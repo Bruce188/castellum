@@ -8,7 +8,6 @@ import io.castellum.risk.*;
 import io.castellum.web.dto.FeedsStatusDto;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.util.NoSuchElementException;
 
 @RestController
@@ -34,7 +33,7 @@ public class RiskController {
             .orElseThrow(() -> new NoSuchElementException("CVE not found: " + cveId));
         Device device = deviceRepo.findById(deviceId)
             .orElseThrow(() -> new NoSuchElementException("Device not found: " + deviceId));
-        double cvssN = pickHighestCvss(cve);
+        double cvssN = CvssExtractor.normalized(cve);
         double epss = epssRepo.findByCveId(cveId).map(e -> e.getEpss().doubleValue()).orElse(0.0);
         boolean kev = kevRepo.existsByCveId(cveId);
         var inputs = new RiskInputs(cvssN, epss, kev, device.getCriticality());
@@ -52,19 +51,4 @@ public class RiskController {
             new FeedsStatusDto.KevStatus(kevMaxIngest, kevCount));
     }
 
-    private static double pickHighestCvss(Cve cve) {
-        BigDecimal best = null;
-        if (cve.getCvssV31Score() != null && cve.getCvssV31Score().signum() >= 0) {
-            best = cve.getCvssV31Score();
-        }
-        if (cve.getCvssV30Score() != null && cve.getCvssV30Score().signum() >= 0
-                && (best == null || cve.getCvssV30Score().compareTo(best) > 0)) {
-            best = cve.getCvssV30Score();
-        }
-        if (cve.getCvssV2Score() != null && cve.getCvssV2Score().signum() >= 0
-                && (best == null || cve.getCvssV2Score().compareTo(best) > 0)) {
-            best = cve.getCvssV2Score();
-        }
-        return best == null ? 0.0 : best.doubleValue() / 10.0;
-    }
 }

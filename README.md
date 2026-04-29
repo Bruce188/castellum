@@ -119,6 +119,65 @@ Valid values: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. Until updated, all devices sc
 - `GET /api/devices`, `POST /api/devices`, `GET /api/devices/{id}`, `DELETE /api/devices/{id}`
 - `GET /api/network-services`, `POST /api/network-services`, `DELETE /api/network-services/{id}`
 
+## Attack Graph
+
+Castellum builds an in-process attack graph (JGraphT `DefaultDirectedWeightedGraph` + `DijkstraShortestPath`) on each query and returns the easiest exploit chain between two devices the inventory already knows about. This is a defender-side artifact: "an attacker who lands on host A reaches host B via this ordered hop sequence, with this much risk accumulating along the way." Each hop is annotated with the MITRE ATT&CK technique an attacker would conceptually be using on that edge.
+
+### Endpoint
+
+```
+GET /api/graph/shortest-path?from={deviceA}&to={deviceB}
+```
+
+Example response:
+
+```json
+{
+  "from": 1,
+  "to": 5,
+  "hops": [
+    { "deviceId": 1, "ipAddress": "10.0.0.10", "edgeType": null, "attackTechniqueId": null, "attackTechniqueName": null, "edgeRisk": 0.00, "cumulativeRisk": 0.00, "cveId": null },
+    { "deviceId": 3, "ipAddress": "10.0.0.42", "edgeType": "SAME_SUBNET", "attackTechniqueId": "T1021", "attackTechniqueName": "Remote Services", "edgeRisk": 0.00, "cumulativeRisk": 0.00, "cveId": null },
+    { "deviceId": 5, "ipAddress": "10.0.0.99", "edgeType": "EXPLOITABLE_VULN", "attackTechniqueId": "T1190", "attackTechniqueName": "Exploit Public-Facing Application", "edgeRisk": 9.50, "cumulativeRisk": 9.50, "cveId": "CVE-2020-15778" }
+  ],
+  "totalHops": 2,
+  "cumulativeRisk": 9.50,
+  "pathFound": true
+}
+```
+
+The first hop in `hops` is the source vertex (edge fields null). Subsequent hops carry the destination of each traversed edge plus edge metadata. `cveId` is populated only on `EXPLOITABLE_VULN` hops. No-path responses return 200 with `pathFound: false` and an empty `hops` array — defenders asking about reachability deserve a structured "no" rather than a 404. Reserved 404 status: `from` or `to` deviceId not in the inventory.
+
+### Edge types and ATT&CK mapping
+
+| Edge type | ATT&CK ID | Technique | Tactic |
+|-----------|-----------|-----------|--------|
+| `SAME_SUBNET` | T1021 | Remote Services | Lateral Movement |
+| `EXPLOITABLE_VULN` | T1190 | Exploit Public-Facing Application | Initial Access |
+| `WEAK_CRED_PATH` | T1078 | Valid Accounts | Initial Access / Lateral Movement |
+
+The mapping is a published contract — encoded in `io.castellum.graph.AttackTechniqueMapper`. Changing it requires a source edit, recompile, and golden-test refresh.
+
+### Configuration
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `castellum.graph.subnet-cap` (`GRAPH_SUBNET_CAP`) | 64 | Maximum devices per /24 before SAME_SUBNET edges are skipped (memory bound). |
+| `castellum.graph.vulns-per-pair-cap` (`GRAPH_VULNS_PER_PAIR_CAP`) | 5 | Maximum number of EXPLOITABLE_VULN edges retained per (source-peer, target) pair. |
+
+### Limitations (v1)
+
+- **Rebuild on each query.** Acceptable at MVP scale (≤10k devices); P50 < 500 ms / P99 < 2 s budget. Caching is a follow-up.
+- **IPv6 SAME_SUBNET grouping not handled.** Non-IPv4 IPs are excluded from SAME_SUBNET edges; queries between IPv6-only devices return `pathFound: false` unless an EXPLOITABLE_VULN edge exists.
+- **Lossy `service.name` → CPE mapping.** `name.toLowerCase().replaceAll("[^a-z0-9_-]", "")` is applied for both vendor and product. Services with hyphenated branding (`OpenSSH-Server`) may miss CVE matches against the canonical `openssh` CPE.
+- **WEAK_CRED_PATH edges are typed-but-empty.** v1 emits zero edges; the seam exists for future credential-spray detector wiring.
+- **Single technique for all vuln edges.** EXPLOITABLE_VULN → T1190. SMB/RPC/RDP-specific T1210 mapping is a follow-up.
+- **One audit_log row per query.** Every successful and no-path query is recorded with `{from, to, totalHops, cumulativeRisk}`.
+
+### Licensing note
+
+JGraphT 1.5.2 is dual-licensed EPL-2.0 / LGPL-2.1. Castellum distributes under Apache-2.0 using the EPL-2.0 path.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

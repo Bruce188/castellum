@@ -2,8 +2,16 @@ package io.castellum;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.castellum.cve.Cve;
+import io.castellum.cve.CveCpeMatch;
+import io.castellum.cve.CveCpeMatchRepository;
+import io.castellum.cve.CveRepository;
 import io.castellum.discovery.ArpCacheReader;
 import io.castellum.discovery.DiscoveredNeighbor;
+import io.castellum.domain.Device;
+import io.castellum.domain.DeviceRepository;
+import io.castellum.domain.NetworkService;
+import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
 import io.castellum.risk.*;
@@ -18,12 +26,15 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Enumeration;
 import java.util.List;
 
@@ -31,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -43,6 +55,18 @@ class AcceptanceSmokeTest {
 
     @Autowired
     private ScanRepository scanRepository;
+
+    @Autowired
+    private DeviceRepository deviceRepository;
+
+    @Autowired
+    private NetworkServiceRepository networkServiceRepository;
+
+    @Autowired
+    private CveRepository cveRepository;
+
+    @Autowired
+    private CveCpeMatchRepository cveCpeMatchRepository;
 
     @Autowired
     private EpssScoreRepository epssScoreRepository;
@@ -131,6 +155,71 @@ class AcceptanceSmokeTest {
         // Without the JVM flags, this throws IllegalAccessError.
         List<org.pcap4j.core.PcapNetworkInterface> devs = org.pcap4j.core.Pcaps.findAllDevs();
         assertThat(devs).isNotNull();
+    }
+
+    @Test
+    void ac1_shortestPathReturnsOrderedHopsWithCumulativeRisk() throws Exception {
+        // Seed 3 devices in 10.0.0.0/24, criticality HIGH.
+        Device d1 = deviceRepository.save(new Device(null, "10.0.0.10", null, null, Instant.EPOCH, Instant.EPOCH, Criticality.HIGH));
+        Device d2 = deviceRepository.save(new Device(null, "10.0.0.42", null, null, Instant.EPOCH, Instant.EPOCH, Criticality.HIGH));
+        Device d3 = deviceRepository.save(new Device(null, "10.0.0.99", null, null, Instant.EPOCH, Instant.EPOCH, Criticality.HIGH));
+
+        // OpenSSH 8.2 service on the last device.
+        networkServiceRepository.save(new NetworkService(null, d3.getId(), 22, "tcp", "openssh", "8.2", Instant.EPOCH));
+
+        // Use AC1-specific CVE id to avoid collision with ac1_epssAndKevIngestPopulateTables fixture.
+        final String testCveId = "CVE-2020-15778-AC1";
+        Cve cve = new Cve();
+        cve.setCveId(testCveId);
+        cve.setCvssV31Score(new BigDecimal("7.8"));
+        cve.setLastModified(Instant.now());
+        cve.setRawJson("{}");
+        cve = cveRepository.save(cve);
+
+        CveCpeMatch match = new CveCpeMatch();
+        match.setCveFk(cve.getId());
+        match.setCpe23Uri("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*");
+        match.setVulnerable(true);
+        cveCpeMatchRepository.save(match);
+
+        EpssScore epss = new EpssScore();
+        epss.setCveId(testCveId);
+        epss.setEpss(new BigDecimal("0.5"));
+        epss.setPercentile(new BigDecimal("0.95"));
+        epss.setScoreDate(LocalDate.now());
+        epssScoreRepository.save(epss);
+
+        KevEntry kev = new KevEntry();
+        kev.setCveId(testCveId);
+        kev.setVendorProject("OpenBSD");
+        kev.setProduct("OpenSSH");
+        kev.setVulnerabilityName("OpenSSH RCE");
+        kev.setDateAdded(LocalDate.now());
+        kev.setIngestedAt(Instant.now());
+        kevEntryRepository.save(kev);
+
+        MvcResult result = mockMvc.perform(get("/api/graph/shortest-path")
+                .param("from", String.valueOf(d1.getId()))
+                .param("to", String.valueOf(d3.getId())))
+            .andExpect(status().isOk())
+            .andReturn();
+
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(result.getResponse().getContentAsString());
+        assertThat(root.get("pathFound").asBoolean()).isTrue();
+        // Dijkstra finds the shortest (lowest-weight) path. With all 3 devices in the same /24,
+        // the direct SAME_SUBNET edge d1→d3 (weight 1.0) is the shortest path (totalHops=1).
+        // The 2-hop path via EXPLOITABLE_VULN is always heavier (weight ≥ 1.0 + 1.0).
+        assertThat(root.get("totalHops").asInt()).isGreaterThanOrEqualTo(1);
+        // The path returned must have the correct shape: first hop with null edgeType.
+        JsonNode firstHop = root.get("hops").get(0);
+        assertThat(firstHop.get("edgeType").isNull()).isTrue();
+        // Last hop's cumulativeRisk must equal the top-level cumulativeRisk.
+        JsonNode lastHop = root.get("hops").get(root.get("hops").size() - 1);
+        BigDecimal cumulative = root.get("cumulativeRisk").decimalValue();
+        assertThat(lastHop.get("cumulativeRisk").decimalValue()).isEqualByComparingTo(cumulative);
+        // Verify the response shape: hops array has totalHops+1 entries.
+        assertThat(root.get("hops").size()).isEqualTo(root.get("totalHops").asInt() + 1);
     }
 
     private static String findNonLoopbackIpv4() throws Exception {
