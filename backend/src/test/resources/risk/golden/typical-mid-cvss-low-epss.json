@@ -1,0 +1,6 @@
+{
+  "name": "typical-mid-cvss-low-epss",
+  "input": {"cvssNormalized": 0.75, "epss": 0.1, "kev": false, "criticality": "MEDIUM"},
+  "expectedScore": 5.16,
+  "tolerance": 0.01
+}

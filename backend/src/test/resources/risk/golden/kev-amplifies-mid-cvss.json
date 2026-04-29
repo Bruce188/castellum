@@ -1,0 +1,6 @@
+{
+  "name": "kev-amplifies-mid-cvss",
+  "input": {"cvssNormalized": 0.5, "epss": 0.5, "kev": true, "criticality": "MEDIUM"},
+  "expectedScore": 7.03,
+  "tolerance": 0.01
+}

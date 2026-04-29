@@ -4,6 +4,7 @@ import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
+import io.castellum.risk.Criticality;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -55,5 +56,35 @@ class DeviceControllerTest {
             .andExpect(header().string("Location", org.hamcrest.Matchers.containsString("/api/devices/")));
 
         verify(auditService).recordEvent(eq("system"), eq("DEVICE_CREATE"), eq("device"), anyString(), any());
+    }
+
+    @Test
+    void create_acceptsCriticalityField() throws Exception {
+        Device saved = new Device();
+        saved.setId(2L);
+        saved.setIpAddress("10.0.0.1");
+        saved.setCriticality(Criticality.HIGH);
+        when(deviceRepository.save(any(Device.class))).thenReturn(saved);
+
+        mockMvc.perform(post("/api/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipAddress\":\"10.0.0.1\",\"criticality\":\"HIGH\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.criticality").value("HIGH"));
+    }
+
+    @Test
+    void create_defaultsToMediumWhenOmitted() throws Exception {
+        Device saved = new Device();
+        saved.setId(3L);
+        saved.setIpAddress("10.0.0.2");
+        saved.setCriticality(Criticality.MEDIUM);
+        when(deviceRepository.save(any(Device.class))).thenReturn(saved);
+
+        mockMvc.perform(post("/api/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipAddress\":\"10.0.0.2\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.criticality").value("MEDIUM"));
     }
 }

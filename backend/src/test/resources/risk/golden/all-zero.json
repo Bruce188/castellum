@@ -1,0 +1,6 @@
+{
+  "name": "all-zero",
+  "input": {"cvssNormalized": 0.0, "epss": 0.0, "kev": false, "criticality": "LOW"},
+  "expectedScore": 0.00,
+  "tolerance": 0.01
+}

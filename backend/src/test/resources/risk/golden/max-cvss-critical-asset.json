@@ -1,0 +1,6 @@
+{
+  "name": "max-cvss-critical-asset",
+  "input": {"cvssNormalized": 1.0, "epss": 0.0, "kev": false, "criticality": "CRITICAL"},
+  "expectedScore": 10.00,
+  "tolerance": 0.01
+}

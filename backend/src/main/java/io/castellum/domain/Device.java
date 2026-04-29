@@ -1,5 +1,6 @@
 package io.castellum.domain;
 
+import io.castellum.risk.Criticality;
 import jakarta.persistence.*;
 import java.time.Instant;
 
@@ -25,6 +26,10 @@ public class Device {
     @Column(name = "last_seen")
     private Instant lastSeen;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private Criticality criticality = Criticality.MEDIUM;
+
     public Device() {}
 
     public Device(Long id, String ipAddress, String hostname, String macAddress, Instant firstSeen, Instant lastSeen) {
@@ -34,6 +39,16 @@ public class Device {
         this.macAddress = macAddress;
         this.firstSeen = firstSeen;
         this.lastSeen = lastSeen;
+    }
+
+    public Device(Long id, String ipAddress, String hostname, String macAddress, Instant firstSeen, Instant lastSeen, Criticality criticality) {
+        this.id = id;
+        this.ipAddress = ipAddress;
+        this.hostname = hostname;
+        this.macAddress = macAddress;
+        this.firstSeen = firstSeen;
+        this.lastSeen = lastSeen;
+        this.criticality = criticality;
     }
 
     public Long getId() { return id; }
@@ -53,4 +68,7 @@ public class Device {
 
     public Instant getLastSeen() { return lastSeen; }
     public void setLastSeen(Instant lastSeen) { this.lastSeen = lastSeen; }
+
+    public Criticality getCriticality() { return criticality; }
+    public void setCriticality(Criticality criticality) { this.criticality = criticality; }
 }

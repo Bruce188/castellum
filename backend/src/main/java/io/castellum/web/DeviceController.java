@@ -3,6 +3,7 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
+import io.castellum.risk.Criticality;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -41,6 +42,7 @@ public class DeviceController {
 
     @PostMapping
     public ResponseEntity<Device> create(@Valid @RequestBody Device device) {
+        if (device.getCriticality() == null) device.setCriticality(Criticality.MEDIUM);
         Device saved = deviceRepository.save(device);
         auditService.recordEvent("system", "DEVICE_CREATE", "device", String.valueOf(saved.getId()), saved);
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()

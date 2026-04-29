@@ -47,6 +47,60 @@ The mirror reflects whatever NVD has at sync time. CVEs in the `Awaiting Analysi
 
 This is a property of the NVD data pipeline, not a Castellum bug. The CVE→CPE matcher will simply return no matches for an unenriched CVE; it does not fall back to the live NVD API to fetch enrichment on demand (per the no-live-call-on-hot-path constraint).
 
+## Risk Scoring
+
+Castellum combines four signals to produce a composite risk score in the range `[0, 10]` for any `(CVE, Device)` pair.
+
+### Formula
+
+```
+score = clamp(CVSS_on_ten × (1 + EPSS_WEIGHT×EPSS) × kevMult × critMult / (1 + CRIT_CRITICAL), 0, 10)
+```
+
+where:
+- `CVSS_on_ten` = CVSS base score (v3.1 preferred, fallback to v3.0 → v2 → 0.0), scaled to 0–10
+- `EPSS_WEIGHT = 1.0` — an EPSS probability of 1.0 doubles the CVSS contribution
+- `kevMult = 1.5` if the CVE is in the CISA KEV catalog, else `1.0` — known active exploitation adds a 50 % uplift
+- `critMult = 1 + critFactor` where `critFactor ∈ {LOW: 0.0, MEDIUM: 0.25, HIGH: 0.5, CRITICAL: 1.0}`
+- The divisor `(1 + CRIT_CRITICAL) = 2.0` normalises the scale so that max-CVSS + CRITICAL asset (no other signals) lands exactly at 10.00
+
+Plain-English summary: a CVE listed in CISA KEV is multiplied by 1.5× to reflect known active exploitation; an EPSS probability of 1.0 doubles the CVSS contribution; asset criticality scales the score from 1× (LOW) to 2× (CRITICAL), divided by 2 to keep the ceiling at 10.
+
+### Signal Sources
+
+| Signal | Source | Refresh |
+|--------|--------|---------|
+| EPSS daily probabilities | `https://epss.cyentia.com/epss_scores-current.csv.gz` | Daily at 06:00 UTC |
+| CISA KEV catalog | `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` | Daily at 06:00 UTC |
+| CVSS scores | Local NVD mirror (`cve` table) | NVD incremental sync |
+| Asset criticality | `device.criticality` column | Set per-device via `PUT /api/devices/{id}` |
+
+### Refresh Cadence
+
+Both EPSS and KEV feeds are fetched daily at 06:00 UTC by `RiskFeedScheduler`. The cron expression defaults to `0 0 6 * * *` and can be overridden via `RISK_REFRESH_CRON`.
+
+EPSS uses a **snapshot-replace** strategy: each daily run deletes all existing `epss_score` rows and bulk-inserts the fresh feed. KEV uses **upsert-on-`cve_id`** so re-runs are idempotent.
+
+### Determinism Contract
+
+`CompositeScorer.score(RiskInputs)` is a **pure function** — same inputs always produce the same output. It has no database access, no HTTP calls, no clock, and no random state. All formula constants are `private static final` hard-coded inside `CompositeScorer`; they cannot be changed via configuration. Golden-file tests in `src/test/resources/risk/golden/` pin known input tuples to expected scores (tolerance ±0.01).
+
+### REST Endpoints
+
+- `GET /api/risk/score?cve=CVE-YYYY-NNNNN&device=42` — composite score for a `(CVE, Device)` pair
+- `GET /api/risk/feeds/status` — freshness: EPSS row count + latest score date, KEV entry count + last ingestion timestamp
+
+### Operations Runbook
+
+**`Device.criticality` defaults to `MEDIUM` for all existing devices.** The V6 migration sets `DEFAULT 'MEDIUM'` on the `criticality` column, so every existing row is assigned `MEDIUM` (multiplier 1.25×) automatically. Operators should review the device inventory and update the criticality for known-critical assets:
+
+```
+PUT /api/devices/{id}
+{"ipAddress": "10.0.0.1", "criticality": "CRITICAL"}
+```
+
+Valid values: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`. Until updated, all devices score with the MEDIUM (`1.25×`) multiplier.
+
 ## API
 
 ### CVE Mirror

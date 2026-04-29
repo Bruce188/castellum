@@ -1,0 +1,6 @@
+{
+  "name": "openssh-class-anchor",
+  "input": {"cvssNormalized": 0.78, "epss": 0.5, "kev": true, "criticality": "HIGH"},
+  "expectedScore": 10.00,
+  "tolerance": 0.01
+}

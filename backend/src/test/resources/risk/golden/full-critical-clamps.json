@@ -1,0 +1,6 @@
+{
+  "name": "full-critical-clamps",
+  "input": {"cvssNormalized": 1.0, "epss": 0.99, "kev": true, "criticality": "CRITICAL"},
+  "expectedScore": 10.00,
+  "tolerance": 0.01
+}

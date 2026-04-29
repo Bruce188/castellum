@@ -13,12 +13,19 @@ import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.risk.Criticality;
+import io.castellum.risk.EpssScore;
+import io.castellum.risk.EpssScoreRepository;
+import io.castellum.risk.KevEntry;
+import io.castellum.risk.KevEntryRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -56,6 +63,12 @@ class FlywayMigrationIntegrationTest {
 
     @Autowired
     private CveCpeMatchRepository cveCpeMatchRepository;
+
+    @Autowired
+    private EpssScoreRepository epssScoreRepository;
+
+    @Autowired
+    private KevEntryRepository kevEntryRepository;
 
     @Test
     void flyway_migratesAllFourTables_andEntitiesMatchSchema() {
@@ -118,5 +131,44 @@ class FlywayMigrationIntegrationTest {
 
         assertEquals(1, cveCpeMatchRepository.findByCveFk(savedCve.getId()).size(),
             "CveCpeMatch should be retrievable by cveFk after Flyway-managed schema apply");
+    }
+
+    @Test
+    void flyway_v6_epssScore_roundTripWithFlywayManagedSchema() {
+        EpssScore score = new EpssScore(null, "CVE-2020-15778",
+            BigDecimal.valueOf(0.5), BigDecimal.valueOf(0.9), LocalDate.now(), Instant.now());
+        EpssScore saved = epssScoreRepository.save(score);
+        assertNotNull(saved.getId(), "EpssScore insert should succeed with Flyway-managed schema");
+        assertTrue(epssScoreRepository.findByCveId("CVE-2020-15778").isPresent(),
+            "EpssScore should be retrievable by cveId");
+    }
+
+    @Test
+    void flyway_v6_kevEntry_roundTripWithFlywayManagedSchema() {
+        KevEntry entry = new KevEntry();
+        entry.setCveId("CVE-2020-15778");
+        entry.setDateAdded(LocalDate.now());
+        entry.setVendorProject("OpenBSD");
+        entry.setProduct("OpenSSH");
+        entry.setIngestedAt(Instant.now());
+        kevEntryRepository.save(entry);
+        assertTrue(kevEntryRepository.existsByCveId("CVE-2020-15778"),
+            "KevEntry should exist by cveId after Flyway-managed schema apply");
+    }
+
+    @Test
+    void flyway_v6_deviceCriticality_columnAcceptsAllFourValues() {
+        String[] ips = {"192.168.0.1", "192.168.0.2", "192.168.0.3", "192.168.0.4"};
+        Criticality[] crits = {Criticality.LOW, Criticality.MEDIUM, Criticality.HIGH, Criticality.CRITICAL};
+        for (int i = 0; i < crits.length; i++) {
+            Device d = new Device();
+            d.setIpAddress(ips[i]);
+            d.setFirstSeen(Instant.now());
+            d.setLastSeen(Instant.now());
+            d.setCriticality(crits[i]);
+            Device saved = deviceRepository.save(d);
+            assertEquals(crits[i], deviceRepository.findById(saved.getId()).orElseThrow().getCriticality(),
+                "Criticality " + crits[i] + " should round-trip correctly");
+        }
     }
 }

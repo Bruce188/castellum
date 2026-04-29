@@ -1,0 +1,6 @@
+{
+  "name": "max-cvss-only-low-asset",
+  "input": {"cvssNormalized": 1.0, "epss": 0.0, "kev": false, "criticality": "LOW"},
+  "expectedScore": 5.00,
+  "tolerance": 0.01
+}

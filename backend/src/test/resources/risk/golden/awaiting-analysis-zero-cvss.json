@@ -1,0 +1,6 @@
+{
+  "name": "awaiting-analysis-zero-cvss",
+  "input": {"cvssNormalized": 0.0, "epss": 0.9, "kev": true, "criticality": "HIGH"},
+  "expectedScore": 0.00,
+  "tolerance": 0.01
+}
