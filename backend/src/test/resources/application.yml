@@ -12,3 +12,10 @@ spring:
     database-platform: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false
+
+castellum:
+  nvd:
+    base-url: https://services.nvd.nist.gov/rest/json/cves/2.0
+    api-key: ""
+    request-interval-millis: 10
+    results-per-page: 2000

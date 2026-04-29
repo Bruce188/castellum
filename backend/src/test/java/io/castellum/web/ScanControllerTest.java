@@ -6,15 +6,20 @@ import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -64,5 +69,24 @@ class ScanControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"cidr\":\"192.168.1.0/24\",\"type\":\"INVALID_TYPE\"}"))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void list_returnsPaginatedShape() throws Exception {
+        when(scanRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
+        mockMvc.perform(get("/api/scans"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content").exists())
+            .andExpect(jsonPath("$.totalElements").exists());
+    }
+
+    @Test
+    void list_respectsPageSize() throws Exception {
+        when(scanRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
+        mockMvc.perform(get("/api/scans?size=5&page=0"))
+            .andExpect(status().isOk());
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(scanRepository).findAll(captor.capture());
+        assertEquals(5, captor.getValue().getPageSize());
     }
 }

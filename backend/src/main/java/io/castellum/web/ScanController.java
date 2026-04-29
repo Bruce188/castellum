@@ -10,8 +10,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
@@ -49,7 +52,7 @@ public class ScanController {
     }
 
     @GetMapping("/api/scans")
-    public List<Scan> list() {
-        return scanRepository.findAll();
+    public Page<Scan> list(@PageableDefault(size = 100) Pageable pageable) {
+        return scanRepository.findAll(pageable);
     }
 }

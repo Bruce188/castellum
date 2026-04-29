@@ -19,6 +19,22 @@ public class NmapRunner {
     /** Maximum bytes read from a single stream to prevent memory exhaustion. */
     private static final int MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // 10 MB
 
+    /** Package-private: overrides executor factory for testing only. */
+    interface ExecutorFactory {
+        ExecutorService create();
+    }
+
+    private final ExecutorFactory executorFactory;
+
+    public NmapRunner() {
+        this.executorFactory = () -> Executors.newFixedThreadPool(2);
+    }
+
+    /** Package-private constructor for testing with a spy executor factory. */
+    NmapRunner(ExecutorFactory executorFactory) {
+        this.executorFactory = executorFactory;
+    }
+
     public NmapResult run(String cidr, ScanType type) throws InterruptedException, IOException {
         String validatedCidr = CidrValidator.requireValid(cidr);
 
@@ -32,26 +48,31 @@ public class NmapRunner {
         Process process = pb.start();
 
         // Drain stdout and stderr concurrently to prevent OS pipe-buffer deadlock.
-        ExecutorService drainer = Executors.newFixedThreadPool(2);
-        Future<byte[]> stdoutFuture = drainer.submit(() -> readCapped(process.getInputStream(), MAX_OUTPUT_BYTES));
-        Future<byte[]> stderrFuture = drainer.submit(() -> readCapped(process.getErrorStream(), MAX_OUTPUT_BYTES));
-        drainer.shutdown();
+        ExecutorService drainer = executorFactory.create();
+        try {
+            Future<byte[]> stdoutFuture = drainer.submit(() -> readCapped(process.getInputStream(), MAX_OUTPUT_BYTES));
+            Future<byte[]> stderrFuture = drainer.submit(() -> readCapped(process.getErrorStream(), MAX_OUTPUT_BYTES));
+            drainer.shutdown();
 
-        boolean finished = process.waitFor(60, TimeUnit.SECONDS);
-        if (!finished) {
+            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+            if (!finished) {
+                throw new IOException("nmap timed out");
+            }
+
+            try {
+                byte[] stdout = stdoutFuture.get();
+                byte[] stderr = stderrFuture.get();
+                return new NmapResult(process.exitValue(),
+                    new String(stdout, java.nio.charset.StandardCharsets.UTF_8),
+                    new String(stderr, java.nio.charset.StandardCharsets.UTF_8));
+            } catch (ExecutionException e) {
+                throw new IOException("failed to read nmap output", e.getCause());
+            }
+        } finally {
+            // Forcibly destroy the process on all exit paths (timeout, error, interruption).
+            // This closes the process's stdout/stderr pipes, allowing drainer threads to unblock.
             process.destroyForcibly();
             drainer.shutdownNow();
-            throw new IOException("nmap timed out");
-        }
-
-        try {
-            byte[] stdout = stdoutFuture.get();
-            byte[] stderr = stderrFuture.get();
-            return new NmapResult(process.exitValue(),
-                new String(stdout, java.nio.charset.StandardCharsets.UTF_8),
-                new String(stderr, java.nio.charset.StandardCharsets.UTF_8));
-        } catch (ExecutionException e) {
-            throw new IOException("failed to read nmap output", e.getCause());
         }
     }
 

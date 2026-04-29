@@ -2,6 +2,10 @@ package io.castellum;
 
 import io.castellum.audit.AuditLog;
 import io.castellum.audit.AuditLogRepository;
+import io.castellum.cve.Cve;
+import io.castellum.cve.CveCpeMatch;
+import io.castellum.cve.CveCpeMatchRepository;
+import io.castellum.cve.CveRepository;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.Scan;
@@ -47,6 +51,12 @@ class FlywayMigrationIntegrationTest {
     @Autowired
     private AuditLogRepository auditLogRepository;
 
+    @Autowired
+    private CveRepository cveRepository;
+
+    @Autowired
+    private CveCpeMatchRepository cveCpeMatchRepository;
+
     @Test
     void flyway_migratesAllFourTables_andEntitiesMatchSchema() {
         // Device — ip_address is TEXT in V1 migration, String in entity: must be compatible.
@@ -86,5 +96,27 @@ class FlywayMigrationIntegrationTest {
         assertNotNull(savedLog.getId(), "AuditLog insert should succeed with Flyway-managed schema");
         assertEquals("{\"test\":true}", savedLog.getPayload(),
             "AuditLog payload round-trips correctly with TEXT column type");
+    }
+
+    @Test
+    void flyway_v5_cve_andCveCpeMatch_roundTripWithFlywayManagedSchema() {
+        Cve cve = new Cve();
+        cve.setCveId("CVE-2020-15778");
+        cve.setLastModified(Instant.now());
+        cve.setRawJson("{}");
+        cve.setFetchedAt(Instant.now());
+        Cve savedCve = cveRepository.save(cve);
+        assertNotNull(savedCve.getId(), "Cve insert should succeed with Flyway-managed schema");
+
+        CveCpeMatch match = new CveCpeMatch();
+        match.setCveFk(savedCve.getId());
+        match.setCpe23Uri("cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*");
+        match.setVulnerable(Boolean.TRUE);
+        match.setVersionEndExcluding("8.4");
+        CveCpeMatch savedMatch = cveCpeMatchRepository.save(match);
+        assertNotNull(savedMatch.getId(), "CveCpeMatch insert should succeed");
+
+        assertEquals(1, cveCpeMatchRepository.findByCveFk(savedCve.getId()).size(),
+            "CveCpeMatch should be retrievable by cveFk after Flyway-managed schema apply");
     }
 }
