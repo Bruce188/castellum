@@ -34,3 +34,16 @@ castellum:
     feed-url: ${KEV_FEED_URL:https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
   risk:
     refresh-cron: ${RISK_REFRESH_CRON:0 0 6 * * *}
+  discovery:
+    default-duration-seconds: ${DISCOVERY_DURATION_SECONDS:30}
+    arp:
+      proc-path: ${DISCOVERY_ARP_PATH:/proc/net/arp}
+    mdns:
+      service-types: ${DISCOVERY_MDNS_SERVICE_TYPES:_workstation._tcp.local.,_http._tcp.local.,_ssh._tcp.local.,_smb._tcp.local.,_printer._tcp.local.}
+    pcap:
+      enabled: ${DISCOVERY_PCAP_ENABLED:false}
+    lldp:
+      enabled: ${DISCOVERY_LLDP_ENABLED:false}
+    cdp:
+      enabled: ${DISCOVERY_CDP_ENABLED:false}
+    bpf-filter: ${DISCOVERY_BPF_FILTER:arp or (udp and port 5353) or (udp and port 67) or (udp and port 68)}

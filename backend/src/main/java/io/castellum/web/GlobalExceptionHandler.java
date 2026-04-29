@@ -1,5 +1,6 @@
 package io.castellum.web;
 
+import io.castellum.discovery.DiscoveryUnavailableException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,5 +56,12 @@ public class GlobalExceptionHandler {
         log.warn("Resource not found: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(Map.of("error", "Not found", "details", List.of()));
+    }
+
+    @ExceptionHandler(DiscoveryUnavailableException.class)
+    public ResponseEntity<Map<String, Object>> handleDiscoveryUnavailable(DiscoveryUnavailableException ex) {
+        log.warn("Discovery unavailable: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(Map.of("error", "discovery_unavailable", "message", ex.getMessage()));
     }
 }

@@ -26,3 +26,16 @@ castellum:
     feed-url: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
   risk:
     refresh-cron: "-"
+  discovery:
+    default-duration-seconds: 30
+    arp:
+      proc-path: /proc/net/arp
+    mdns:
+      service-types: _workstation._tcp.local.,_http._tcp.local.
+    pcap:
+      enabled: false
+    lldp:
+      enabled: false
+    cdp:
+      enabled: false
+    bpf-filter: arp
