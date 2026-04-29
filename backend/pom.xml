@@ -35,6 +35,7 @@
 		<pcap4j.version>1.8.2</pcap4j.version>
 		<jmdns.version>3.6.3</jmdns.version>
 		<jgrapht.version>1.5.2</jgrapht.version>
+		<plc4x.version>0.12.0</plc4x.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -106,6 +107,12 @@
 			<groupId>org.jgrapht</groupId>
 			<artifactId>jgrapht-core</artifactId>
 			<version>${jgrapht.version}</version>
+		</dependency>
+		<!-- PLC4X S7 driver 0.12.0: Apache-2.0. Used for S7comm OT fingerprinting only. -->
+		<dependency>
+			<groupId>org.apache.plc4x</groupId>
+			<artifactId>plc4j-driver-s7</artifactId>
+			<version>${plc4x.version}</version>
 		</dependency>
 	</dependencies>
 

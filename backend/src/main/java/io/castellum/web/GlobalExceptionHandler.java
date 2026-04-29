@@ -1,6 +1,10 @@
 package io.castellum.web;
 
 import io.castellum.discovery.DiscoveryUnavailableException;
+import io.castellum.ot.OtProbeDecodeException;
+import io.castellum.ot.OtProbeNotImplementedException;
+import io.castellum.ot.OtProbeTimeoutException;
+import io.castellum.ot.OtProbeUnreachableException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,5 +67,33 @@ public class GlobalExceptionHandler {
         log.warn("Discovery unavailable: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
             .body(Map.of("error", "discovery_unavailable", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(OtProbeUnreachableException.class)
+    public ResponseEntity<Map<String, Object>> handleOtProbeUnreachable(OtProbeUnreachableException ex) {
+        log.warn("OT probe unreachable: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+            .body(Map.of("error", "ot_probe_unreachable", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(OtProbeTimeoutException.class)
+    public ResponseEntity<Map<String, Object>> handleOtProbeTimeout(OtProbeTimeoutException ex) {
+        log.warn("OT probe timeout: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
+            .body(Map.of("error", "ot_probe_timeout", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(OtProbeDecodeException.class)
+    public ResponseEntity<Map<String, Object>> handleOtProbeDecode(OtProbeDecodeException ex) {
+        log.warn("OT probe decode failure: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+            .body(Map.of("error", "ot_probe_decode_failure", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(OtProbeNotImplementedException.class)
+    public ResponseEntity<Map<String, Object>> handleOtProbeNotImplemented(OtProbeNotImplementedException ex) {
+        log.warn("OT probe not implemented: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
+            .body(Map.of("error", "ot_probe_not_implemented", "message", ex.getMessage()));
     }
 }

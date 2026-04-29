@@ -36,6 +36,15 @@ public class NetworkService {
     @Column(name = "observed_at")
     private Instant observedAt;
 
+    @Column(name = "vendor")
+    private String vendor;
+
+    @Column(name = "product")
+    private String product;
+
+    @Column(name = "protocol_family")
+    private String protocolFamily;
+
     public NetworkService() {}
 
     public NetworkService(Long id, Long deviceId, Integer port, String protocol, String name, String version, Instant observedAt) {
@@ -68,4 +77,13 @@ public class NetworkService {
 
     public Instant getObservedAt() { return observedAt; }
     public void setObservedAt(Instant observedAt) { this.observedAt = observedAt; }
+
+    public String getVendor() { return vendor; }
+    public void setVendor(String vendor) { this.vendor = vendor; }
+
+    public String getProduct() { return product; }
+    public void setProduct(String product) { this.product = product; }
+
+    public String getProtocolFamily() { return protocolFamily; }
+    public void setProtocolFamily(String protocolFamily) { this.protocolFamily = protocolFamily; }
 }

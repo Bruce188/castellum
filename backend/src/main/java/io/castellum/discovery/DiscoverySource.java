@@ -16,5 +16,7 @@ public enum DiscoverySource {
     MDNS,
     PCAP,
     LLDP_UNTESTED,
-    CDP_UNTESTED
+    CDP_UNTESTED,
+    /** Active OT/ICS fingerprint probe (Modbus, DNP3, S7comm, BACnet). */
+    OT_PROBE
 }

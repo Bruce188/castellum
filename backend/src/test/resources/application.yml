@@ -26,6 +26,12 @@ castellum:
     feed-url: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
   risk:
     refresh-cron: "-"
+  ot:
+    probe:
+      connect-timeout-ms: 500
+      read-timeout-ms: 500
+      total-timeout-ms: 1000
+      max-concurrent: 4
   discovery:
     default-duration-seconds: 30
     arp:

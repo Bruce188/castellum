@@ -178,6 +178,37 @@ The mapping is a published contract — encoded in `io.castellum.graph.AttackTec
 
 JGraphT 1.5.2 is dual-licensed EPL-2.0 / LGPL-2.1. Castellum distributes under Apache-2.0 using the EPL-2.0 path.
 
+## OT/ICS Read-Only Fingerprinters
+
+Castellum can fingerprint OT/ICS devices using read-only protocol requests. No write commands are
+ever issued. Supported protocols: Modbus/TCP, DNP3, S7comm, BACnet/IP.
+
+See [documentation/ot-probes.md](documentation/ot-probes.md) for the full reference.
+
+### Endpoint
+
+```
+POST /api/ot-probe
+Content-Type: application/json
+
+{ "host": "192.168.1.10", "port": 502, "protocol": "MODBUS_TCP" }
+```
+
+`host` must be a dotted-quad IPv4 address — hostnames are rejected by the SSRF guard.
+Protocols: `MODBUS_TCP` (502), `DNP3` (20000), `S7COMM` (102), `BACNET_IP` (47808).
+
+On success (HTTP 200) the response includes `vendor`, `product`, `version`, `rawFields`, `deviceId`,
+`serviceId`, and `observedAt`. The device and service rows in the database are upserted automatically.
+
+### Configuration
+
+| Key | Default | Env var |
+|-----|---------|---------|
+| `castellum.ot.probe.connect-timeout-ms` | 3000 | `OT_PROBE_CONNECT_TIMEOUT_MS` |
+| `castellum.ot.probe.read-timeout-ms` | 5000 | `OT_PROBE_READ_TIMEOUT_MS` |
+| `castellum.ot.probe.total-timeout-ms` | 10000 | `OT_PROBE_TOTAL_TIMEOUT_MS` |
+| `castellum.ot.probe.max-concurrent` | 8 | `OT_PROBE_MAX_CONCURRENT` |
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

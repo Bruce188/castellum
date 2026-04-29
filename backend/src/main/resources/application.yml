@@ -50,3 +50,9 @@ castellum:
   graph:
     subnet-cap: ${GRAPH_SUBNET_CAP:64}
     vulns-per-pair-cap: ${GRAPH_VULNS_PER_PAIR_CAP:5}
+  ot:
+    probe:
+      connect-timeout-ms: ${OT_PROBE_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${OT_PROBE_READ_TIMEOUT_MS:5000}
+      total-timeout-ms: ${OT_PROBE_TOTAL_TIMEOUT_MS:10000}
+      max-concurrent: ${OT_PROBE_MAX_CONCURRENT:8}

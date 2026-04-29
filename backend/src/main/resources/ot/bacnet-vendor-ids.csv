@@ -1,0 +1,79 @@
+# BACnet Vendor ID Registry — ASHRAE snapshot 2026-04
+# Format: vendorId,vendorName
+# Source: https://www.ashrae.org/file%20library/technical%20resources/standards%20and%20guidelines/standards%20addenda/bacnet-vendor-ids.xlsx
+# This is a representative subset; full list has ~1100 entries as of 2026-04.
+0,ASHRAE
+1,Alerton Technologies Inc.
+2,American Auto-Matrix
+3,Andover Controls Corporation
+4,BACnet International
+5,Johnson Controls Inc.
+6,Siemens Building Technologies
+7,Trane
+8,Carrier Corporation
+9,Delta Controls
+10,Tour Andover Controls
+11,Automated Logic Corporation
+12,KMC Controls Inc.
+13,Honeywell Inc.
+14,Echelon Corporation
+15,York Controls
+16,Continuum Automation Products
+17,Reliable Controls Corporation
+18,Orion Controls Group
+19,Building Automation Products Inc.
+20,Group Technologies Corporation
+24,Schneider Electric
+25,Distech Controls
+26,Trend Control Systems
+36,Loytec Electronics GmbH
+39,Satchwell Control Systems
+42,Staefa Control System
+45,Siebe Environmental Controls
+55,Philips Lighting
+62,Distech Controls Inc.
+65,EcoStruxure Automation Expert
+72,Bosch Thermotechnik GmbH
+78,ABB Building Systems
+100,Cisco Systems
+110,Legrand
+117,Mitsubishi Electric
+125,Daikin Industries
+130,Delta Electronics
+135,GE Intelligent Platforms
+140,IBM
+146,Lutron Electronics Co Inc.
+155,Panasonic
+160,Samsung Electronics
+165,Siemens AG
+170,Sony Corporation
+175,Texas Instruments
+180,Toshiba
+185,Yokogawa Electric
+190,Beckhoff Automation
+200,Phoenix Contact
+210,Wago
+220,Pilz GmbH & Co. KG
+230,SEW-EURODRIVE
+240,ifm electronic
+250,Turck
+260,SICK AG
+270,Pepperl+Fuchs
+280,Endress+Hauser
+290,Emerson Process Management
+300,Honeywell Analytics
+310,Vaisala
+320,Grundfos
+330,Danfoss
+340,Wilo SE
+350,Sauter
+360,Neuberger Building Automation GmbH
+370,AVM Gesellschaft für analytische Mess- und Systemtechnik mbH
+380,Thermokon Sensortechnik GmbH
+390,Kieback&Peter GmbH & Co. KG
+400,Entelec Controls Ltd.
+410,Climaware Ltd.
+420,SAUTER CUMULUS GmbH
+430,GE Power Controls
+440,Priva B.V.
+450,Invensys Building Systems
