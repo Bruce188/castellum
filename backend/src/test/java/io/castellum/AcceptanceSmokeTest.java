@@ -28,6 +28,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -62,6 +63,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureMockMvc
+// Use @WithMockUser for all test methods — the full Spring Security chain is active.
+@WithMockUser(roles = "ADMIN")
 class AcceptanceSmokeTest {
 
     @Autowired
@@ -422,6 +425,43 @@ class AcceptanceSmokeTest {
         String json = stixObjectMapper.writeValueAsString(bundle);
         List<String> errors = StixSchemaValidator.validate(json);
         assertThat(errors).as("STIX schema validation errors: " + errors).isEmpty();
+    }
+
+    // ---- Supply-chain AC tests ----
+
+    @Test
+    void ac1_dockerScoutSurrogate_buildAndScanScriptInvokesTrivyAndCosign() throws Exception {
+        Path script = Paths.get(System.getProperty("user.dir"), "..", "scripts", "build-and-scan.sh").normalize();
+        if (!script.toFile().exists()) {
+            script = Paths.get(System.getProperty("user.dir"), "scripts", "build-and-scan.sh").normalize();
+        }
+        String body = Files.readString(script);
+        assertTrue(body.contains("trivy image"), "AC#1 surrogate: script must invoke trivy image");
+        assertTrue(body.contains("--severity HIGH,CRITICAL"), "AC#1 surrogate: script must gate on HIGH,CRITICAL");
+        assertTrue(body.contains("cosign verify"), "AC#1 surrogate: script must reference cosign verify");
+    }
+
+    @Test
+    void ac2_cosignVerifyDocumentedAndScripted() throws Exception {
+        Path doc = Paths.get(System.getProperty("user.dir"), "..", "documentation", "supply-chain.md").normalize();
+        if (!doc.toFile().exists()) {
+            doc = Paths.get(System.getProperty("user.dir"), "documentation", "supply-chain.md").normalize();
+        }
+        String body = Files.readString(doc);
+        assertTrue(body.contains("cosign generate-key-pair"), "AC#2: keygen must be documented");
+        assertTrue(body.contains("cosign sign"), "AC#2: sign must be documented");
+        assertTrue(body.contains("cosign verify"), "AC#2: verify must be documented");
+    }
+
+    @Test
+    void ac3_sbomGeneratedByMavenPlugin() throws Exception {
+        Path pom = Paths.get(System.getProperty("user.dir"), "pom.xml").normalize();
+        if (!pom.toFile().exists()) {
+            pom = Paths.get(System.getProperty("user.dir"), "backend", "pom.xml").normalize();
+        }
+        String body = Files.readString(pom);
+        assertTrue(body.contains("cyclonedx-maven-plugin"), "AC#3: cyclonedx-maven-plugin must be declared");
+        assertTrue(body.contains("<phase>package</phase>"), "AC#3: plugin must be bound to package phase");
     }
 
     // ---- Helper methods ----

@@ -1,5 +1,6 @@
 package io.castellum.web;
 
+import io.castellum.audit.AuditService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.castellum.config.SecurityConfig;
 import io.castellum.ot.OtFingerprintService;
@@ -9,12 +10,18 @@ import io.castellum.ot.OtProbeDecodeException;
 import io.castellum.ot.OtProbeNotImplementedException;
 import io.castellum.ot.OtProbeTimeoutException;
 import io.castellum.ot.OtProbeUnreachableException;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
@@ -28,15 +35,23 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(OtProbeController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WithMockUser(roles = "ADMIN")
 class OtProbeControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+    @MockBean
+    AuditService auditService;
 
     @MockBean
     private OtFingerprintService otFingerprintService;
 
+    @MockBean
+    private CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
+    
     private static final OtProbeResult MOCK_RESULT = new OtProbeResult(
         1L, 2L, OtProtocol.MODBUS_TCP, "127.0.0.1", 502,
         "Castellum-Test", "MOCK-1", "1.0",
@@ -139,5 +154,14 @@ class OtProbeControllerTest {
                 .content("{\"host\":\"127.0.0.1\",\"port\":502,\"protocol\":\"MODBUS_TCP\"}"))
             .andExpect(status().isNotImplemented())
             .andExpect(jsonPath("$.error").value("ot_probe_not_implemented"));
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotMutate_returns403() throws Exception {
+        mockMvc.perform(post("/api/ot-probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"host\":\"127.0.0.1\",\"port\":502,\"protocol\":\"MODBUS_TCP\"}"))
+            .andExpect(status().isForbidden());
     }
 }

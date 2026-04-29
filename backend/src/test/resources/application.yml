@@ -1,6 +1,8 @@
 # Test datasource — strategy (a): H2 in PostgreSQL compatibility mode
 # This allows @DataJpaTest and contextLoads to run without a live PostgreSQL instance.
 spring:
+  profiles:
+    active: test
   datasource:
     url: jdbc:h2:mem:test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
     username: sa
@@ -14,6 +16,13 @@ spring:
     enabled: false
 
 castellum:
+  security:
+    jwt:
+      secret: test-secret-test-secret-test-secret-1234
+      ttl-seconds: 3600
+  admin:
+    username: ""
+    password-hash: ""
   nvd:
     base-url: https://services.nvd.nist.gov/rest/json/cves/2.0
     api-key: ""

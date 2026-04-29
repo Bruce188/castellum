@@ -8,6 +8,7 @@ import io.castellum.scan.CidrValidator;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import org.springframework.data.domain.Page;
@@ -30,6 +31,7 @@ public class ScanController {
     }
 
     @PostMapping("/api/scan")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Map<String, Long>> submit(@Valid @RequestBody ScanRequest request) {
         CidrValidator.requireValid(request.cidr());
 
@@ -46,12 +48,14 @@ public class ScanController {
     }
 
     @GetMapping("/api/scans/{id}")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public Scan getById(@PathVariable Long id) {
         return scanRepository.findById(id)
             .orElseThrow(NoSuchElementException::new);
     }
 
     @GetMapping("/api/scans")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public Page<Scan> list(@PageableDefault(size = 100) Pageable pageable) {
         return scanRepository.findAll(pageable);
     }

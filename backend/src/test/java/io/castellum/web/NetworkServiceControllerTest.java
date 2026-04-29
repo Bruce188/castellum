@@ -4,12 +4,18 @@ import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -20,7 +26,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(NetworkServiceController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WithMockUser(roles = "ADMIN")
 class NetworkServiceControllerTest {
 
     @Autowired
@@ -32,6 +39,11 @@ class NetworkServiceControllerTest {
     @MockBean
     private AuditService auditService;
 
+    @MockBean
+    private CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
+    
     @Test
     void post_portOutOfRange_returns400() throws Exception {
         mockMvc.perform(post("/api/services")
@@ -66,5 +78,14 @@ class NetworkServiceControllerTest {
             .andExpect(status().isCreated());
 
         verify(auditService).recordEvent(eq("system"), eq("SERVICE_CREATE"), eq("service"), anyString(), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotMutate_returns403() throws Exception {
+        mockMvc.perform(post("/api/services")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"deviceId\":1,\"port\":8080,\"protocol\":\"tcp\"}"))
+            .andExpect(status().isForbidden());
     }
 }

@@ -5,6 +5,11 @@ import io.castellum.config.SecurityConfig;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +19,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,7 +30,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(ScanController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WithMockUser(roles = "ADMIN")
 class ScanControllerTest {
 
     @Autowired
@@ -36,6 +43,11 @@ class ScanControllerTest {
     @MockBean
     private AuditService auditService;
 
+    @MockBean
+    private CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
+    
     @Test
     void postScan_validRequest_returns202WithId() throws Exception {
         Scan saved = new Scan();
@@ -88,5 +100,14 @@ class ScanControllerTest {
         ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
         verify(scanRepository).findAll(captor.capture());
         assertEquals(5, captor.getValue().getPageSize());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotMutate_returns403() throws Exception {
+        mockMvc.perform(post("/api/scan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"cidr\":\"10.0.0.0/24\",\"type\":\"PING_SWEEP\"}"))
+            .andExpect(status().isForbidden());
     }
 }

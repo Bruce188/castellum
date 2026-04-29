@@ -5,12 +5,14 @@ import io.castellum.ot.OtProbeDecodeException;
 import io.castellum.ot.OtProbeNotImplementedException;
 import io.castellum.ot.OtProbeTimeoutException;
 import io.castellum.ot.OtProbeUnreachableException;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -104,4 +106,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
             .body(Map.of("error", "upstream_unavailable", "message", ex.getMessage() != null ? ex.getMessage() : "unknown"));
     }
+
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException e, HttpServletRequest req) {
+        return ResponseEntity.status(401)
+            .body(Map.of("error", "unauthorized", "status", 401, "path", req.getRequestURI()));
+    }
+
 }

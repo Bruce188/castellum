@@ -6,12 +6,18 @@ import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
@@ -22,7 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 // Tests GlobalExceptionHandler via real controllers — @RestControllerAdvice applies globally.
 @WebMvcTest({DeviceController.class, NetworkServiceController.class})
-@Import({SecurityConfig.class, GlobalExceptionHandler.class})
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class, GlobalExceptionHandler.class})
+@WithMockUser(roles = "ADMIN")
 class GlobalExceptionHandlerTest {
 
     @Autowired
@@ -37,6 +44,11 @@ class GlobalExceptionHandlerTest {
     @MockBean
     private AuditService auditService;
 
+    @MockBean
+    private CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
+    
     @Test
     void methodArgumentNotValid_returns400WithErrorBody() throws Exception {
         // POST with invalid port triggers MethodArgumentNotValidException
@@ -53,6 +65,17 @@ class GlobalExceptionHandlerTest {
 
         mockMvc.perform(get("/api/devices/999"))
             .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").exists());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void accessDenied_returns403() throws Exception {
+        // VIEWER attempting POST /api/devices triggers @PreAuthorize → AccessDeniedException → 403
+        mockMvc.perform(post("/api/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipAddress\":\"10.0.0.1\"}"))
+            .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.error").exists());
     }
 }

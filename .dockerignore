@@ -1,0 +1,28 @@
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+.claude/
+docs/
+documentation/
+*.log
+*.md
+
+# Build artifacts
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar.bak
+target/
+
+# Frontend (excluded entirely; backend is the only thing the image needs)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python helpers
+**/__pycache__/
+*.pyc

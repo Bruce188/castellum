@@ -235,6 +235,53 @@ MISP_API_KEY=<key>
 
 See `documentation/stix-taxii-misp.md` for full configuration reference, STIX object mapping, retry behaviour, and the `threat_intel_push` audit table.
 
+## Authentication
+
+Castellum uses stateless JWT authentication with role-based access control (RBAC). All API endpoints require a valid `Authorization: Bearer <token>` header except `POST /api/auth/login` and `GET /actuator/health`.
+
+There are two roles: `ADMIN` (full read/write access) and `VIEWER` (read-only). Mutating endpoints (`POST`, `PUT`, `DELETE`) require `ADMIN`. See [documentation/auth.md](documentation/auth.md) for the full RBAC matrix and JWT contract.
+
+### Login
+
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"username":"admin","password":"your-password"}'
+# → {"token":"...","expiresAt":"...","roles":["ADMIN"]}
+
+curl -H 'Authorization: Bearer <token>' http://localhost:8080/api/devices
+```
+
+### Bootstrap admin
+
+Set these environment variables before starting the application. The initializer performs an idempotent upsert on startup.
+
+```bash
+# Generate a BCrypt strength-12 hash:
+htpasswd -bnBC 12 "" "your-password" | tr -d ':\n'
+
+export CASTELLUM_ADMIN_USERNAME=admin
+export CASTELLUM_ADMIN_PASSWORD_HASH='$2a$12$...'
+```
+
+Also set a strong JWT secret (≥32 bytes):
+
+```bash
+export CASTELLUM_SECURITY_JWT_SECRET="$(openssl rand -base64 48)"
+```
+
+## Supply chain
+
+Castellum ships as a multi-stage Docker image built from `Dockerfile` at the repo root. The builder stage compiles the application with Maven on JDK 21; the final stage uses `gcr.io/distroless/java21-debian12:nonroot` which has no shell and a minimal OS attack surface.
+
+The supply-chain pipeline in `scripts/build-and-scan.sh` builds the image, gates it with Trivy on HIGH/CRITICAL CVEs (`--ignore-unfixed`), extracts an image-level CycloneDX SBOM via `syft`, and emits the operator `cosign sign`/`cosign verify` commands. The `cyclonedx-maven-plugin` (bound to the `package` phase) also produces `target/bom.xml` and `target/bom.json` capturing all JVM dependencies.
+
+```bash
+bash scripts/build-and-scan.sh
+```
+
+See [documentation/supply-chain.md](documentation/supply-chain.md) for the full operator runbook including Trivy policy, cosign signing procedure, KMS-backed key examples, and SBOM artifact locations.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

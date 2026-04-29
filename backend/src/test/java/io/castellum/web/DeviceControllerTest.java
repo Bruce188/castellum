@@ -5,12 +5,18 @@ import io.castellum.config.SecurityConfig;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.risk.Criticality;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
@@ -21,7 +27,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(DeviceController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WithMockUser(roles = "ADMIN")
 class DeviceControllerTest {
 
     @Autowired
@@ -33,6 +40,11 @@ class DeviceControllerTest {
     @MockBean
     private AuditService auditService;
 
+    @MockBean
+    private CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
+    
     @Test
     void getById_missingId_returns404() throws Exception {
         when(deviceRepository.findById(999L)).thenReturn(Optional.empty());
@@ -86,5 +98,14 @@ class DeviceControllerTest {
                 .content("{\"ipAddress\":\"10.0.0.2\"}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.criticality").value("MEDIUM"));
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotMutate_returns403() throws Exception {
+        mockMvc.perform(post("/api/devices")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipAddress\":\"10.0.0.99\"}"))
+            .andExpect(status().isForbidden());
     }
 }

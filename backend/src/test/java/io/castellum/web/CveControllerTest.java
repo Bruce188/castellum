@@ -1,15 +1,22 @@
 package io.castellum.web;
 
+import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
@@ -23,17 +30,25 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(CveController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WithMockUser(roles = "ADMIN")
 class CveControllerTest {
 
     @Autowired
     MockMvc mockMvc;
+    @MockBean
+    AuditService auditService;
 
     @MockBean
     CveRepository cveRepository;
 
     @MockBean
     CveMatcher cveMatcher;
+
+    @MockBean
+    CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
 
     private Cve buildCve(String cveId) {
         Cve cve = new Cve();

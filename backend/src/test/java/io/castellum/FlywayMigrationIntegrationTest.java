@@ -23,11 +23,13 @@ import io.castellum.threatintel.ThreatIntelPushRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -74,6 +76,9 @@ class FlywayMigrationIntegrationTest {
 
     @Autowired
     private ThreatIntelPushRepository threatIntelPushRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void flyway_migratesAllFourTables_andEntitiesMatchSchema() {
@@ -187,5 +192,22 @@ class FlywayMigrationIntegrationTest {
         assertNotNull(loaded.getOccurredAt(), "occurred_at must be non-null after insert");
         assertEquals("EXPORT", loaded.getPushTarget());
         assertEquals("bundle--test-1234", loaded.getBundleId());
+    }
+
+    @Test
+    void v9_usersTableRoundTrip() {
+        // Insert via raw JDBC to guard against entity/migration drift independently
+        jdbcTemplate.update(
+            "INSERT INTO users (username, password_hash, role, enabled, created_at) VALUES (?, ?, ?, ?, ?)",
+            "alice", "$2a$12$dummyhash", "ADMIN", true, Instant.now()
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT username, password_hash, role, enabled, created_at FROM users WHERE username = 'alice'"
+        );
+        assertEquals("alice", row.get("username"), "username must round-trip");
+        assertEquals("ADMIN", row.get("role"), "role must round-trip as string");
+        assertEquals(true, row.get("enabled"), "enabled must be true");
+        assertEquals("$2a$12$dummyhash", row.get("password_hash"), "password_hash must round-trip");
+        assertNotNull(row.get("created_at"), "created_at must be non-null");
     }
 }

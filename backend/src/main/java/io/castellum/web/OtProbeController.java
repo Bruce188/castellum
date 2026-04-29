@@ -6,6 +6,7 @@ import io.castellum.web.dto.OtProbeRequest;
 import io.castellum.web.dto.OtProbeResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +27,7 @@ public class OtProbeController {
     }
 
     @PostMapping("/api/ot-probe")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<OtProbeResponse> probe(@Valid @RequestBody OtProbeRequest request) {
         OtProbeResult result = service.probe(request.host(), request.port(), request.protocol());
         OtProbeResponse response = new OtProbeResponse(

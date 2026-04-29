@@ -10,6 +10,7 @@ import io.castellum.graph.CpeMapper;
 import io.castellum.risk.*;
 import io.castellum.web.dto.DeviceRiskDto;
 import io.castellum.web.dto.FeedsStatusDto;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -42,6 +43,7 @@ public class RiskController {
     }
 
     @GetMapping("/score")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public RiskScore score(@RequestParam("cve") String cveId, @RequestParam("device") long deviceId) {
         Cve cve = cveRepo.findByCveId(cveId)
             .orElseThrow(() -> new NoSuchElementException("CVE not found: " + cveId));
@@ -55,6 +57,7 @@ public class RiskController {
     }
 
     @GetMapping("/feeds/status")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public FeedsStatusDto feedsStatus() {
         long epssCount = epssRepo.count();
         var epssMaxDate = epssRepo.findMaxScoreDate().orElse(null);
@@ -66,6 +69,7 @@ public class RiskController {
     }
 
     @GetMapping("/device/{id}")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public DeviceRiskDto deviceRisk(@PathVariable long id) {
         Device device = deviceRepo.findById(id)
             .orElseThrow(() -> new NoSuchElementException("Device not found: " + id));

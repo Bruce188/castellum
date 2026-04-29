@@ -3,6 +3,7 @@ package io.castellum.web;
 import io.castellum.discovery.*;
 import io.castellum.web.dto.PassiveDiscoveryRequestDto;
 import jakarta.validation.Valid;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,6 +23,7 @@ public class PassiveScanController {
     }
 
     @PostMapping("/passive")
+    @PreAuthorize("hasRole('ADMIN')")
     public PassiveDiscoveryResponse passive(@Valid @RequestBody PassiveDiscoveryRequestDto dto) {
         PassiveDiscoveryRequest req = normalize(dto);
         return service.sweep(req);

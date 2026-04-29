@@ -2,6 +2,7 @@ package io.castellum.web;
 
 import io.castellum.graph.GraphService;
 import io.castellum.graph.dto.ShortestPathResponse;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,6 +19,7 @@ public class GraphController {
     }
 
     @GetMapping("/shortest-path")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public ShortestPathResponse shortestPath(@RequestParam("from") long from,
                                               @RequestParam("to") long to) {
         if (from <= 0 || to <= 0) throw new IllegalArgumentException("from/to must be positive");

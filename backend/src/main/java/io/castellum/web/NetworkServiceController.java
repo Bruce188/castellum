@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -30,6 +31,7 @@ public class NetworkServiceController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public Object list(@RequestParam(required = false) Long deviceId,
                        @PageableDefault(size = 100) Pageable pageable) {
         if (deviceId != null) {
@@ -39,12 +41,14 @@ public class NetworkServiceController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public NetworkService getById(@PathVariable Long id) {
         return serviceRepository.findById(id)
             .orElseThrow(NoSuchElementException::new);
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<NetworkService> create(@Valid @RequestBody NetworkService service) {
         NetworkService saved = serviceRepository.save(service);
         auditService.recordEvent("system", "SERVICE_CREATE", "service", String.valueOf(saved.getId()), saved);
@@ -56,6 +60,7 @@ public class NetworkServiceController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public NetworkService update(@PathVariable Long id, @Valid @RequestBody NetworkService service) {
         serviceRepository.findById(id).orElseThrow(NoSuchElementException::new);
         service.setId(id);
@@ -65,6 +70,7 @@ public class NetworkServiceController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         NetworkService existing = serviceRepository.findById(id).orElseThrow(NoSuchElementException::new);
         serviceRepository.deleteById(id);

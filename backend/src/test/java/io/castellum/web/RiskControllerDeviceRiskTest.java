@@ -10,11 +10,17 @@ import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.risk.*;
+import io.castellum.security.CastellumUserDetailsService;
+import io.castellum.security.JwtAuthenticationFilter;
+import io.castellum.security.JwtService;
+import io.castellum.security.RbacAccessDeniedHandler;
+import io.castellum.security.RbacAuthenticationEntryPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -28,7 +34,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(controllers = RiskController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WithMockUser(roles = "ADMIN")
 class RiskControllerDeviceRiskTest {
 
     @Autowired MockMvc mvc;
@@ -38,6 +45,9 @@ class RiskControllerDeviceRiskTest {
     @MockBean KevEntryRepository kevRepo;
     @MockBean NetworkServiceRepository networkServiceRepository;
     @MockBean CveMatcher cveMatcher;
+    @MockBean CastellumUserDetailsService castellumUserDetailsService;
+    @MockBean
+    JwtService jwtService;
     @MockBean AuditService auditService;
 
     @Test

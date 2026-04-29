@@ -23,8 +23,14 @@ public class AuditService {
 
     public AuditLog recordEvent(String actor, String action, String resourceType, String resourceId, Object payload) {
         String payloadJson = serializePayload(payload, resourceType, resourceId);
-        AuditLog event = new AuditLog(Instant.now(), actor, action, resourceType, resourceId, payloadJson);
+        AuditLog event = new AuditLog(Instant.now(), sanitizeActor(actor), action, resourceType, resourceId, payloadJson);
         return repository.save(event);
+    }
+
+    private String sanitizeActor(String actor) {
+        if (actor == null) return "unknown";
+        String stripped = actor.replaceAll("[\\p{Cntrl}]", "_");
+        return stripped.length() > 64 ? stripped.substring(0, 64) : stripped;
     }
 
     private String serializePayload(Object payload, String resourceType, String resourceId) {
