@@ -1,122 +1,96 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from 'react';
+import { ScanTriggerForm } from './components/ScanTriggerForm';
+import { TopologyView } from './components/TopologyView';
+import { DeviceDetailPanel } from './components/DeviceDetailPanel';
+import { api } from './api/client';
+import type { Device, DeviceRiskDto, NetworkService } from './api/types';
+import './index.css';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
+  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [selectedRisk, setSelectedRisk] = useState<DeviceRiskDto | null>(null);
+  const [selectedServices, setSelectedServices] = useState<NetworkService[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const page = await api.listDevices();
+        if (cancelled) return;
+        setDevices(page.content);
+        const results = await Promise.allSettled(
+          page.content.map(d => api.deviceRisk(d.id))
+        );
+        if (cancelled) return;
+        const map = new Map<number, DeviceRiskDto>();
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
+        });
+        setRisksById(map);
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'load failed');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleNodeClick(id: number) {
+    const dev = devices.find(d => d.id === id) ?? null;
+    setSelectedDevice(dev);
+    if (dev === null) return;
+    try {
+      const [services, risk] = await Promise.all([
+        api.listServicesForDevice(id),
+        api.deviceRisk(id),
+      ]);
+      setSelectedServices(services);
+      setSelectedRisk(risk);
+    } catch {
+      setSelectedServices([]);
+      setSelectedRisk(null);
+    }
+  }
+
+  function handleBackgroundClick() {
+    setSelectedDevice(null);
+    setSelectedRisk(null);
+    setSelectedServices([]);
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <div className="grid grid-rows-[auto_1fr] h-screen">
+      <header><ScanTriggerForm /></header>
+      <main className="relative">
+        <TopologyView
+          devices={devices}
+          risksById={risksById}
+          onNodeClick={handleNodeClick}
+          onBackgroundClick={handleBackgroundClick}
+        />
+        <DeviceDetailPanel
+          device={selectedDevice}
+          risk={selectedRisk}
+          services={selectedServices}
+          onClose={handleBackgroundClick}
+        />
+        {devices.length === 0 && !loadError && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <p className="text-gray-500 text-center max-w-md">
+              No devices yet. Submit a scan above or POST <code>/api/devices</code> to populate the graph.
+            </p>
+          </div>
+        )}
+        {loadError && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <p className="text-red-600">Failed to load: {loadError}</p>
+          </div>
+        )}
+      </main>
+    </div>
+  );
 }
 
-export default App
+export default App;

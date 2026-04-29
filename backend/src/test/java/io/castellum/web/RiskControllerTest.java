@@ -1,10 +1,12 @@
 package io.castellum.web;
 
 import io.castellum.cve.Cve;
+import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
 import io.castellum.config.SecurityConfig;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
+import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.risk.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +33,8 @@ class RiskControllerTest {
     @MockBean DeviceRepository deviceRepo;
     @MockBean EpssScoreRepository epssRepo;
     @MockBean KevEntryRepository kevRepo;
+    @MockBean NetworkServiceRepository networkServiceRepository;
+    @MockBean CveMatcher cveMatcher;
 
     @Test
     void score_assemblesInputsAndReturnsScore() throws Exception {
