@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oasis-open/cti-stix2-json-schemas/stix2.1/schemas/sdos/relationship.json",
+  "title": "relationship",
+  "type": "object",
+  "properties": {
+    "type": { "type": "string", "const": "relationship" },
+    "spec_version": { "type": "string", "enum": ["2.1"] },
+    "id": { "$ref": "../common/identifier.json" },
+    "created_by_ref": { "$ref": "../common/identifier.json" },
+    "created": { "$ref": "../common/timestamp.json" },
+    "modified": { "$ref": "../common/timestamp.json" },
+    "relationship_type": { "type": "string" },
+    "source_ref": { "$ref": "../common/identifier.json" },
+    "target_ref": { "$ref": "../common/identifier.json" }
+  },
+  "required": ["type", "spec_version", "id", "created", "modified", "relationship_type", "source_ref", "target_ref"]
+}

@@ -15,6 +15,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -95,5 +96,12 @@ public class GlobalExceptionHandler {
         log.warn("OT probe not implemented: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
             .body(Map.of("error", "ot_probe_not_implemented", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<Map<String, Object>> handleIoException(IOException ex) {
+        log.warn("Upstream unavailable: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+            .body(Map.of("error", "upstream_unavailable", "message", ex.getMessage() != null ? ex.getMessage() : "unknown"));
     }
 }

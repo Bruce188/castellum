@@ -1,0 +1,187 @@
+{
+  "type" : "bundle",
+  "id" : "bundle--PLACEHOLDER",
+  "spec_version" : "2.1",
+  "objects" : [ {
+    "type" : "identity",
+    "spec_version" : "2.1",
+    "id" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "name" : "Castellum",
+    "identity_class" : "system"
+  }, {
+    "type" : "infrastructure",
+    "spec_version" : "2.1",
+    "id" : "infrastructure--55ff4e7d-7aeb-3112-82ce-1475c072c402",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "plc-01",
+    "infrastructure_types" : [ "unknown" ],
+    "extensions" : {
+      "x_castellum" : {
+        "ip_address" : "10.0.0.5",
+        "criticality" : "HIGH"
+      }
+    }
+  }, {
+    "type" : "infrastructure",
+    "spec_version" : "2.1",
+    "id" : "infrastructure--2f68aadd-cc2f-3919-b222-8186221b599f",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "plc-02",
+    "infrastructure_types" : [ "unknown" ],
+    "extensions" : {
+      "x_castellum" : {
+        "ip_address" : "10.0.0.6",
+        "criticality" : "MEDIUM"
+      }
+    }
+  }, {
+    "type" : "infrastructure",
+    "spec_version" : "2.1",
+    "id" : "infrastructure--e99a28a1-e935-3982-a098-22115ea9dc8f",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "10.0.0.7",
+    "infrastructure_types" : [ "unknown" ],
+    "extensions" : {
+      "x_castellum" : {
+        "ip_address" : "10.0.0.7",
+        "criticality" : "LOW"
+      }
+    }
+  }, {
+    "type" : "vulnerability",
+    "spec_version" : "2.1",
+    "id" : "vulnerability--ba4b4602-feba-3e66-bf57-ff7201c3e5f2",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "CVE-2026-0001",
+    "description" : "High severity RCE in testapp",
+    "external_references" : [ {
+      "source_name" : "cve",
+      "external_id" : "CVE-2026-0001"
+    } ]
+  }, {
+    "type" : "vulnerability",
+    "spec_version" : "2.1",
+    "id" : "vulnerability--fcc71197-281d-306f-a5a1-12f8de0c861f",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "CVE-2026-0002",
+    "description" : "KEV exploit in testapp",
+    "external_references" : [ {
+      "source_name" : "cve",
+      "external_id" : "CVE-2026-0002"
+    } ]
+  }, {
+    "type" : "vulnerability",
+    "spec_version" : "2.1",
+    "id" : "vulnerability--be18309e-7710-3888-9410-cde5de3e434b",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "CVE-2026-0003",
+    "description" : "Low severity in testapp",
+    "external_references" : [ {
+      "source_name" : "cve",
+      "external_id" : "CVE-2026-0003"
+    } ]
+  }, {
+    "type" : "vulnerability",
+    "spec_version" : "2.1",
+    "id" : "vulnerability--99dcd5ea-c2b5-3e0c-8833-23b10ac79d87",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "CVE-2026-0004",
+    "description" : "Unmatched CVE",
+    "external_references" : [ {
+      "source_name" : "cve",
+      "external_id" : "CVE-2026-0004"
+    } ]
+  }, {
+    "type" : "relationship",
+    "spec_version" : "2.1",
+    "id" : "relationship--27e7ca0b-f389-35ee-91de-c7dda7b17bc2",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "relationship_type" : "affects",
+    "source_ref" : "vulnerability--ba4b4602-feba-3e66-bf57-ff7201c3e5f2",
+    "target_ref" : "infrastructure--55ff4e7d-7aeb-3112-82ce-1475c072c402"
+  }, {
+    "type" : "indicator",
+    "spec_version" : "2.1",
+    "id" : "indicator--198e7ef1-1b29-3946-8bed-509f0f359939",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "CVE-2026-0001 on 10.0.0.5",
+    "indicator_types" : [ "malicious-activity" ],
+    "pattern" : "[ipv4-addr:value = '10.0.0.5']",
+    "pattern_type" : "stix",
+    "valid_from" : "2026-04-29T12:00:00.000Z",
+    "x_castellum_composite_score" : 7.35
+  }, {
+    "type" : "relationship",
+    "spec_version" : "2.1",
+    "id" : "relationship--c95f221d-e9e9-3f43-9cdc-751b27e983ee",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "relationship_type" : "targets",
+    "source_ref" : "indicator--198e7ef1-1b29-3946-8bed-509f0f359939",
+    "target_ref" : "infrastructure--55ff4e7d-7aeb-3112-82ce-1475c072c402"
+  }, {
+    "type" : "relationship",
+    "spec_version" : "2.1",
+    "id" : "relationship--552d03d2-53b9-3a9b-8f93-00b249e58051",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "relationship_type" : "affects",
+    "source_ref" : "vulnerability--fcc71197-281d-306f-a5a1-12f8de0c861f",
+    "target_ref" : "infrastructure--55ff4e7d-7aeb-3112-82ce-1475c072c402"
+  }, {
+    "type" : "indicator",
+    "spec_version" : "2.1",
+    "id" : "indicator--398e32ce-10ea-3954-afbd-1157aa3d012a",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "name" : "CVE-2026-0002 on 10.0.0.5",
+    "indicator_types" : [ "malicious-activity" ],
+    "pattern" : "[ipv4-addr:value = '10.0.0.5']",
+    "pattern_type" : "stix",
+    "valid_from" : "2026-04-29T12:00:00.000Z",
+    "x_castellum_composite_score" : 5.63
+  }, {
+    "type" : "relationship",
+    "spec_version" : "2.1",
+    "id" : "relationship--1f0c4233-3a9e-3094-880d-fce621cc5f64",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "relationship_type" : "targets",
+    "source_ref" : "indicator--398e32ce-10ea-3954-afbd-1157aa3d012a",
+    "target_ref" : "infrastructure--55ff4e7d-7aeb-3112-82ce-1475c072c402"
+  }, {
+    "type" : "relationship",
+    "spec_version" : "2.1",
+    "id" : "relationship--d0002872-fa19-36ca-8e81-b9c8130ed131",
+    "created" : "2026-04-29T12:00:00.000Z",
+    "modified" : "2026-04-29T12:00:00.000Z",
+    "created_by_ref" : "identity--65840157-3696-3d4e-9b22-7113bbe7a64a",
+    "relationship_type" : "affects",
+    "source_ref" : "vulnerability--be18309e-7710-3888-9410-cde5de3e434b",
+    "target_ref" : "infrastructure--55ff4e7d-7aeb-3112-82ce-1475c072c402"
+  } ]
+}

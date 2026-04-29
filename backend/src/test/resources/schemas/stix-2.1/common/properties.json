@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oasis-open/cti-stix2-json-schemas/stix2.1/schemas/common/properties.json",
+  "title": "common-properties",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]+$"
+    },
+    "spec_version": {
+      "type": "string",
+      "enum": ["2.1"]
+    },
+    "id": {
+      "$ref": "identifier.json"
+    },
+    "created_by_ref": {
+      "$ref": "identifier.json"
+    },
+    "created": {
+      "$ref": "timestamp.json"
+    },
+    "modified": {
+      "$ref": "timestamp.json"
+    },
+    "external_references": {
+      "type": "array",
+      "items": { "$ref": "external-reference.json" }
+    }
+  }
+}

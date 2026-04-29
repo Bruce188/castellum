@@ -18,6 +18,8 @@ import io.castellum.risk.EpssScore;
 import io.castellum.risk.EpssScoreRepository;
 import io.castellum.risk.KevEntry;
 import io.castellum.risk.KevEntryRepository;
+import io.castellum.threatintel.ThreatIntelPushRecord;
+import io.castellum.threatintel.ThreatIntelPushRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -69,6 +71,9 @@ class FlywayMigrationIntegrationTest {
 
     @Autowired
     private KevEntryRepository kevEntryRepository;
+
+    @Autowired
+    private ThreatIntelPushRepository threatIntelPushRepository;
 
     @Test
     void flyway_migratesAllFourTables_andEntitiesMatchSchema() {
@@ -170,5 +175,17 @@ class FlywayMigrationIntegrationTest {
             assertEquals(crits[i], deviceRepository.findById(saved.getId()).orElseThrow().getCriticality(),
                 "Criticality " + crits[i] + " should round-trip correctly");
         }
+    }
+
+    @Test
+    void v8_threatIntelPushRoundtrip() {
+        ThreatIntelPushRecord rec = new ThreatIntelPushRecord(
+            "EXPORT", "bundle--test-1234", 200, "status=200", Instant.now(), null);
+        ThreatIntelPushRecord saved = threatIntelPushRepository.save(rec);
+        assertNotNull(saved.getId(), "ThreatIntelPushRecord should get a generated id");
+        ThreatIntelPushRecord loaded = threatIntelPushRepository.findById(saved.getId()).orElseThrow();
+        assertNotNull(loaded.getOccurredAt(), "occurred_at must be non-null after insert");
+        assertEquals("EXPORT", loaded.getPushTarget());
+        assertEquals("bundle--test-1234", loaded.getBundleId());
     }
 }

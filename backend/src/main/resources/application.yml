@@ -58,3 +58,15 @@ castellum:
       read-timeout-ms: ${OT_PROBE_READ_TIMEOUT_MS:5000}
       total-timeout-ms: ${OT_PROBE_TOTAL_TIMEOUT_MS:10000}
       max-concurrent: ${OT_PROBE_MAX_CONCURRENT:8}
+  taxii:
+    base-url: ${TAXII_BASE_URL:}
+    collection-id: ${TAXII_COLLECTION_ID:}
+    username: ${TAXII_USERNAME:}
+    password: ${TAXII_PASSWORD:}
+    backoff-base-millis: 6000
+  misp:
+    base-url: ${MISP_BASE_URL:}
+    api-key: ${MISP_API_KEY:}
+    distribution: ${MISP_DISTRIBUTION:0}
+    threat-level-id: ${MISP_THREAT_LEVEL_ID:2}
+    backoff-base-millis: 6000

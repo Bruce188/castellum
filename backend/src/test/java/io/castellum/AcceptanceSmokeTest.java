@@ -18,8 +18,12 @@ import io.castellum.ot.modbus.ModbusFrames;
 import io.castellum.ot.dnp3.Dnp3Frames;
 import io.castellum.ot.bacnet.BacnetFrames;
 import io.castellum.risk.*;
+import io.castellum.threatintel.BundleAssembler;
+import io.castellum.threatintel.stix.StixBundle;
+import io.castellum.threatintel.stix.StixSchemaValidator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -89,6 +93,13 @@ class AcceptanceSmokeTest {
 
     @Autowired
     private KevIngestionService kevIngestionService;
+
+    @Autowired
+    private BundleAssembler bundleAssembler;
+
+    @Autowired
+    @Qualifier("stixObjectMapper")
+    private ObjectMapper stixObjectMapper;
 
     @MockBean
     private EpssClient epssClient;
@@ -339,6 +350,78 @@ class AcceptanceSmokeTest {
                 .as("golden fixture %s", root.get("name").asText())
                 .isCloseTo(expected, org.assertj.core.data.Offset.offset(tolerance));
         }
+    }
+
+    @Test
+    void ac1_stixBundleValidatesAgainstOasisSchema() throws Exception {
+        // Seed: 2 devices + 2 CVEs, one of which is KEV
+        Device d1 = new Device();
+        d1.setIpAddress("10.99.0.1");
+        d1.setHostname("ac1-device-1");
+        d1.setFirstSeen(Instant.now());
+        d1.setLastSeen(Instant.now());
+        d1.setCriticality(Criticality.HIGH);
+        d1 = deviceRepository.save(d1);
+
+        Device d2 = new Device();
+        d2.setIpAddress("10.99.0.2");
+        d2.setHostname("ac1-device-2");
+        d2.setFirstSeen(Instant.now());
+        d2.setLastSeen(Instant.now());
+        d2.setCriticality(Criticality.MEDIUM);
+        d2 = deviceRepository.save(d2);
+
+        Cve cve1 = new Cve();
+        cve1.setCveId("CVE-2026-AC1-001");
+        cve1.setDescription("AC1 test CVE high severity");
+        cve1.setCvssV31Score(new BigDecimal("9.0"));
+        cve1.setLastModified(Instant.now());
+        cve1.setRawJson("{}");
+        cve1.setFetchedAt(Instant.now());
+        cve1 = cveRepository.save(cve1);
+
+        Cve cve2 = new Cve();
+        cve2.setCveId("CVE-2026-AC1-002");
+        cve2.setDescription("AC1 KEV test CVE");
+        cve2.setCvssV31Score(new BigDecimal("5.0"));
+        cve2.setLastModified(Instant.now());
+        cve2.setRawJson("{}");
+        cve2.setFetchedAt(Instant.now());
+        cve2 = cveRepository.save(cve2);
+
+        KevEntry kev = new KevEntry();
+        kev.setCveId("CVE-2026-AC1-002");
+        kev.setDateAdded(LocalDate.now());
+        kev.setVendorProject("ac1vendor");
+        kev.setProduct("ac1app");
+        kev.setIngestedAt(Instant.now());
+        kevEntryRepository.save(kev);
+
+        NetworkService svc = new NetworkService();
+        svc.setDeviceId(d1.getId());
+        svc.setPort(80);
+        svc.setProtocol("tcp");
+        svc.setName("ac1app");
+        svc.setVersion("1.0");
+        svc.setObservedAt(Instant.now());
+        networkServiceRepository.save(svc);
+
+        io.castellum.cve.CveCpeMatch m1 = new io.castellum.cve.CveCpeMatch();
+        m1.setCveFk(cve1.getId());
+        m1.setCpe23Uri("cpe:2.3:a:ac1app:ac1app:*:*:*:*:*:*:*:*");
+        m1.setVulnerable(true);
+        cveCpeMatchRepository.save(m1);
+
+        io.castellum.cve.CveCpeMatch m2 = new io.castellum.cve.CveCpeMatch();
+        m2.setCveFk(cve2.getId());
+        m2.setCpe23Uri("cpe:2.3:a:ac1app:ac1app:*:*:*:*:*:*:*:*");
+        m2.setVulnerable(true);
+        cveCpeMatchRepository.save(m2);
+
+        StixBundle bundle = bundleAssembler.assemble();
+        String json = stixObjectMapper.writeValueAsString(bundle);
+        List<String> errors = StixSchemaValidator.validate(json);
+        assertThat(errors).as("STIX schema validation errors: " + errors).isEmpty();
     }
 
     // ---- Helper methods ----

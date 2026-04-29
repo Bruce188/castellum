@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oasis-open/cti-stix2-json-schemas/stix2.1/schemas/sdos/identity.json",
+  "title": "identity",
+  "type": "object",
+  "properties": {
+    "type": { "type": "string", "const": "identity" },
+    "spec_version": { "type": "string", "enum": ["2.1"] },
+    "id": { "$ref": "../common/identifier.json" },
+    "created_by_ref": { "$ref": "../common/identifier.json" },
+    "created": { "$ref": "../common/timestamp.json" },
+    "modified": { "$ref": "../common/timestamp.json" },
+    "name": { "type": "string" },
+    "identity_class": { "type": "string" }
+  },
+  "required": ["type", "spec_version", "id", "created", "modified", "name"]
+}

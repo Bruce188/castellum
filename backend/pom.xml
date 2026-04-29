@@ -114,6 +114,13 @@
 			<artifactId>plc4j-driver-s7</artifactId>
 			<version>${plc4x.version}</version>
 		</dependency>
+		<!-- OASIS STIX 2.1 schema validator — test scope only; keeps production jar lean. -->
+		<dependency>
+			<groupId>com.networknt</groupId>
+			<artifactId>json-schema-validator</artifactId>
+			<version>1.5.4</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>

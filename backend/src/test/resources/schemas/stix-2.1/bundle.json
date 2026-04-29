@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oasis-open/cti-stix2-json-schemas/stix2.1/schemas/bundle.json",
+  "title": "bundle",
+  "description": "STIX 2.1 Bundle object. Inline subset for offline schema validation.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "bundle"
+    },
+    "id": {
+      "$ref": "common/identifier.json"
+    },
+    "spec_version": {
+      "type": "string",
+      "enum": ["2.1"]
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "id": { "$ref": "common/identifier.json" },
+          "spec_version": { "type": "string" },
+          "created": { "$ref": "common/timestamp.json" },
+          "modified": { "$ref": "common/timestamp.json" }
+        },
+        "required": ["type", "id"]
+      }
+    }
+  },
+  "required": ["type", "id"]
+}

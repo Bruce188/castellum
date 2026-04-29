@@ -209,6 +209,32 @@ On success (HTTP 200) the response includes `vendor`, `product`, `version`, `raw
 | `castellum.ot.probe.total-timeout-ms` | 10000 | `OT_PROBE_TOTAL_TIMEOUT_MS` |
 | `castellum.ot.probe.max-concurrent` | 8 | `OT_PROBE_MAX_CONCURRENT` |
 
+## Threat Intel Export (STIX / TAXII / MISP)
+
+Castellum can export its vulnerability and device data as STIX 2.1 bundles and push them to a TAXII 2.1 collection or a MISP instance.
+
+### Endpoints (require `ADMIN` role)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/threat-intel/export` | Return bundle as `application/json` |
+| `POST` | `/api/threat-intel/push/taxii` | Push to configured TAXII 2.1 collection |
+| `POST` | `/api/threat-intel/push/misp` | Push attributes to MISP event |
+
+### Quick start
+
+```env
+TAXII_BASE_URL=https://taxii.example.com
+TAXII_COLLECTION_ID=<id>
+TAXII_USERNAME=<user>
+TAXII_PASSWORD=<pass>
+
+MISP_BASE_URL=https://misp.example.com
+MISP_API_KEY=<key>
+```
+
+See `documentation/stix-taxii-misp.md` for full configuration reference, STIX object mapping, retry behaviour, and the `threat_intel_push` audit table.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

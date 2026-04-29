@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/oasis-open/cti-stix2-json-schemas/stix2.1/schemas/sdos/indicator.json",
+  "title": "indicator",
+  "type": "object",
+  "properties": {
+    "type": { "type": "string", "const": "indicator" },
+    "spec_version": { "type": "string", "enum": ["2.1"] },
+    "id": { "$ref": "../common/identifier.json" },
+    "created_by_ref": { "$ref": "../common/identifier.json" },
+    "created": { "$ref": "../common/timestamp.json" },
+    "modified": { "$ref": "../common/timestamp.json" },
+    "name": { "type": "string" },
+    "indicator_types": { "type": "array", "items": { "type": "string" } },
+    "pattern": { "type": "string" },
+    "pattern_type": { "type": "string" },
+    "valid_from": { "$ref": "../common/timestamp.json" },
+    "x_castellum_composite_score": {}
+  },
+  "required": ["type", "spec_version", "id", "created", "modified", "pattern", "pattern_type", "valid_from"]
+}
