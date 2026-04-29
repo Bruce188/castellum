@@ -1,0 +1,8 @@
+CREATE TABLE scan (
+  id BIGSERIAL PRIMARY KEY,
+  cidr TEXT NOT NULL,
+  scan_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
