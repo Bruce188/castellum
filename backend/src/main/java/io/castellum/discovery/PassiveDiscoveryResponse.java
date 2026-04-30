@@ -6,5 +6,6 @@ import java.util.Map;
 public record PassiveDiscoveryResponse(
     int discovered,
     List<Long> deviceIds,
-    Map<DiscoverySource, Integer> perSourceCount
+    Map<DiscoverySource, Integer> perSourceCount,
+    Long sweepId
 ) {}

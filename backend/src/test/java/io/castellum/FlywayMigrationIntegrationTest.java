@@ -218,6 +218,41 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void flywayMigratesV11_discoverySweepTable_appliesIdempotentlyAgainstH2Mirror() {
+        // V11 migration must have applied during context start — assert the table is present.
+        Number columnCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE UPPER(TABLE_NAME) = 'DISCOVERY_SWEEP'",
+            Number.class);
+        assertNotNull(columnCount, "INFORMATION_SCHEMA.COLUMNS query must return a result");
+        assertTrue(columnCount.intValue() >= 10,
+            "discovery_sweep table must have at least 10 columns after V11 (id, started_at, finished_at, source, iface, neighbor_count, device_count, triggered_by, audit_log_id, status)");
+        // Index check — V11 declares idx_discovery_sweep_started.
+        Number indexCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES WHERE UPPER(TABLE_NAME) = 'DISCOVERY_SWEEP' AND UPPER(INDEX_NAME) LIKE '%STARTED%'",
+            Number.class);
+        assertNotNull(indexCount, "INFORMATION_SCHEMA.INDEXES query must return a result");
+        assertTrue(indexCount.intValue() >= 1, "idx_discovery_sweep_started must exist after V11 migration");
+    }
+
+    @Test
+    void flywayMigratesV11_discoverySweepRoundTrip_persistsAndReadsBack() {
+        // Insert via raw JDBC to guard against entity/migration drift independently.
+        Instant start = Instant.now();
+        jdbcTemplate.update(
+            "INSERT INTO discovery_sweep (started_at, source, triggered_by, status) VALUES (?, ?, ?, ?)",
+            start, "ARP", "MANUAL", "OK"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT source, triggered_by, status, neighbor_count, device_count FROM discovery_sweep ORDER BY started_at DESC LIMIT 1"
+        );
+        assertEquals("ARP", row.get("source"), "source must round-trip");
+        assertEquals("MANUAL", row.get("triggered_by"), "triggered_by must round-trip");
+        assertEquals("OK", row.get("status"), "status must round-trip");
+        assertEquals(0, ((Number) row.get("neighbor_count")).intValue(), "neighbor_count default 0");
+        assertEquals(0, ((Number) row.get("device_count")).intValue(), "device_count default 0");
+    }
+
+    @Test
     void usersV10TokenVersionRoundTrips() {
         // Persist a User and assert tokenVersion defaults to 0
         User u = new User("rt-user", "$2a$12$x", Role.VIEWER, true, Instant.now());

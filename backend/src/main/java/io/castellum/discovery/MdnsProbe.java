@@ -44,7 +44,7 @@ public class MdnsProbe {
      * @return list of discovered neighbors; empty if nothing was heard
      * @throws DiscoveryUnavailableException if multicast is unavailable
      */
-    public List<DiscoveredNeighbor> probe(int durationSeconds) {
+    public List<DiscoveredNeighbor> probe(int durationSeconds) throws DiscoveryUnavailableException {
         Queue<DiscoveredNeighbor> queue = new ConcurrentLinkedQueue<>();
 
         ServiceListener listener = new ServiceListener() {
@@ -62,26 +62,14 @@ public class MdnsProbe {
             public void serviceResolved(ServiceEvent event) {
                 var info = event.getInfo();
                 if (info == null) return;
-
                 InetAddress[] addrs = info.getInet4Addresses();
-                String ip = null;
-                if (addrs != null) {
-                    for (InetAddress a : addrs) {
-                        if (a != null) {
-                            ip = a.getHostAddress();
-                            break;
-                        }
-                    }
+                String firstIp = firstNonNull(addrs);
+                DiscoveredNeighbor n = buildNeighbor(firstIp, info.getServer());
+                if (n != null) {
+                    queue.offer(n);
+                    log.debug("mDNS resolved: name={} ip={} hostname={}",
+                        info.getName(), n.ipAddress(), n.hostname());
                 }
-                if (ip == null) {
-                    // Use service name as placeholder IP if no IPv4 available
-                    ip = info.getServer() != null ? info.getServer() : info.getName();
-                    if (ip == null || ip.isBlank()) return;
-                }
-
-                String hostname = info.getServer();
-                queue.offer(new DiscoveredNeighbor(ip, null, null, null, null));
-                log.debug("mDNS resolved: {} -> {}", info.getName(), ip);
             }
         };
 
@@ -115,5 +103,34 @@ public class MdnsProbe {
         }
 
         return new ArrayList<>(queue);
+    }
+
+    /**
+     * Builds a neighbor record from a resolved IPv4 address and mDNS server hostname.
+     * Returns {@code null} when neither an IPv4 nor a hostname is available — the entry
+     * carries no actionable information. Package-private for unit-test access.
+     *
+     * <p>Behavioral contract (Phase D.1):
+     * <ul>
+     *   <li>{@code ip != null} → emit {@code DiscoveredNeighbor(ip, null, null, null, null, hostname)}.</li>
+     *   <li>{@code ip == null && hostname != null} → emit hostname-only neighbor with {@code ipAddress=null}
+     *       (NOT the hostname stuffed into the ipAddress slot — that was the pre-D.1 bug).</li>
+     *   <li>{@code ip == null && (hostname == null || blank)} → return null (skip).</li>
+     * </ul>
+     */
+    static DiscoveredNeighbor buildNeighbor(String ip, String hostname) {
+        if (ip == null) {
+            if (hostname == null || hostname.isBlank()) return null;
+            return new DiscoveredNeighbor(null, null, null, null, null, hostname);
+        }
+        return new DiscoveredNeighbor(ip, null, null, null, null, hostname);
+    }
+
+    private static String firstNonNull(InetAddress[] addrs) {
+        if (addrs == null) return null;
+        for (InetAddress a : addrs) {
+            if (a != null) return a.getHostAddress();
+        }
+        return null;
     }
 }

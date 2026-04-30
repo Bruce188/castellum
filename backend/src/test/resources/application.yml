@@ -43,6 +43,7 @@ castellum:
       max-concurrent: 4
   discovery:
     default-duration-seconds: 30
+    passive-sweep-cron: "-"
     arp:
       proc-path: /proc/net/arp
     mdns:

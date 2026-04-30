@@ -66,6 +66,7 @@ castellum:
     refresh-cron: ${RISK_REFRESH_CRON:0 0 6 * * *}
   discovery:
     default-duration-seconds: ${DISCOVERY_DURATION_SECONDS:30}
+    passive-sweep-cron: ${DISCOVERY_PASSIVE_SWEEP_CRON:0 0 */6 * * *}
     arp:
       proc-path: ${DISCOVERY_ARP_PATH:/proc/net/arp}
     mdns:
