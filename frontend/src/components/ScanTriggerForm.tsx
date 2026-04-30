@@ -8,16 +8,16 @@ const SCAN_TYPES: ScanType[] = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT'
 export function ScanTriggerForm() {
   const [cidr, setCidr] = useState('192.168.1.0/24');
   const [type, setType] = useState<ScanType>('PING_SWEEP');
-  const [submittedScanId, setSubmittedScanId] = useState<number | null>(null);
+  const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const scan = useScanStatus(submittedScanId);
+  const scan = useScanStatus(activeScanId);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     try {
       const result = await api.triggerScan({ cidr, type });
-      setSubmittedScanId(result.id);
+      setActiveScanId(result.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'submit failed');
     }

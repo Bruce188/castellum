@@ -27,4 +27,12 @@ describe('<App /> smoke', () => {
     expect(screen.getByTestId('topology-canvas')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /scan/i })).toBeInTheDocument();
   });
+
+  it('empty-state notice text is selectable (pointer-events-auto)', async () => {
+    render(<App />);
+    const notice = await screen.findByText(/No devices yet/);
+    expect(notice).toBeInTheDocument();
+    // The <p> tag itself must carry pointer-events-auto so users can copy the snippet.
+    expect(notice).toHaveClass('pointer-events-auto');
+  });
 });

@@ -42,7 +42,7 @@ export function DeviceDetailPanel({ device, risk, services, onClose }: Props) {
           />
           <span className="text-sm font-medium uppercase">{tier}</span>
           <span className="ml-auto text-2xl font-bold">
-            {score === null ? '—' : score.toFixed(2)}
+            {Number.isFinite(score) ? (score as number).toFixed(2) : '—'}
           </span>
         </div>
       </section>

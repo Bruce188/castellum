@@ -78,7 +78,7 @@ function App() {
         />
         {devices.length === 0 && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-gray-500 text-center max-w-md">
+            <p className="text-gray-500 text-center max-w-md pointer-events-auto">
               No devices yet. Submit a scan above or POST <code>/api/devices</code> to populate the graph.
             </p>
           </div>

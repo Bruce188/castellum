@@ -54,4 +54,28 @@ describe('<DeviceDetailPanel />', () => {
     fireEvent.click(screen.getByLabelText('Close panel'));
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
+
+  it('renders dash when risk.score is NaN', () => {
+    const nanRisk: DeviceRiskDto = { deviceId: 1, score: 'not-a-number', topCveIds: [] };
+    const { container } = render(
+      <DeviceDetailPanel device={device} risk={nanRisk} services={[]} onClose={() => {}} />
+    );
+    // Score badge carries text-2xl font-bold; match the dash there specifically
+    // (the device dl also contains '—' for missing mac/firstSeen/lastSeen).
+    const scoreBadge = container.querySelector('span.text-2xl');
+    expect(scoreBadge).not.toBeNull();
+    expect(scoreBadge?.textContent).toBe('—');
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
+  it('renders dash when risk.score is Infinity', () => {
+    const infRisk: DeviceRiskDto = { deviceId: 1, score: 'Infinity', topCveIds: [] };
+    const { container } = render(
+      <DeviceDetailPanel device={device} risk={infRisk} services={[]} onClose={() => {}} />
+    );
+    const scoreBadge = container.querySelector('span.text-2xl');
+    expect(scoreBadge).not.toBeNull();
+    expect(scoreBadge?.textContent).toBe('—');
+    expect(screen.queryByText(/Infinity/)).not.toBeInTheDocument();
+  });
 });

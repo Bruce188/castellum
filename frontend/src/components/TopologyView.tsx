@@ -8,6 +8,20 @@ import { buildSubnetEdges } from '../lib/subnetEdges';
 
 cytoscape.use(coseBilkent);
 
+// Local typing for cose-bilkent layout options. The package ships no types
+// (see @ts-expect-error on the import above) and cytoscape.LayoutOptions is a
+// union of built-in layout shapes that does not include 'cose-bilkent'.
+// Extend BaseLayoutOptions (which is one arm of the LayoutOptions union and
+// only requires `name: string`) so cy.layout() accepts the value without a
+// cast — this lets us drop the `as any` previously needed at the call site.
+interface CoseBilkentLayoutOptions extends cytoscape.BaseLayoutOptions {
+  name: 'cose-bilkent';
+  idealEdgeLength?: number;
+  nodeRepulsion?: number;
+  animate?: boolean;
+  randomize?: boolean;
+}
+
 interface Props {
   devices: Device[];
   risksById: Map<number, DeviceRiskDto>;
@@ -18,6 +32,17 @@ interface Props {
 export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
+  /**
+   * Callback refs (kept fresh by the two effects below) decouple the Cytoscape
+   * init effect from the parent's handler identity. Without this indirection,
+   * any change to onNodeClick or onBackgroundClick would change the init
+   * effect's dependency closure, forcing cy.destroy() + new cytoscape() on
+   * every parent re-render — losing layout state and breaking the React 19
+   * strict-mode `topologyView_doesNotCallDestroyOnRiskUpdate` invariant.
+   *
+   * The two micro-effects below patch the refs each render so the cytoscape
+   * tap handlers (which read .current) always invoke the latest props.
+   */
   const onNodeClickRef = useRef(onNodeClick);
   const onBgClickRef = useRef(onBackgroundClick);
 
@@ -82,14 +107,14 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
 
     cy.elements().remove();
     cy.add([...nodes, ...edges]);
-    cy.layout(({
+    const layoutOptions: CoseBilkentLayoutOptions = {
       name: 'cose-bilkent',
       idealEdgeLength: 100,
       nodeRepulsion: 4500,
       animate: false,
       randomize: false,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    }) as any).run();
+    };
+    cy.layout(layoutOptions).run();
   }, [devices, risksById]);
 
   return (
