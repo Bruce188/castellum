@@ -114,6 +114,52 @@ class BootstrapAdminTest {
     @Nested
     @SpringBootTest
     @TestPropertySource(properties = {
+        "castellum.admin.username=admin",
+        "castellum.admin.password-hash=$2a$12$newadminhash"
+    })
+    class AdminHashRotate {
+        @Autowired UserRepository userRepository;
+        @Autowired AuditLogRepository auditLogRepository;
+        @Autowired BootstrapAdminInitializer initializer;
+
+        @BeforeEach
+        void seedOldHash() {
+            userRepository.deleteAll();
+            User a = new User();
+            a.setUsername("admin");
+            a.setPasswordHash("$2a$12$oldadminhash");
+            a.setRole(Role.ADMIN);
+            a.setEnabled(true);
+            a.setCreatedAt(java.time.Instant.now());
+            userRepository.save(a);
+        }
+
+        @Test
+        void adminHashRotateAuditEventEmitted() {
+            initializer.bootstrap();
+            long count = auditLogRepository.findAll().stream()
+                .filter(r -> "ADMIN_HASH_ROTATE".equals(r.getAction()))
+                .count();
+            assertEquals(1L, count,
+                "Exactly one ADMIN_HASH_ROTATE audit row must be emitted on rotation");
+        }
+
+        @Test
+        void secondBootstrapWithSameHashIsIdempotent() {
+            initializer.bootstrap();    // rotates to new hash
+            long firstCount = auditLogRepository.findAll().stream()
+                .filter(r -> "ADMIN_HASH_ROTATE".equals(r.getAction())).count();
+            initializer.bootstrap();    // should be a no-op (hash already current)
+            long secondCount = auditLogRepository.findAll().stream()
+                .filter(r -> "ADMIN_HASH_ROTATE".equals(r.getAction())).count();
+            assertEquals(firstCount, secondCount,
+                "No additional ADMIN_HASH_ROTATE row when hash already matches");
+        }
+    }
+
+    @Nested
+    @SpringBootTest
+    @TestPropertySource(properties = {
         "castellum.admin.username=",
         "castellum.admin.password-hash=",
         "castellum.viewer.username=rotateviewer",

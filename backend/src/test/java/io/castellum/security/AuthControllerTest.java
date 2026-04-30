@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
@@ -117,6 +118,19 @@ class AuthControllerTest {
             .andExpect(header().string("Retry-After", "45"));
 
         verify(auditService).recordEvent(any(), eq("LOGIN_RATE_LIMIT"), eq("auth"), any(), any());
+    }
+
+    @Test
+    void login_disabledUser_returnsUnauthorized() throws Exception {
+        when(authManager.authenticate(any())).thenThrow(new DisabledException("user disabled"));
+
+        mvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"disabled-user\",\"password\":\"anything\"}"))
+            .andExpect(status().isUnauthorized());
+
+        verify(jwtService, never()).issueToken(any(), any());
+        verify(jwtService, never()).issueToken(any(), any(), anyInt());
     }
 
     @Test

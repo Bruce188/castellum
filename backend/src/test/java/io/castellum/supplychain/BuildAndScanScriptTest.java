@@ -29,6 +29,8 @@ class BuildAndScanScriptTest {
         String body = Files.readString(script());
         assertTrue(body.contains("trivy image"), "script must invoke trivy image");
         assertTrue(body.contains("--severity HIGH,CRITICAL"), "script must gate on HIGH,CRITICAL");
+        assertTrue(body.contains("--exit-code 1"),
+            "build-and-scan.sh must invoke trivy with --exit-code 1 to fail on findings");
         assertTrue(body.contains("cosign verify"), "script must reference cosign verify");
     }
 }

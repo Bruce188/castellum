@@ -25,6 +25,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -140,5 +141,14 @@ class PassiveScanControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"iface\":\"eth0\",\"durationSeconds\":10,\"sources\":[\"ARP\"]}"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(post("/api/discovery/passive")
+                .with(anonymous())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isUnauthorized());
     }
 }

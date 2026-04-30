@@ -29,6 +29,7 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -101,5 +102,35 @@ class RiskControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.epss.rowCount").value(100))
             .andExpect(jsonPath("$.kev.entryCount").value(50));
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mvc.perform(get("/api/risk/score")
+                .with(anonymous())
+                .param("cve", "CVE-2020-15778")
+                .param("device", "42"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewer_canRead_returns200() throws Exception {
+        Cve cve = new Cve();
+        cve.setCveId("CVE-2020-15778");
+        cve.setCvssV31Score(BigDecimal.valueOf(7.8));
+        when(cveRepo.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+
+        Device device = new Device();
+        device.setIpAddress("10.0.0.1");
+        device.setCriticality(Criticality.HIGH);
+        when(deviceRepo.findById(42L)).thenReturn(Optional.of(device));
+
+        EpssScore epss = new EpssScore(null, "CVE-2020-15778", BigDecimal.valueOf(0.5), BigDecimal.valueOf(0.9), LocalDate.now(), Instant.now());
+        when(epssRepo.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(epss));
+        when(kevRepo.existsByCveId("CVE-2020-15778")).thenReturn(true);
+
+        mvc.perform(get("/api/risk/score").param("cve", "CVE-2020-15778").param("device", "42"))
+            .andExpect(status().isOk());
     }
 }

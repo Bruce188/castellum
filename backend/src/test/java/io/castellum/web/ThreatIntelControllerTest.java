@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -79,5 +80,11 @@ class ThreatIntelControllerTest {
         mvc.perform(post("/api/threat-intel/export")
                 .contentType(MediaType.APPLICATION_JSON))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mvc.perform(post("/api/threat-intel/export").with(anonymous()))
+            .andExpect(status().isUnauthorized());
     }
 }

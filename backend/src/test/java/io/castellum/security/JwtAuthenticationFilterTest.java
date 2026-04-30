@@ -151,4 +151,34 @@ class JwtAuthenticationFilterTest {
         verify(auditService).recordEvent(eq("bob"), eq("AUTH_TOKEN_REJECT"), eq("auth"), eq(null),
             argThat(p -> p instanceof Map<?,?> m && "user_disabled_or_missing".equals(m.get("reason"))));
     }
+
+    @Test
+    void forgedToken_emitsAuthTokenRejectAudit() throws Exception {
+        // Real JwtService for parse-error realism — forged token will fail signature verification.
+        JwtService realJwtService = jwtService();
+        UserRepository mockUserRepo = mock(UserRepository.class);
+        AuditService mockAuditService = mock(AuditService.class);
+
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(
+            realJwtService, mockAuditService, mockUserRepo);
+
+        MockHttpServletRequest req = new MockHttpServletRequest();
+        req.addHeader("Authorization", "Bearer not-a-real-token");
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilterInternal(req, res, chain);
+
+        // Capture the payload Map and confirm it contains a "reason" String.
+        verify(mockAuditService).recordEvent(
+            eq("anonymous"),
+            eq("AUTH_TOKEN_REJECT"),
+            eq("auth"),
+            eq(null),
+            argThat(p -> p instanceof Map<?, ?> m
+                && m.get("reason") instanceof String
+                && !((String) m.get("reason")).isEmpty()));
+        assertNull(SecurityContextHolder.getContext().getAuthentication(),
+            "context must be cleared when token is forged/unparsable");
+    }
 }

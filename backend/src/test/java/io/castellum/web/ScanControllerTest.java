@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -112,5 +113,11 @@ class ScanControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"cidr\":\"10.0.0.0/24\",\"type\":\"PING_SWEEP\"}"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(get("/api/scans").with(anonymous()))
+            .andExpect(status().isUnauthorized());
     }
 }

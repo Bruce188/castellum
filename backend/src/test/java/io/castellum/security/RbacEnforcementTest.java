@@ -70,7 +70,10 @@ class RbacEnforcementTest {
             Arguments.of("GET",  "/api/risk/feeds/status",   "VIEWER+", 200),
             Arguments.of("POST", "/api/discovery/passive",   "ADMIN",   200),
             Arguments.of("POST", "/api/ot-probe",            "ADMIN",   502), // no real device
-            Arguments.of("GET",  "/api/graph/shortest-path", "VIEWER+", 400)
+            Arguments.of("GET",  "/api/graph/shortest-path", "VIEWER+", 400),
+            Arguments.of("POST", "/api/threat-intel/export",     "ADMIN", 200),
+            Arguments.of("POST", "/api/threat-intel/push/taxii", "ADMIN", 502),
+            Arguments.of("POST", "/api/threat-intel/push/misp",  "ADMIN", 502)
         );
     }
 
