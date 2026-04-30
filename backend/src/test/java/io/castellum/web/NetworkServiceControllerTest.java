@@ -23,6 +23,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -90,5 +91,11 @@ class NetworkServiceControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"deviceId\":1,\"port\":8080,\"protocol\":\"tcp\"}"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(get("/api/services").with(anonymous()))
+            .andExpect(status().isUnauthorized());
     }
 }

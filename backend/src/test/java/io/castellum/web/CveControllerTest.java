@@ -27,6 +27,7 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -95,5 +96,22 @@ class CveControllerTest {
             .andExpect(jsonPath("$[0].cveId").value("CVE-2020-15778"));
 
         verify(cveMatcher).findVulnerable(eq(cpe));
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(get("/api/cve/CVE-2020-15778").with(anonymous()))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewer_canRead_returns200() throws Exception {
+        Cve cve = buildCve("CVE-2020-15778");
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk());
     }
 }

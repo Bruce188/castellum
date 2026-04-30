@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -166,5 +167,14 @@ class OtProbeControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"host\":\"127.0.0.1\",\"port\":502,\"protocol\":\"MODBUS_TCP\"}"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(post("/api/ot-probe")
+                .with(anonymous())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isUnauthorized());
     }
 }

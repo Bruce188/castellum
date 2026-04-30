@@ -24,6 +24,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -110,5 +111,11 @@ class DeviceControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"ipAddress\":\"10.0.0.99\"}"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(get("/api/devices").with(anonymous()))
+            .andExpect(status().isUnauthorized());
     }
 }

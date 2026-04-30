@@ -31,6 +31,7 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -98,6 +99,23 @@ class RiskControllerDeviceRiskTest {
            .andExpect(jsonPath("$.score").isNotEmpty())
            .andExpect(jsonPath("$.topCveIds.length()").value(3))
            .andExpect(jsonPath("$.topCveIds[0]").value("CVE-2020-15778"));
+    }
+
+    @Test
+    void anon_returns401() throws Exception {
+        mvc.perform(get("/api/risk/device/1").with(anonymous()))
+           .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewer_canRead_returns200() throws Exception {
+        Device d = new Device(1L, "192.168.1.10", null, null, null, null, Criticality.MEDIUM);
+        when(deviceRepo.findById(1L)).thenReturn(Optional.of(d));
+        when(networkServiceRepository.findByDeviceId(1L)).thenReturn(List.of());
+
+        mvc.perform(get("/api/risk/device/1"))
+           .andExpect(status().isOk());
     }
 
     private static Cve makeCve(String id, double cvss) {
