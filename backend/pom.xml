@@ -193,6 +193,28 @@
 				</plugins>
 			</build>
 		</profile>
+		<!--
+			discovery-live: opt-in profile for the {@code LinuxHostSelfDiscoveryIT} live-host
+			integration test. Default {@code mvn test} skips it cleanly via
+			{@code @EnabledIfSystemProperty(named="discovery.live", matches="true")}.
+			Activate with {@code mvn test -P discovery-live}.
+		-->
+		<profile>
+			<id>discovery-live</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-surefire-plugin</artifactId>
+						<configuration>
+							<systemPropertyVariables>
+								<discovery.live>true</discovery.live>
+							</systemPropertyVariables>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
 	</profiles>
 
 </project>

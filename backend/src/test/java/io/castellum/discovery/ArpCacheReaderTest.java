@@ -17,7 +17,7 @@ class ArpCacheReaderTest {
     private static final String FIXTURE = "src/test/resources/discovery/proc-net-arp.txt";
 
     @Test
-    void read_validFixture_returnsEntries() {
+    void read_validFixture_returnsEntries() throws Exception {
         ArpCacheReader reader = new ArpCacheReader(FIXTURE);
         List<DiscoveredNeighbor> entries = reader.read();
         // Fixture has 2 valid entries: 192.168.1.1 and 192.168.1.99
@@ -28,14 +28,14 @@ class ArpCacheReaderTest {
     }
 
     @Test
-    void read_skipsHeaderRow() {
+    void read_skipsHeaderRow() throws Exception {
         ArpCacheReader reader = new ArpCacheReader(FIXTURE);
         List<DiscoveredNeighbor> entries = reader.read();
         assertThat(entries).noneMatch(e -> "IP address".equals(e.ipAddress()));
     }
 
     @Test
-    void read_filtersIncompleteMac() {
+    void read_filtersIncompleteMac() throws Exception {
         ArpCacheReader reader = new ArpCacheReader(FIXTURE);
         List<DiscoveredNeighbor> entries = reader.read();
         assertThat(entries).noneMatch(e -> "00:00:00:00:00:00".equalsIgnoreCase(e.macAddress()));

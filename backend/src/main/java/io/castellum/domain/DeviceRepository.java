@@ -11,4 +11,6 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     Optional<Device> findByIpAddress(String ipAddress);
 
     List<Device> findByIpAddressIn(Collection<String> ipAddresses);
+
+    List<Device> findByMacAddressIn(Collection<String> macAddresses);
 }

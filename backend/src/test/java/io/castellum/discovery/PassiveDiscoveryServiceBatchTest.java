@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -30,29 +32,35 @@ import static org.mockito.Mockito.when;
  * <p>Pure Mockito (no Spring context) — see Task D.1 for the lightening pattern.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class PassiveDiscoveryServiceBatchTest {
 
-    @Mock private ArpCacheReader arpReader;
+    @Mock private ArpReaderFactory arpFactory;
+    @Mock private ArpReader arpReader;
     @Mock private MdnsProbe mdnsProbe;
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpDecoder lldpDecoder;
     @Mock private CdpDecoder cdpDecoder;
     @Mock private DeviceUpsertService upsertService;
     @Mock private AuditService auditService;
+    @Mock private DiscoverySweepRecorder recorder;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
 
     private PassiveDiscoveryService service() {
-        return new PassiveDiscoveryService(arpReader, mdnsProbe, pcapSniffer,
-            lldpDecoder, cdpDecoder, upsertService, auditService, false, false, clock);
+        org.mockito.Mockito.when(recorder.start(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(42L);
+        org.mockito.Mockito.when(arpFactory.select()).thenReturn(arpReader);
+        return new PassiveDiscoveryService(arpFactory, mdnsProbe, pcapSniffer,
+            lldpDecoder, cdpDecoder, upsertService, auditService, recorder, false, false, true, clock);
     }
 
     @Test
-    void sweep_with100UniqueArpNeighbors_callsSaveAllOnceAndFindByIpAddressInOnce() {
+    void sweep_with100UniqueArpNeighbors_callsSaveAllOnceAndFindByIpAddressInOnce() throws Exception {
         List<DiscoveredNeighbor> neighbors = new ArrayList<>(100);
         for (int i = 0; i < 100; i++) {
             neighbors.add(new DiscoveredNeighbor("10.0.0." + i,
-                String.format("aa:bb:cc:dd:ee:%02x", i), "0x1", "0x2", "eth0"));
+                String.format("aa:bb:cc:dd:ee:%02x", i), "0x1", "0x2", "eth0", null));
         }
         when(arpReader.read()).thenReturn(neighbors);
         when(upsertService.upsertAll(anyList())).thenAnswer(inv -> {
@@ -77,11 +85,11 @@ class PassiveDiscoveryServiceBatchTest {
     }
 
     @Test
-    void sweep_with100UniqueArpNeighbors_neverCallsPerEventSaveOrFindByIpAddress() {
+    void sweep_with100UniqueArpNeighbors_neverCallsPerEventSaveOrFindByIpAddress() throws Exception {
         List<DiscoveredNeighbor> neighbors = new ArrayList<>(100);
         for (int i = 0; i < 100; i++) {
             neighbors.add(new DiscoveredNeighbor("10.1.0." + i,
-                String.format("bb:cc:dd:ee:ff:%02x", i), "0x1", "0x2", "eth0"));
+                String.format("bb:cc:dd:ee:ff:%02x", i), "0x1", "0x2", "eth0", null));
         }
         when(arpReader.read()).thenReturn(neighbors);
         when(upsertService.upsertAll(anyList())).thenAnswer(inv -> {
@@ -104,7 +112,7 @@ class PassiveDiscoveryServiceBatchTest {
     }
 
     @Test
-    void sweep_emptyDiscoveries_skipsRepositoryEntirely() {
+    void sweep_emptyDiscoveries_skipsRepositoryEntirely() throws Exception {
         when(arpReader.read()).thenReturn(List.of());
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));

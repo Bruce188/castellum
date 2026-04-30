@@ -29,10 +29,10 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(PassiveScanController.class)
-@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+@WebMvcTest(PassiveDiscoveryController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class, PassiveDiscoveryControllerTest.FixedClockConfig.class})
 @WithMockUser(roles = "ADMIN")
-class PassiveScanControllerTest {
+class PassiveDiscoveryControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
@@ -48,11 +48,23 @@ class PassiveScanControllerTest {
     JwtService jwtService;
     @MockBean
     UserRepository userRepository;
+    @MockBean
+    DiscoverySweepRepository sweepRepository;
+
+    @org.springframework.boot.test.context.TestConfiguration
+    static class FixedClockConfig {
+        @org.springframework.context.annotation.Bean
+        java.time.Clock clock() {
+            return java.time.Clock.fixed(
+                java.time.Instant.parse("2026-04-30T12:00:00Z"),
+                java.time.ZoneOffset.UTC);
+        }
+    }
 
     @Test
     void post_validRequest_returnsResponseBody() throws Exception {
         when(service.sweep(any())).thenReturn(
-            new PassiveDiscoveryResponse(2, List.of(1L, 2L), Map.of(DiscoverySource.ARP, 2)));
+            new PassiveDiscoveryResponse(2, List.of(1L, 2L), Map.of(DiscoverySource.ARP, 2), 42L));
 
         mockMvc.perform(post("/api/discovery/passive")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -86,7 +98,7 @@ class PassiveScanControllerTest {
     @Test
     void post_emptySources_defaultsToArpAndMdns() throws Exception {
         when(service.sweep(any())).thenReturn(
-            new PassiveDiscoveryResponse(0, List.of(), Map.of()));
+            new PassiveDiscoveryResponse(0, List.of(), Map.of(), null));
 
         mockMvc.perform(post("/api/discovery/passive")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -119,7 +131,7 @@ class PassiveScanControllerTest {
     @Test
     void post_omitsDuration_defaultsTo30() throws Exception {
         when(service.sweep(any())).thenReturn(
-            new PassiveDiscoveryResponse(0, List.of(), Map.of()));
+            new PassiveDiscoveryResponse(0, List.of(), Map.of(), null));
 
         mockMvc.perform(post("/api/discovery/passive")
                 .contentType(MediaType.APPLICATION_JSON)
