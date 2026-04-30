@@ -17,6 +17,7 @@ interface Props {
 
 export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<cytoscape.Core | null>(null);
   const onNodeClickRef = useRef(onNodeClick);
   const onBgClickRef = useRef(onBackgroundClick);
 
@@ -24,37 +25,13 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
   useEffect(() => { onNodeClickRef.current = onNodeClick; }, [onNodeClick]);
   useEffect(() => { onBgClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
 
+  // Init effect — runs ONCE on mount; instance lives in cyRef and is reused for every prop update.
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const nodes = devices.map(d => {
-      const risk = risksById.get(d.id);
-      const score = risk ? Number(risk.score) : null;
-      const tier = toRiskTier(score);
-      return {
-        data: {
-          id: String(d.id),
-          label: d.hostname ?? d.ipAddress,
-          ip: d.ipAddress,
-          riskTier: tier,
-        },
-        classes: `risk-${tier}`,
-      };
-    });
-
-    const edges = buildSubnetEdges(devices);
-
     const cy = cytoscape({
       container: containerRef.current,
-      elements: [...nodes, ...edges],
-      layout: ({
-        name: 'cose-bilkent',
-        idealEdgeLength: 100,
-        nodeRepulsion: 4500,
-        animate: false,
-        randomize: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      }) as any,
+      elements: [],
       style: [
         { selector: 'node', style: { label: 'data(label)', 'font-size': 12, 'text-valign': 'bottom' as const, 'text-halign': 'center' as const, width: 30, height: 30, 'border-width': 1, 'border-color': '#1f2937' } },
         { selector: 'node.risk-low',     style: { 'background-color': tierColor.low } },
@@ -74,7 +51,45 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       if (evt.target === cy) onBgClickRef.current();
     });
 
-    return () => { cy.destroy(); };
+    cyRef.current = cy;
+    return () => {
+      cy.destroy();
+      cyRef.current = null;
+    };
+  }, []);
+
+  // Sync effect — patches the existing cytoscape instance in place rather than tearing it down.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    const nodes = devices.map(d => {
+      const risk = risksById.get(d.id);
+      const score = risk ? Number(risk.score) : null;
+      const tier = toRiskTier(score);
+      return {
+        data: {
+          id: String(d.id),
+          label: d.hostname ?? d.ipAddress,
+          ip: d.ipAddress,
+          riskTier: tier,
+        },
+        classes: `risk-${tier}`,
+      };
+    });
+
+    const edges = buildSubnetEdges(devices);
+
+    cy.elements().remove();
+    cy.add([...nodes, ...edges]);
+    cy.layout(({
+      name: 'cose-bilkent',
+      idealEdgeLength: 100,
+      nodeRepulsion: 4500,
+      animate: false,
+      randomize: false,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any).run();
   }, [devices, risksById]);
 
   return (

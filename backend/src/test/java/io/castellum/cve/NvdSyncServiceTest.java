@@ -25,7 +25,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @DataJpaTest
-@Import({NvdSyncService.class, AuditService.class, JacksonAutoConfiguration.class})
+@Import({NvdSyncService.class, CveUpsertService.class, AuditService.class, JacksonAutoConfiguration.class})
 @TestPropertySource(properties = {
     "spring.flyway.enabled=true",
     "spring.flyway.locations=classpath:db/migration/h2",

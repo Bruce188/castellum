@@ -16,8 +16,14 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/risk")
@@ -76,20 +82,47 @@ public class RiskController {
 
         var services = networkServiceRepository.findByDeviceId(id);
         record Scored(String cveId, BigDecimal composite) {}
-        List<Scored> all = new ArrayList<>();
 
+        // First pass — collect matched CVEs per service plus a flat set of unique CVE IDs.
+        // The map preserves the per-service grouping so the composite-scoring pass can walk
+        // services in input order while the unique-set drives a single batch lookup per repo.
+        Map<Cve, Void> matchedCves = new LinkedHashMap<>();
+        Set<String> uniqueCveIds = new HashSet<>();
+        List<Cve> orderedCves = new ArrayList<>();
         for (var svc : services) {
             String cpe = CpeMapper.toCpe23(svc);
             if (cpe == null) continue;
             for (Cve cve : cveMatcher.findVulnerable(cpe)) {
-                double cvssN = CvssExtractor.normalized(cve);
-                double epss = epssRepo.findByCveId(cve.getCveId())
-                    .map(e -> e.getEpss().doubleValue()).orElse(0.0);
-                boolean kev = kevRepo.existsByCveId(cve.getCveId());
-                RiskScore rs = CompositeScorer.score(
-                    new RiskInputs(cvssN, epss, kev, device.getCriticality()));
-                all.add(new Scored(cve.getCveId(), rs.score()));
+                if (matchedCves.put(cve, null) == null) {
+                    orderedCves.add(cve);
+                }
+                uniqueCveIds.add(cve.getCveId());
             }
+        }
+
+        // Two batch lookups instead of per-CVE storms.
+        Map<String, BigDecimal> epssByCveId;
+        Set<String> kevSet;
+        if (uniqueCveIds.isEmpty()) {
+            epssByCveId = Map.of();
+            kevSet = Set.of();
+        } else {
+            epssByCveId = epssRepo.findAllByCveIdIn(uniqueCveIds).stream()
+                .collect(Collectors.toMap(EpssScore::getCveId, EpssScore::getEpss,
+                    (a, b) -> a, HashMap::new));
+            kevSet = kevRepo.findAllByCveIdIn(uniqueCveIds).stream()
+                .map(KevEntry::getCveId).collect(Collectors.toSet());
+        }
+
+        // Second pass — score using the in-memory maps.
+        List<Scored> all = new ArrayList<>(orderedCves.size());
+        for (Cve cve : orderedCves) {
+            double cvssN = CvssExtractor.normalized(cve);
+            double epss = epssByCveId.getOrDefault(cve.getCveId(), BigDecimal.ZERO).doubleValue();
+            boolean kev = kevSet.contains(cve.getCveId());
+            RiskScore rs = CompositeScorer.score(
+                new RiskInputs(cvssN, epss, kev, device.getCriticality()));
+            all.add(new Scored(cve.getCveId(), rs.score()));
         }
 
         if (all.isEmpty()) {

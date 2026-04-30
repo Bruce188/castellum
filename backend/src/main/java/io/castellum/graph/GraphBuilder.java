@@ -52,7 +52,7 @@ public class GraphBuilder {
         this.properties = properties;
     }
 
-    public Graph<DeviceVertex, AttackEdge> build() {
+    public BuiltGraph build() {
         Graph<DeviceVertex, AttackEdge> graph =
             new DirectedWeightedPseudograph<>(AttackEdge.class);
 
@@ -129,7 +129,7 @@ public class GraphBuilder {
 
         // WEAK_CRED_PATH: typed-but-empty seam — no signal source in v1; see analysis-v5 § 3.
 
-        return graph;
+        return new BuiltGraph(graph, Map.copyOf(vertexById));
     }
 
     static String extractIpv4Prefix24(String ip) {

@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+// @SpringBootTest required: AC#2 (Feature 4) verifies pcap4j JVM args reach Surefire only via full Spring context.
 @SpringBootTest
 class JvmFlagsSmokeTest {
 
