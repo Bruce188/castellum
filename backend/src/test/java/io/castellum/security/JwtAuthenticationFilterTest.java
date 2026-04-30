@@ -88,7 +88,7 @@ class JwtAuthenticationFilterTest {
         env.setActiveProfiles("test");
         JwtService svc = new JwtService(TEST_SECRET, 1, env);
         String token = svc.issueToken("alice", List.of("ADMIN"));
-        Thread.sleep(1500);
+        Thread.sleep(2500);
 
         JwtAuthenticationFilter filter = new JwtAuthenticationFilter(svc);
         MockHttpServletRequest req = new MockHttpServletRequest();
