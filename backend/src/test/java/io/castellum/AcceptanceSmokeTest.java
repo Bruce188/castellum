@@ -227,12 +227,22 @@ class AcceptanceSmokeTest {
         JsonNode root = mapper.readTree(result.getResponse().getContentAsString());
         assertThat(root.get("pathFound").asBoolean()).isTrue();
         assertThat(root.get("totalHops").asInt()).isGreaterThanOrEqualTo(1);
-        JsonNode firstHop = root.get("hops").get(0);
+        // AC#1 D1 Option R: structural integrity of the response — every non-source hop reports an
+        // attack technique (T1021 SAME_SUBNET / T1190|T1210 EXPLOITABLE_VULN / T1078 WEAK_CRED_PATH),
+        // proving the technique mapper is wired and the path metadata is not inert. A strict
+        // EXPLOITABLE_VULN-hop assertion would require cross-subnet vuln edges (out of model scope).
+        JsonNode hops = root.get("hops");
+        for (int i = 1; i < hops.size(); i++) {
+            JsonNode hop = hops.get(i);
+            assertThat(hop.get("edgeType").isNull()).as("hop[%d] edgeType non-null", i).isFalse();
+            assertThat(hop.get("attackTechniqueId").isNull()).as("hop[%d] technique non-null", i).isFalse();
+        }
+        JsonNode firstHop = hops.get(0);
         assertThat(firstHop.get("edgeType").isNull()).isTrue();
-        JsonNode lastHop = root.get("hops").get(root.get("hops").size() - 1);
+        JsonNode lastHop = hops.get(hops.size() - 1);
         BigDecimal cumulative = root.get("cumulativeRisk").decimalValue();
         assertThat(lastHop.get("cumulativeRisk").decimalValue()).isEqualByComparingTo(cumulative);
-        assertThat(root.get("hops").size()).isEqualTo(root.get("totalHops").asInt() + 1);
+        assertThat(hops.size()).isEqualTo(root.get("totalHops").asInt() + 1);
     }
 
     // ---- AC#1: Modbus probe decodes device identification ----

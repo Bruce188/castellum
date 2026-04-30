@@ -75,7 +75,7 @@ Application docs live under `documentation/`; the `docs/` directory is workflow 
 | Passive discovery | `discovery/` | pcap4j ARP sniffer, mDNS probe, LLDP/CDP decoder, ARP cache reader |
 | Threat-intel ingest | `cve/`, `risk/` | Local NVD mirror (V2.0 API), EPSS daily fetch, CISA KEV ingestion |
 | Risk scorer | `risk/CompositeScorer` | Pure function: CVSS × EPSS × KEV × criticality, range [0, 10] |
-| Attack graph | `graph/` | JGraphT DijkstraShortestPath; ATT&CK technique annotation per edge |
+| Attack graph | `graph/` | JGraphT DijkstraShortestPath; ATT&CK technique annotation per edge — see [documentation/attack-graph.md](documentation/attack-graph.md) |
 | OT/ICS probes | `ot/` | Read-only Modbus/TCP, DNP3, S7comm, BACnet/IP fingerprinters |
 | Threat-intel export | `threatintel/` | STIX 2.1 bundle assembly, TAXII 2.1 push, MISP push |
 | Auth/RBAC | `security/` | JWT HS256, BCrypt-12, ADMIN/VIEWER roles, bootstrap initializer |

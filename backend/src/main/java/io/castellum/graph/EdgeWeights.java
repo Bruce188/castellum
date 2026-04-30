@@ -16,22 +16,17 @@ import io.castellum.risk.RiskScore;
  */
 public final class EdgeWeights {
 
-    static final double SAME_SUBNET_WEIGHT = 1.0;
-    static final double SAME_SUBNET_RISK = 0.0;
-    static final double WEAK_CRED_PATH_WEIGHT = 2.0;
-    static final double WEAK_CRED_PATH_RISK = 5.0;
-
     private EdgeWeights() {
         throw new UnsupportedOperationException("static utility");
     }
 
-    public static double sameSubnetWeight() { return SAME_SUBNET_WEIGHT; }
+    public static double sameSubnetWeight() { return 1.0; }
 
-    public static double sameSubnetRisk() { return SAME_SUBNET_RISK; }
+    public static double sameSubnetRisk() { return 0.0; }
 
-    public static double weakCredPathWeight() { return WEAK_CRED_PATH_WEIGHT; }
+    public static double weakCredPathWeight() { return 2.0; }
 
-    public static double weakCredPathRisk() { return WEAK_CRED_PATH_RISK; }
+    public static double weakCredPathRisk() { return 5.0; }
 
     /**
      * Vuln edge weight = 11.0 - composite (strictly positive; inverts risk to effort).

@@ -1,6 +1,7 @@
 package io.castellum.web;
 
 import io.castellum.discovery.DiscoveryUnavailableException;
+import io.castellum.graph.GraphTooLargeException;
 import io.castellum.ot.OtProbeDecodeException;
 import io.castellum.ot.OtProbeNotImplementedException;
 import io.castellum.ot.OtProbeTimeoutException;
@@ -70,6 +71,13 @@ public class GlobalExceptionHandler {
         log.warn("Discovery unavailable: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
             .body(Map.of("error", "discovery_unavailable", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(GraphTooLargeException.class)
+    public ResponseEntity<Map<String, Object>> handleGraphTooLarge(GraphTooLargeException ex) {
+        log.warn("Graph too large: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(Map.of("error", "GRAPH_TOO_LARGE", "message", ex.getMessage()));
     }
 
     @ExceptionHandler(OtProbeUnreachableException.class)

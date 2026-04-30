@@ -1,5 +1,8 @@
 package io.castellum.graph;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.domain.Device;
@@ -12,6 +15,7 @@ import io.castellum.risk.KevEntryRepository;
 import org.jgrapht.Graph;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -20,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -96,20 +101,21 @@ class GraphBuilderTest {
         devs.add(device(3L, "10.0.0.12"));
         when(deviceRepo.findAll()).thenReturn(devs);
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
-
-        assertThat(g.edgeSet()).isEmpty();
-    }
-
-    @Test
-    void nonIpv4DeviceExcludedFromSubnetGrouping() {
-        Device a = device(1L, "fe80::1");
-        Device b = device(2L, "fe80::2");
-        when(deviceRepo.findAll()).thenReturn(List.of(a, b));
-
-        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
-
-        assertThat(g.edgeSet()).isEmpty();
+        ch.qos.logback.classic.Logger logger =
+            (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(GraphBuilder.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+            assertThat(g.edgeSet()).isEmpty();
+            assertThat(appender.list).anyMatch(evt ->
+                evt.getLevel() == Level.WARN
+                    && evt.getFormattedMessage().contains("exceeds subnet-cap"));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
@@ -199,6 +205,12 @@ class GraphBuilderTest {
         assertThat(vulnEdges).isEqualTo(5);
     }
 
+    /**
+     * Memoization key contract: {@link CompositeScoreMemoizer} caches keyed on
+     * {@code (cveId, deviceId)} — NOT {@code cveId} alone. Two same-subnet peers
+     * routing through the same target device + CVE pair share the cache; two
+     * different target devices for the same CVE do NOT.
+     */
     @Test
     void compositeScoreMemoizedPerBuild() {
         // Two same-subnet peers and one target — the per-(cve, deviceId) composite for the target
@@ -223,6 +235,46 @@ class GraphBuilderTest {
         // EPSS + KEV repos called exactly once for (CVE-MEMO-1, deviceId=3) despite two peers.
         verify(epssRepo, times(1)).findByCveId("CVE-MEMO-1");
         verify(kevRepo, times(1)).existsByCveId("CVE-MEMO-1");
+    }
+
+    @Test
+    void ipv6SameSlash64GetsSameSubnetEdge() {
+        Device a = device(1L, "2001:db8:0:1::10");
+        Device b = device(2L, "2001:db8:0:1::20");
+        when(deviceRepo.findAll()).thenReturn(List.of(a, b));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex va = new DeviceVertex(1L, "2001:db8:0:1::10");
+        DeviceVertex vb = new DeviceVertex(2L, "2001:db8:0:1::20");
+        AttackEdge ab = g.getEdge(va, vb);
+        assertThat(ab).isNotNull();
+        assertThat(ab.getType()).isEqualTo(EdgeType.SAME_SUBNET);
+    }
+
+    @Test
+    void ipv6CrossSlash64HasNoSameSubnetEdge() {
+        Device a = device(1L, "2001:db8:0:1::10");
+        Device b = device(2L, "2001:db8:0:2::10");
+        when(deviceRepo.findAll()).thenReturn(List.of(a, b));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        assertThat(g.edgeSet()).isEmpty();
+    }
+
+    @Test
+    void buildRejectsWhenDeviceCountExceedsMaxDevices() {
+        properties.setMaxDevices(2);
+        List<Device> devs = List.of(
+            device(1L, "10.0.0.10"),
+            device(2L, "10.0.0.11"),
+            device(3L, "10.0.0.12"));
+        when(deviceRepo.findAll()).thenReturn(devs);
+
+        assertThatThrownBy(() -> builder.build())
+            .isInstanceOf(GraphTooLargeException.class)
+            .hasMessageContaining("max-devices");
     }
 
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
