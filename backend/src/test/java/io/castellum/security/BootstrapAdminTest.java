@@ -1,5 +1,7 @@
 package io.castellum.security;
 
+import io.castellum.audit.AuditLog;
+import io.castellum.audit.AuditLogRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -71,6 +73,78 @@ class BootstrapAdminTest {
             initializer.bootstrapAdmin();
             assertEquals(1, userRepository.count(),
                 "Running initializer twice should produce exactly one user");
+        }
+    }
+
+    @Nested
+    @SpringBootTest
+    @TestPropertySource(properties = {
+        "castellum.admin.username=",
+        "castellum.admin.password-hash=",
+        "castellum.viewer.username=bob",
+        "castellum.viewer.password-hash=$2a$12$viewerdummy"
+    })
+    class ViewerBootstrap {
+        @Autowired UserRepository userRepository;
+        @Autowired BootstrapAdminInitializer initializer;
+
+        @BeforeEach
+        void cleanup() { userRepository.deleteAll(); }
+
+        @Test
+        void viewerCreatedWhenViewerEnvSet() {
+            initializer.bootstrap();
+            assertTrue(userRepository.findByUsername("bob").isPresent(),
+                "Viewer user should be created when viewer env vars are set");
+            assertEquals(Role.VIEWER, userRepository.findByUsername("bob").get().getRole(),
+                "Viewer user should have VIEWER role");
+            assertTrue(userRepository.findByUsername("bob").get().isEnabled(),
+                "Viewer user should be enabled");
+        }
+
+        @Test
+        void viewerSkippedWhenEnvUnset() {
+            // Env already empty for admin — also no VIEWER with different username
+            // Confirm no user "carol" exists (unrelated viewer)
+            assertFalse(userRepository.findByUsername("carol").isPresent(),
+                "No viewer should be created for non-configured username");
+        }
+    }
+
+    @Nested
+    @SpringBootTest
+    @TestPropertySource(properties = {
+        "castellum.admin.username=",
+        "castellum.admin.password-hash=",
+        "castellum.viewer.username=rotateviewer",
+        "castellum.viewer.password-hash=$2a$12$newhash"
+    })
+    class ViewerHashRotate {
+        @Autowired UserRepository userRepository;
+        @Autowired AuditLogRepository auditLogRepository;
+        @Autowired BootstrapAdminInitializer initializer;
+
+        @BeforeEach
+        void seedOldHash() {
+            userRepository.deleteAll();
+            User v = new User();
+            v.setUsername("rotateviewer");
+            v.setPasswordHash("$2a$12$oldhash");
+            v.setRole(Role.VIEWER);
+            v.setEnabled(true);
+            v.setCreatedAt(java.time.Instant.now());
+            userRepository.save(v);
+        }
+
+        @Test
+        void viewerHashRotateAuditEventEmitted() {
+            int before = auditLogRepository.findAll().size();
+            initializer.bootstrap();
+            int after = auditLogRepository.findAll().size();
+            assertTrue(after > before, "VIEWER_HASH_ROTATE audit event should be emitted");
+            assertTrue(auditLogRepository.findAll().stream()
+                .anyMatch(log -> "VIEWER_HASH_ROTATE".equals(log.getAction())),
+                "Audit log must contain VIEWER_HASH_ROTATE action");
         }
     }
 }

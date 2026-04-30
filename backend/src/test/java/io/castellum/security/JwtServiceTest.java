@@ -1,6 +1,7 @@
 package io.castellum.security;
 
 import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.SignatureException;
 import org.junit.jupiter.api.Test;
@@ -78,5 +79,37 @@ class JwtServiceTest {
         // no active profiles — not "test"
         assertThrows(IllegalStateException.class,
             () -> new JwtService(JwtService.DEFAULT_PLACEHOLDER, 3600, env));
+    }
+
+    @Test
+    void parseRejectsNonHs256Token() {
+        JwtService svc = defaultService();
+        // Build a 64-byte key (HS512 minimum) — completely different bytes from the service key
+        byte[] hs512Bytes = new byte[64];
+        new java.util.Random(42).nextBytes(hs512Bytes);
+        javax.crypto.SecretKey hs512Key = io.jsonwebtoken.security.Keys.hmacShaKeyFor(hs512Bytes);
+        String forged = Jwts.builder()
+                .subject("alice")
+                .issuer("castellum")
+                .signWith(hs512Key, Jwts.SIG.HS512)
+                .compact();
+        assertThrows(JwtException.class, () -> svc.parse(forged),
+            "parse() must reject non-HS256 tokens");
+    }
+
+    @Test
+    void parseAcceptsTokenVersionClaim() {
+        JwtService svc = defaultService();
+        String token = svc.issueToken("alice", List.of("ADMIN"), 5);
+        assertEquals(5, svc.extractTokenVersion(token),
+            "extractTokenVersion must return the tv claim value");
+    }
+
+    @Test
+    void extractTokenVersionDefaultsToZeroForLegacyToken() {
+        JwtService svc = defaultService();
+        String token = svc.issueToken("alice", List.of("ADMIN"));
+        assertEquals(0, svc.extractTokenVersion(token),
+            "extractTokenVersion must default to 0 for tokens without tv claim");
     }
 }

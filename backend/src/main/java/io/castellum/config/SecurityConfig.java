@@ -15,9 +15,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 
 @Configuration
-@EnableMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
@@ -38,6 +39,14 @@ public class SecurityConfig {
             RbacAuthenticationEntryPoint entry) throws Exception {
         http
             .cors(Customizer.withDefaults())
+            .headers(h -> h
+                .contentSecurityPolicy(c -> c.policyDirectives("default-src 'self'"))
+                .httpStrictTransportSecurity(s -> s
+                    .requestMatcher(AnyRequestMatcher.INSTANCE)
+                    .includeSubDomains(true)
+                    .maxAgeInSeconds(31536000))
+                .frameOptions(f -> f.deny()))
+            // CSRF disabled — stateless JWT API surface; no session, no cookie auth.
             .csrf(c -> c.disable())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(a -> a

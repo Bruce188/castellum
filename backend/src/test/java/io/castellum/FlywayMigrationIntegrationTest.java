@@ -18,6 +18,9 @@ import io.castellum.risk.EpssScore;
 import io.castellum.risk.EpssScoreRepository;
 import io.castellum.risk.KevEntry;
 import io.castellum.risk.KevEntryRepository;
+import io.castellum.security.Role;
+import io.castellum.security.User;
+import io.castellum.security.UserRepository;
 import io.castellum.threatintel.ThreatIntelPushRecord;
 import io.castellum.threatintel.ThreatIntelPushRepository;
 import org.junit.jupiter.api.Test;
@@ -76,6 +79,9 @@ class FlywayMigrationIntegrationTest {
 
     @Autowired
     private ThreatIntelPushRepository threatIntelPushRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -209,5 +215,29 @@ class FlywayMigrationIntegrationTest {
         assertEquals(true, row.get("enabled"), "enabled must be true");
         assertEquals("$2a$12$dummyhash", row.get("password_hash"), "password_hash must round-trip");
         assertNotNull(row.get("created_at"), "created_at must be non-null");
+    }
+
+    @Test
+    void usersV10TokenVersionRoundTrips() {
+        // Persist a User and assert tokenVersion defaults to 0
+        User u = new User("rt-user", "$2a$12$x", Role.VIEWER, true, Instant.now());
+        userRepository.saveAndFlush(u);
+        userRepository.findById(u.getId()).ifPresentOrElse(loaded -> {
+            assertEquals(0, loaded.getTokenVersion(), "tokenVersion must default to 0 after V10 migration");
+
+            // Now update tokenVersion and round-trip
+            loaded.setTokenVersion(7);
+            userRepository.saveAndFlush(loaded);
+            userRepository.findById(loaded.getId()).ifPresent(reloaded ->
+                assertEquals(7, reloaded.getTokenVersion(), "tokenVersion must round-trip after update")
+            );
+        }, () -> fail("User must be retrievable after persist"));
+
+        // Also verify column metadata via JDBC
+        Number columnCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE UPPER(TABLE_NAME) = 'USERS' AND UPPER(COLUMN_NAME) = 'TOKEN_VERSION'",
+            Number.class);
+        assertNotNull(columnCount, "INFORMATION_SCHEMA.COLUMNS query must return a result");
+        assertTrue(columnCount.intValue() > 0, "token_version column must exist in users table per V10 migration");
     }
 }

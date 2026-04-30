@@ -25,19 +25,34 @@ public class AuthController {
     private final AuthenticationManager authManager;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final LoginRateLimiter rateLimiter;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private UserRepository userRepository;
 
-    public AuthController(AuthenticationManager authManager, JwtService jwtService, AuditService auditService) {
+    public AuthController(AuthenticationManager authManager, JwtService jwtService,
+                          AuditService auditService, LoginRateLimiter rateLimiter) {
         this.authManager = authManager;
         this.jwtService = jwtService;
         this.auditService = auditService;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest body, HttpServletRequest request) {
         String ip = request.getRemoteAddr();
+
+        if (!rateLimiter.tryAcquire(ip)) {
+            long retryAfter = rateLimiter.retryAfterSeconds(ip);
+            String actor = body.username() == null || body.username().isBlank()
+                    ? "<unknown>" : body.username();
+            auditService.recordEvent(actor, "LOGIN_RATE_LIMIT", "auth", actor,
+                    Map.of("ip", ip == null ? "" : ip, "retryAfter", retryAfter));
+            return ResponseEntity.status(429)
+                    .header("Retry-After", String.valueOf(retryAfter))
+                    .build();
+        }
+
         try {
             Authentication auth = authManager.authenticate(
                     new UsernamePasswordAuthenticationToken(body.username(), body.password()));
@@ -45,7 +60,14 @@ public class AuthController {
                     .map(GrantedAuthority::getAuthority)
                     .map(a -> a.startsWith("ROLE_") ? a.substring(5) : a)
                     .toList();
-            String token = jwtService.issueToken(body.username(), roles);
+            String token;
+            if (userRepository != null) {
+                token = userRepository.findByUsername(body.username())
+                        .map(user -> jwtService.issueToken(body.username(), roles, user.getTokenVersion()))
+                        .orElseGet(() -> jwtService.issueToken(body.username(), roles));
+            } else {
+                token = jwtService.issueToken(body.username(), roles);
+            }
             Instant expiresAt = Instant.now().plusSeconds(jwtService.ttlSeconds());
             if (userRepository != null) {
                 userRepository.findByUsername(body.username()).ifPresent(user -> {
@@ -59,6 +81,7 @@ public class AuthController {
         } catch (BadCredentialsException e) {
             String actor = body.username() == null || body.username().isBlank()
                     ? "<unknown>" : body.username();
+            rateLimiter.recordFailure(ip);
             auditService.recordEvent(actor, "LOGIN_FAIL", "auth", actor,
                     Map.of("ip", ip == null ? "" : ip, "reason", "bad_credentials"));
             throw e;

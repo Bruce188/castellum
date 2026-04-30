@@ -21,43 +21,59 @@ public class BootstrapAdminInitializer {
     private final AuditService auditService;
     private final String adminUsername;
     private final String adminPasswordHash;
+    private final String viewerUsername;
+    private final String viewerPasswordHash;
 
     public BootstrapAdminInitializer(
             UserRepository repository,
             AuditService auditService,
             @Value("${castellum.admin.username:#{null}}") String adminUsername,
-            @Value("${castellum.admin.password-hash:#{null}}") String adminPasswordHash) {
+            @Value("${castellum.admin.password-hash:#{null}}") String adminPasswordHash,
+            @Value("${castellum.viewer.username:#{null}}") String viewerUsername,
+            @Value("${castellum.viewer.password-hash:#{null}}") String viewerPasswordHash) {
         this.repository = repository;
         this.auditService = auditService;
         this.adminUsername = adminUsername;
         this.adminPasswordHash = adminPasswordHash;
+        this.viewerUsername = viewerUsername;
+        this.viewerPasswordHash = viewerPasswordHash;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     @Transactional
+    public void bootstrap() {
+        mintOrRotate(adminUsername, adminPasswordHash, Role.ADMIN, "ADMIN_HASH_ROTATE");
+        mintOrRotate(viewerUsername, viewerPasswordHash, Role.VIEWER, "VIEWER_HASH_ROTATE");
+    }
+
+    /** Kept for backward compatibility with tests that call this by name. */
     public void bootstrapAdmin() {
-        if (adminUsername == null || adminUsername.isBlank()
-                || adminPasswordHash == null || adminPasswordHash.isBlank()) {
-            log.warn("Bootstrap admin skipped: CASTELLUM_ADMIN_USERNAME or CASTELLUM_ADMIN_PASSWORD_HASH not set");
+        bootstrap();
+    }
+
+    private void mintOrRotate(String username, String passwordHash, Role role, String rotateAuditAction) {
+        if (username == null || username.isBlank()
+                || passwordHash == null || passwordHash.isBlank()) {
+            log.warn("Bootstrap {} skipped: env not set", role);
             return;
         }
-        repository.findByUsername(adminUsername).ifPresentOrElse(existing -> {
-            if (!existing.getPasswordHash().equals(adminPasswordHash)) {
-                auditService.recordEvent("bootstrap", "ADMIN_HASH_ROTATE", "user", adminUsername,
-                        Map.of("username", adminUsername));
-                existing.setPasswordHash(adminPasswordHash);
+        repository.findByUsername(username).ifPresentOrElse(existing -> {
+            if (!existing.getPasswordHash().equals(passwordHash)) {
+                auditService.recordEvent("bootstrap", rotateAuditAction, "user", username,
+                        Map.of("username", username));
+                existing.setPasswordHash(passwordHash);
                 repository.save(existing);
-                log.info("Bootstrap admin password hash updated for {}", adminUsername);
+                log.info("Bootstrap {} password hash updated for {}", role, username);
             }
         }, () -> {
             User u = new User();
-            u.setUsername(adminUsername);
-            u.setPasswordHash(adminPasswordHash);
-            u.setRole(Role.ADMIN);
+            u.setUsername(username);
+            u.setPasswordHash(passwordHash);
+            u.setRole(role);
             u.setEnabled(true);
             u.setCreatedAt(Instant.now());
             repository.save(u);
-            log.info("Bootstrap admin created: {}", adminUsername);
+            log.info("Bootstrap {} created: {}", role, username);
         });
     }
 }

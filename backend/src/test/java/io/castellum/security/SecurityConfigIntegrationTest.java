@@ -1,12 +1,15 @@
 package io.castellum.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.castellum.config.CorsConfig;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -97,5 +100,34 @@ class SecurityConfigIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void actuatorHealthAnonymousResponseHasNoComponents() throws Exception {
+        mvc.perform(get("/actuator/health"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("UP"))
+            .andExpect(jsonPath("$.components").doesNotExist());
+    }
+
+    @Test
+    void apiResponseHasSecurityHeaders() throws Exception {
+        mvc.perform(get("/api/devices"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(header().exists("Content-Security-Policy"))
+            .andExpect(header().exists("Strict-Transport-Security"))
+            .andExpect(header().exists("X-Frame-Options"));
+    }
+
+    @Test
+    void malformedCorsOriginFailsContextLoad() {
+        ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withUserConfiguration(CorsConfig.class)
+            .withPropertyValues("castellum.cors.allowed-origins=*.example.com");
+        runner.run(ctx -> {
+            Assertions.assertThat(ctx).hasFailed();
+            Assertions.assertThat(ctx.getStartupFailure())
+                .hasMessageContaining("CORS wildcard subdomain forbidden");
+        });
     }
 }

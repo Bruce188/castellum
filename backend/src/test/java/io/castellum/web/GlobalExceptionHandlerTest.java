@@ -11,6 +11,7 @@ import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
+import io.castellum.security.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -48,7 +49,9 @@ class GlobalExceptionHandlerTest {
     private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
-    
+    @MockBean
+    UserRepository userRepository;
+
     @Test
     void methodArgumentNotValid_returns400WithErrorBody() throws Exception {
         // POST with invalid port triggers MethodArgumentNotValidException
