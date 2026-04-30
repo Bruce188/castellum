@@ -156,11 +156,14 @@ public class PassiveDiscoveryService {
             }
         }
 
-        // Upsert unique discoveries
+        // Upsert unique discoveries — single batch round-trip via upsertAll
         List<Long> deviceIds = new ArrayList<>();
-        for (Discovery disc : discoveredByIp.values()) {
-            Device d = upsertService.upsert(disc);
-            deviceIds.add(d.getId());
+        if (!discoveredByIp.isEmpty()) {
+            List<Discovery> batch = new ArrayList<>(discoveredByIp.values());
+            List<Device> persisted = upsertService.upsertAll(batch);
+            for (Device d : persisted) {
+                deviceIds.add(d.getId());
+            }
         }
 
         // Emit audit event

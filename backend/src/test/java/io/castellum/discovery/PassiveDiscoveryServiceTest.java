@@ -1,54 +1,75 @@
 package io.castellum.discovery;
 
-import io.castellum.audit.AuditLog;
 import io.castellum.audit.AuditService;
-import io.castellum.domain.DeviceRepository;
+import io.castellum.domain.Device;
+import io.castellum.risk.Criticality;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-@SpringBootTest
+/**
+ * Plain Mockito version of the discovery sweep tests. Was previously
+ * {@code @SpringBootTest} which spun up the full Spring context (~3s startup).
+ * Behaviour-identical assertions; switching to {@link MockitoExtension} drops
+ * the suite to under 500ms.
+ */
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class PassiveDiscoveryServiceTest {
 
-    @Autowired
+    @Mock private ArpCacheReader arpReader;
+    @Mock private MdnsProbe mdnsProbe;
+    @Mock private PcapSniffer pcapSniffer;
+    @Mock private LldpDecoder lldpDecoder;
+    @Mock private CdpDecoder cdpDecoder;
+    @Mock private DeviceUpsertService upsertService;
+    @Mock private AuditService auditService;
+
     private PassiveDiscoveryService service;
-
-    @Autowired
-    private DeviceRepository deviceRepo;
-
-    @MockBean
-    private ArpCacheReader arpReader;
-
-    @MockBean
-    private MdnsProbe mdnsProbe;
-
-    @MockBean
-    private PcapSniffer pcapSniffer;
-
-    @MockBean
-    private LldpDecoder lldpDecoder;
-
-    @MockBean
-    private CdpDecoder cdpDecoder;
-
-    @MockBean
-    private AuditService auditService;
+    private Clock clock;
 
     @BeforeEach
     void setUp() {
-        deviceRepo.deleteAll();
+        clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+        service = new PassiveDiscoveryService(
+            arpReader, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            upsertService, auditService,
+            false /* lldpEnabled */,
+            false /* cdpEnabled */,
+            clock
+        );
+        // upsertAll returns one Device per Discovery, with sequential ids — preserves input order
+        when(upsertService.upsertAll(anyList())).thenAnswer(inv -> {
+            List<Discovery> in = inv.getArgument(0);
+            List<Device> out = new ArrayList<>(in.size());
+            long next = 1L;
+            for (Discovery d : in) {
+                out.add(new Device(next++, d.ipAddress(), d.hostname(), d.macAddress(),
+                    d.observedAt(), d.observedAt(), Criticality.MEDIUM));
+            }
+            return out;
+        });
         when(auditService.recordEvent(any(), any(), any(), any(), any())).thenReturn(null);
     }
 

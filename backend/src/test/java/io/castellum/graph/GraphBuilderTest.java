@@ -64,7 +64,7 @@ class GraphBuilderTest {
         Device b = device(2L, "10.0.0.20");
         when(deviceRepo.findAll()).thenReturn(List.of(a, b));
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         DeviceVertex va = new DeviceVertex(1L, "10.0.0.10");
         DeviceVertex vb = new DeviceVertex(2L, "10.0.0.20");
@@ -82,7 +82,7 @@ class GraphBuilderTest {
         Device b = device(2L, "10.0.1.10");
         when(deviceRepo.findAll()).thenReturn(List.of(a, b));
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         assertThat(g.edgeSet()).isEmpty();
     }
@@ -96,7 +96,7 @@ class GraphBuilderTest {
         devs.add(device(3L, "10.0.0.12"));
         when(deviceRepo.findAll()).thenReturn(devs);
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         assertThat(g.edgeSet()).isEmpty();
     }
@@ -107,7 +107,7 @@ class GraphBuilderTest {
         Device b = device(2L, "fe80::2");
         when(deviceRepo.findAll()).thenReturn(List.of(a, b));
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         assertThat(g.edgeSet()).isEmpty();
     }
@@ -128,7 +128,7 @@ class GraphBuilderTest {
         cve.setRawJson("{}");
         when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of(cve));
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         DeviceVertex vs = new DeviceVertex(1L, "10.0.0.10");
         DeviceVertex vt = new DeviceVertex(2L, "10.0.0.20");
@@ -157,7 +157,7 @@ class GraphBuilderTest {
         cve.setRawJson("{}");
         when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of(cve));
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         DeviceVertex vs = new DeviceVertex(1L, "10.0.0.10");
         DeviceVertex vt = new DeviceVertex(2L, "10.0.0.20");
@@ -190,7 +190,7 @@ class GraphBuilderTest {
         }
         when(cveMatcher.findVulnerable(anyString())).thenReturn(seven);
 
-        Graph<DeviceVertex, AttackEdge> g = builder.build();
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
 
         DeviceVertex vs = new DeviceVertex(1L, "10.0.0.10");
         DeviceVertex vt = new DeviceVertex(2L, "10.0.0.20");

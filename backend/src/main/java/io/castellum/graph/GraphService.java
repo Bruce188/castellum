@@ -4,7 +4,6 @@ import io.castellum.audit.AuditService;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.graph.dto.HopDto;
 import io.castellum.graph.dto.ShortestPathResponse;
-import org.jgrapht.Graph;
 import org.jgrapht.GraphPath;
 import org.springframework.stereotype.Service;
 
@@ -46,13 +45,14 @@ public class GraphService {
         deviceRepository.findById(toId)
             .orElseThrow(() -> new NoSuchElementException("device not found: " + toId));
 
-        Graph<DeviceVertex, AttackEdge> graph = graphBuilder.build();
-
-        DeviceVertex fromVertex = findVertex(graph, fromId);
-        DeviceVertex toVertex = findVertex(graph, toId);
+        BuiltGraph built = graphBuilder.build();
+        DeviceVertex fromVertex = built.vertexById().get(fromId);
+        DeviceVertex toVertex = built.vertexById().get(toId);
+        if (fromVertex == null) throw new NoSuchElementException("device not found in graph: " + fromId);
+        if (toVertex == null) throw new NoSuchElementException("device not found in graph: " + toId);
 
         Optional<GraphPath<DeviceVertex, AttackEdge>> path =
-            shortestPathFinder.findPath(graph, fromVertex, toVertex);
+            shortestPathFinder.findPath(built.graph(), fromVertex, toVertex);
 
         ShortestPathResponse response;
         if (path.isEmpty()) {
@@ -64,7 +64,7 @@ public class GraphService {
                 ZERO, ZERO, null));
             BigDecimal cumulative = ZERO;
             for (AttackEdge edge : path.get().getEdgeList()) {
-                DeviceVertex dest = graph.getEdgeTarget(edge);
+                DeviceVertex dest = built.graph().getEdgeTarget(edge);
                 AttackTechnique tech = AttackTechniqueMapper.forEdgeType(edge.getType());
                 BigDecimal edgeRisk = round2(edge.getRiskContribution());
                 cumulative = round2(cumulative.doubleValue() + edge.getRiskContribution());
@@ -84,13 +84,6 @@ public class GraphService {
             fromId + "-" + toId, payload);
 
         return response;
-    }
-
-    private static DeviceVertex findVertex(Graph<DeviceVertex, AttackEdge> graph, long deviceId) {
-        for (DeviceVertex v : graph.vertexSet()) {
-            if (v.deviceId() == deviceId) return v;
-        }
-        throw new NoSuchElementException("device not found in graph: " + deviceId);
     }
 
     private static BigDecimal round2(double v) {

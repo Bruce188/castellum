@@ -16,7 +16,6 @@ function readStoredId(): number | null {
 }
 
 export function useScanStatus(scanId: number | null): Scan | null {
-  const initialId = scanId ?? readStoredId();
   const [scan, setScan] = useState<Scan | null>(null);
 
   useEffect(() => {
@@ -50,13 +49,6 @@ export function useScanStatus(scanId: number | null): Scan | null {
       if (handle !== null) window.clearInterval(handle);
     };
   }, [scanId]);
-
-  // initialId surfaced via state on first paint when arg is null.
-  useEffect(() => {
-    if (scanId === null && initialId !== null && scan === null) {
-      void api.getScan(initialId).then(s => setScan(s)).catch(() => { /* noop */ });
-    }
-  }, [scanId, initialId, scan]);
 
   return scan;
 }

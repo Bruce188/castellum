@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:bundle": "vite build && vitest run --testNamePattern=bundle"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.4",
