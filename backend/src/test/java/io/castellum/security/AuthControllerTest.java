@@ -2,7 +2,7 @@ package io.castellum.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.castellum.audit.AuditService;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -44,6 +44,17 @@ class AuthControllerTest {
 
     @MockBean
     CastellumUserDetailsService castellumUserDetailsService;
+
+    @MockBean
+    UserRepository userRepository;
+
+    @MockBean
+    LoginRateLimiter rateLimiter;
+
+    @BeforeEach
+    void setupRateLimiter() {
+        when(rateLimiter.tryAcquire(any())).thenReturn(true);
+    }
 
     @Test
     void validCredentialsReturns200WithToken() throws Exception {
@@ -95,8 +106,32 @@ class AuthControllerTest {
     }
 
     @Test
-    @Disabled("rate-limit deferred to follow-up")
-    void placeholderRateLimitTestSkipped() {
-        throw new UnsupportedOperationException("rate-limit not implemented; do not remove @Disabled without implementation");
+    void eleventhLoginInWindowReturns429WithRetryAfter() throws Exception {
+        when(rateLimiter.tryAcquire(any())).thenReturn(false);
+        when(rateLimiter.retryAfterSeconds(any())).thenReturn(45L);
+
+        mvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"alice\",\"password\":\"pw\"}"))
+            .andExpect(status().is(429))
+            .andExpect(header().string("Retry-After", "45"));
+
+        verify(auditService).recordEvent(any(), eq("LOGIN_RATE_LIMIT"), eq("auth"), any(), any());
+    }
+
+    @Test
+    void successfulLoginsDoNotConsumeRateLimit() throws Exception {
+        var authResult = new UsernamePasswordAuthenticationToken(
+            "alice", null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+        when(authManager.authenticate(any())).thenReturn(authResult);
+        when(jwtService.issueToken(eq("alice"), anyList())).thenReturn("jwt-fixture");
+        when(jwtService.ttlSeconds()).thenReturn(3600L);
+
+        mvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"alice\",\"password\":\"pw\"}"))
+            .andExpect(status().isOk());
+
+        verify(rateLimiter, never()).recordFailure(any());
     }
 }

@@ -7,6 +7,7 @@ import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
+import io.castellum.security.UserRepository;
 import io.castellum.threatintel.ThreatIntelService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +35,7 @@ class ThreatIntelControllerTest {
     @MockBean CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
+    @MockBean UserRepository userRepository;
 
     @Test
     @WithMockUser(roles = "ADMIN")

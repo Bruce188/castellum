@@ -10,6 +10,7 @@ import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
+import io.castellum.security.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,7 +48,9 @@ class ScanControllerTest {
     private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
-    
+    @MockBean
+    UserRepository userRepository;
+
     @Test
     void postScan_validRequest_returns202WithId() throws Exception {
         Scan saved = new Scan();

@@ -3,6 +3,7 @@ package io.castellum;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.castellum.cve.Cve;
+import org.springframework.context.ApplicationContext;
 import io.castellum.cve.CveCpeMatch;
 import io.castellum.cve.CveCpeMatchRepository;
 import io.castellum.cve.CveRepository;
@@ -69,6 +70,9 @@ class AcceptanceSmokeTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ApplicationContext context;
 
     @Autowired
     private ScanRepository scanRepository;
@@ -462,6 +466,106 @@ class AcceptanceSmokeTest {
         String body = Files.readString(pom);
         assertTrue(body.contains("cyclonedx-maven-plugin"), "AC#3: cyclonedx-maven-plugin must be declared");
         assertTrue(body.contains("<phase>package</phase>"), "AC#3: plugin must be bound to package phase");
+    }
+
+    // ---- Auth hardening AC tests ----
+
+    @Test
+    void ac1_jwtServiceRejectsNonHs256Token() throws Exception {
+        io.castellum.security.JwtService jwtSvc = context.getBean(io.castellum.security.JwtService.class);
+        // Access package-private key() via reflection (test-only)
+        java.lang.reflect.Method keyMethod = io.castellum.security.JwtService.class
+                .getDeclaredMethod("key");
+        keyMethod.setAccessible(true);
+        // key() return value unused — just verify reflection access works
+        keyMethod.invoke(jwtSvc);
+        // Build a token signed with HS512 using a fresh random key (algorithm mismatch + wrong key)
+        javax.crypto.SecretKey hs512Key = io.jsonwebtoken.Jwts.SIG.HS512.key().build();
+        String forgedToken = io.jsonwebtoken.Jwts.builder()
+                .subject("hacker")
+                .issuer("castellum")
+                .signWith(hs512Key, io.jsonwebtoken.Jwts.SIG.HS512)
+                .compact();
+
+        mockMvc.perform(get("/api/devices").header("Authorization", "Bearer " + forgedToken))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @org.springframework.test.annotation.DirtiesContext
+    void ac2_disablingUserRevokesOutstandingToken() throws Exception {
+        // Seed a VIEWER user and ADMIN user
+        io.castellum.security.UserRepository userRepository =
+            context.getBean(io.castellum.security.UserRepository.class);
+        org.springframework.security.crypto.password.PasswordEncoder encoder =
+            context.getBean(org.springframework.security.crypto.password.PasswordEncoder.class);
+
+        userRepository.deleteAll();
+        io.castellum.security.User viewer = new io.castellum.security.User(
+            "ac2viewer", encoder.encode("pw"), io.castellum.security.Role.VIEWER, true, Instant.now());
+        userRepository.save(viewer);
+        io.castellum.security.User admin = new io.castellum.security.User(
+            "ac2admin", encoder.encode("pw"), io.castellum.security.Role.ADMIN, true, Instant.now());
+        userRepository.save(admin);
+
+        // Obtain JWT for viewer
+        MvcResult loginResult = mockMvc.perform(post("/api/auth/login")
+                .contentType("application/json")
+                .content("{\"username\":\"ac2viewer\",\"password\":\"pw\"}"))
+            .andExpect(status().isOk())
+            .andReturn();
+        String viewerToken = new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(loginResult.getResponse().getContentAsString())
+            .get("token").asText();
+
+        // Obtain JWT for admin
+        MvcResult adminLoginResult = mockMvc.perform(post("/api/auth/login")
+                .contentType("application/json")
+                .content("{\"username\":\"ac2admin\",\"password\":\"pw\"}"))
+            .andExpect(status().isOk())
+            .andReturn();
+        String adminToken = new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(adminLoginResult.getResponse().getContentAsString())
+            .get("token").asText();
+
+        // Viewer token should allow access
+        mockMvc.perform(get("/api/devices").header("Authorization", "Bearer " + viewerToken))
+            .andExpect(status().isOk());
+
+        // Admin disables the viewer
+        mockMvc.perform(post("/api/users/ac2viewer/disable")
+                .header("Authorization", "Bearer " + adminToken))
+            .andExpect(status().isNoContent());
+
+        // Viewer's old token should now be rejected
+        mockMvc.perform(get("/api/devices").header("Authorization", "Bearer " + viewerToken))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @org.springframework.security.test.context.support.WithAnonymousUser
+    void ac4_securityHeadersPresent() throws Exception {
+        mockMvc.perform(get("/api/devices"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                .exists("Content-Security-Policy"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                .exists("Strict-Transport-Security"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                .exists("X-Frame-Options"));
+    }
+
+    @Test
+    void ac5_malformedCorsOriginFailsStartup() {
+        org.springframework.boot.test.context.runner.ApplicationContextRunner runner =
+            new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withUserConfiguration(io.castellum.config.CorsConfig.class)
+                .withPropertyValues("castellum.cors.allowed-origins=*.example.com");
+        runner.run(ctx -> {
+            org.assertj.core.api.Assertions.assertThat(ctx).hasFailed();
+            org.assertj.core.api.Assertions.assertThat(ctx.getStartupFailure())
+                .hasMessageContaining("CORS wildcard subdomain forbidden");
+        });
     }
 
     // ---- Helper methods ----

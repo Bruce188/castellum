@@ -18,6 +18,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -26,16 +27,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final UserRepository userRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public JwtAuthenticationFilter(JwtService jwtService, AuditService auditService) {
+    public JwtAuthenticationFilter(JwtService jwtService, AuditService auditService,
+                                   UserRepository userRepository) {
         this.jwtService = jwtService;
         this.auditService = auditService;
+        this.userRepository = userRepository;
     }
 
     /** Single-arg constructor retained for unit tests that instantiate directly. */
     JwtAuthenticationFilter(JwtService jwtService) {
-        this(jwtService, null);
+        this(jwtService, null, null);
+    }
+
+    /** Two-arg constructor for unit tests that need auditService but not userRepository. */
+    JwtAuthenticationFilter(JwtService jwtService, AuditService auditService) {
+        this(jwtService, auditService, null);
     }
 
     @Override
@@ -50,6 +59,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String username = jwtService.extractUsername(token);
             List<String> roles = jwtService.extractRoles(token);
+
+            if (userRepository != null) {
+                Optional<User> userOpt = userRepository.findByUsernameAndEnabledTrue(username);
+                if (userOpt.isEmpty()) {
+                    SecurityContextHolder.clearContext();
+                    if (auditService != null) {
+                        auditService.recordEvent(username, "AUTH_TOKEN_REJECT", "auth", null,
+                                Map.of("reason", "user_disabled_or_missing"));
+                    }
+                    chain.doFilter(request, response);
+                    return;
+                }
+                int tokenTv = jwtService.extractTokenVersion(token);
+                if (tokenTv != userOpt.get().getTokenVersion()) {
+                    SecurityContextHolder.clearContext();
+                    if (auditService != null) {
+                        auditService.recordEvent(username, "AUTH_TOKEN_REJECT", "auth", null,
+                                Map.of("reason", "token_version_mismatch"));
+                    }
+                    chain.doFilter(request, response);
+                    return;
+                }
+            }
+
             var auth = new UsernamePasswordAuthenticationToken(
                     username, null,
                     roles.stream().map(r -> new SimpleGrantedAuthority("ROLE_" + r)).toList());

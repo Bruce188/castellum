@@ -41,10 +41,15 @@ public class JwtService {
     }
 
     public String issueToken(String username, List<String> roles) {
+        return issueToken(username, roles, 0);
+    }
+
+    public String issueToken(String username, List<String> roles, int tokenVersion) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(username)
                 .claim("roles", roles)
+                .claim("tv", tokenVersion)
                 .issuer(ISSUER)
                 .issuedAt(java.util.Date.from(now))
                 .expiration(java.util.Date.from(now.plusSeconds(ttlSeconds)))
@@ -53,7 +58,12 @@ public class JwtService {
     }
 
     public Jws<Claims> parse(String token) {
-        return Jwts.parser().verifyWith(key).requireIssuer(ISSUER).build().parseSignedClaims(token);
+        return Jwts.parser()
+                .verifyWith(key)
+                .requireIssuer(ISSUER)
+                .sig().add(Jwts.SIG.HS256).and()
+                .build()
+                .parseSignedClaims(token);
     }
 
     public String extractUsername(String token) {
@@ -67,6 +77,12 @@ public class JwtService {
             return list.stream().map(Object::toString).toList();
         }
         return Collections.emptyList();
+    }
+
+    public int extractTokenVersion(String token) {
+        Object raw = parse(token).getPayload().get("tv");
+        if (raw instanceof Number n) return n.intValue();
+        return 0;
     }
 
     public long ttlSeconds() { return ttlSeconds; }

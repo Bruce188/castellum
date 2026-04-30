@@ -10,6 +10,7 @@ import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
+import io.castellum.security.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -49,6 +50,8 @@ class CveControllerTest {
     CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
+    @MockBean
+    UserRepository userRepository;
 
     private Cve buildCve(String cveId) {
         Cve cve = new Cve();

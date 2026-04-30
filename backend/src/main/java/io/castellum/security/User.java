@@ -31,6 +31,9 @@ public class User {
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
+    @Column(name = "token_version", nullable = false)
+    private int tokenVersion = 0;
+
     /** JPA no-arg constructor. */
     public User() {}
 
@@ -56,6 +59,8 @@ public class User {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getLastLoginAt() { return lastLoginAt; }
     public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }
+    public int getTokenVersion() { return tokenVersion; }
+    public void setTokenVersion(int tokenVersion) { this.tokenVersion = tokenVersion; }
 
     @Override
     public boolean equals(Object o) {

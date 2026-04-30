@@ -8,6 +8,7 @@ import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
+import io.castellum.security.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,7 +45,9 @@ class PassiveScanControllerTest {
     private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
-    
+    @MockBean
+    UserRepository userRepository;
+
     @Test
     void post_validRequest_returnsResponseBody() throws Exception {
         when(service.sweep(any())).thenReturn(
