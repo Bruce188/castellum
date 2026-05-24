@@ -1,14 +1,22 @@
 import type {
   Device, DeviceRiskDto, NetworkService, Page, Scan, ScanRequest,
 } from './types';
+import { clearAuth, getToken } from '../hooks/useAuth';
 
 const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080') as string;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    headers: { 'content-type': 'application/json' },
-    ...init,
-  });
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const response = await fetch(`${BASE}${path}`, { ...init, headers });
+  if (response.status === 401) {
+    clearAuth();
+    throw new Error('401 Unauthorized — please sign in again');
+  }
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }

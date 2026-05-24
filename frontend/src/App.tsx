@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react';
 import { ScanTriggerForm } from './components/ScanTriggerForm';
 import { TopologyView } from './components/TopologyView';
 import { DeviceDetailPanel } from './components/DeviceDetailPanel';
+import { Login } from './components/Login';
 import { api } from './api/client';
+import { clearAuth, useAuth } from './hooks/useAuth';
 import type { Device, DeviceRiskDto, NetworkService } from './api/types';
 import './index.css';
 
 function App() {
+  const auth = useAuth();
+  if (!auth.token) return <Login />;
   const [devices, setDevices] = useState<Device[]>([]);
   const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -62,7 +66,19 @@ function App() {
 
   return (
     <div className="grid grid-rows-[auto_1fr] h-screen">
-      <header><ScanTriggerForm /></header>
+      <header className="flex items-center justify-between gap-4">
+        <ScanTriggerForm />
+        <div className="flex items-center gap-3 pr-4 text-sm text-gray-600">
+          <span>{auth.username}</span>
+          <button
+            type="button"
+            onClick={() => clearAuth()}
+            className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-100"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
       <main className="relative">
         <TopologyView
           devices={devices}
