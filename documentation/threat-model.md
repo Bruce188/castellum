@@ -54,22 +54,22 @@ Full mitigations are listed in the [Top-5 mitigations](#top-5-mitigations) secti
 ## Trust-Boundary Diagram
 
 ```
-                          ┌─────────────────────────────────────────────────────┐
-  External network        │                  Castellum JVM                       │
-  (operator browser)      │                                                       │
-        │                 │  ┌──────────┐  ┌──────────┐  ┌─────────────────┐    │
-        │  HTTP/HTTPS ─── │──▶  REST API │──▶  Service │──▶   PostgreSQL 16  │   │
-        │                 │  │ layer     │  │  layer   │  │  (inventory,    │   │
-        │                 │  │(controllers)│  │(scan,risk│  │   audit_log,   │   │
-        │                 │  │          │  │ graph,   │  │   cve, epss,   │   │
-        │                 │  └──────────┘  │ auth…)   │  │   device…)     │   │
-        │                 │                └──────────┘  └─────────────────┘    │
-        │                 │                                                       │
-        │                 │  ┌──────────────────────────────────────────────┐    │
-        │                 │  │  NIC (CAP_NET_RAW — passive discovery only)   │    │
-        │                 │  │  PcapSniffer / ArpCacheReader / MdnsProbe    │    │
-        │                 │  └──────────────────────────────────────────────┘    │
-        │                 └─────────────────────────────────────────────────────┘
+                          ┌───────────────────────────────────────────────────────────────┐
+  External network        │                   Castellum JVM                               │
+  (operator browser)      │                                                               │
+        │                 │  ┌───────────────┐  ┌────────────┐  ┌─────────────────┐    │
+        │  HTTP/HTTPS ─── │──▶ REST API layer │──▶  Service   │──▶  PostgreSQL 16  │    │
+        │                 │  │ (controllers)  │  │  layer     │  │  (inventory,    │    │
+        │                 │  │               │  │ (scan,risk │  │   audit_log,    │    │
+        │                 │  │               │  │  graph,    │  │   cve, epss,    │    │
+        │                 │  └───────────────┘  │  auth…)    │  │   device…)     │    │
+        │                 │                     └────────────┘  └─────────────────┘    │
+        │                 │                                                               │
+        │                 │  ┌──────────────────────────────────────────────────────┐   │
+        │                 │  │  NIC (CAP_NET_RAW — passive discovery only)           │   │
+        │                 │  │  PcapSniffer / ArpCacheReader / MdnsProbe            │   │
+        │                 │  └──────────────────────────────────────────────────────┘   │
+        │                 └───────────────────────────────────────────────────────────────┘
         │
         │  Egress HTTPS (TLS at reverse proxy)
         ├──────────────────────────────── NVD (nvd.nist.gov)
@@ -246,7 +246,7 @@ OT probe requests are submitted via `POST /api/ot-probe` which requires `ADMIN` 
 Probe responses include vendor, product, and firmware version strings for OT devices. This data is sensitive in an OT context — it reveals exactly what hardware is deployed and what version it is running, enabling targeted exploit selection. Probe results are accessible to `VIEWER`+ users. In high-security OT deployments, probe data should potentially be restricted to ADMIN access only.
 
 **D — Denial of Service**
-A tight TCP connect timeout (`OT_PROBE_CONNECT_TIMEOUT_MS` default 3000 ms) and total timeout (`OT_PROBE_TOTAL_TIMEOUT_MS` default 10000 ms) bound the duration of each probe. The `max-concurrent` cap (default 8) prevents probe storms. An ADMIN who submits many simultaneous probe requests could saturate the OT network segment. Operators in safety-critical environments should consider further tightening `max-concurrent` to 1–2.
+A tight TCP connect timeout (`OT_PROBE_CONNECT_TIMEOUT_MS` default 3000 ms), total timeout (`OT_PROBE_TOTAL_TIMEOUT_MS` default 10000 ms), and per-read timeout (`OT_PROBE_READ_TIMEOUT_MS` default 5000 ms) bound the duration of each probe. The `max-concurrent` cap (default 8) prevents probe storms. An ADMIN who submits many simultaneous probe requests could saturate the OT network segment. Operators in safety-critical environments should consider further tightening `max-concurrent` to 1–2.
 
 **E — Elevation of Privilege**
 N/A — the probe module sends read-only TCP packets and writes fingerprint results to the inventory. There is no privilege escalation vector within this module.

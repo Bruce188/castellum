@@ -24,7 +24,7 @@ For the security posture underpinning these decisions see [documentation/threat-
 
 ### Why this matters
 
-Castellum's local NVD CVE mirror is built via the NVD 2.0 REST API. Without an API key, NIST rate-limits anonymous clients to **5 requests every 30 seconds**. The initial bulk pull of the full ~250k CVE corpus takes **3–4 hours** at this rate. With an API key, the limit rises to **50 requests every 30 seconds**, reducing the initial pull to approximately **30 minutes**.
+Castellum's local NVD CVE mirror is built via the NVD 2.0 REST API. Without an API key, NIST rate-limits anonymous clients to **5 requests every 30 seconds**. The initial bulk pull of the full CVE corpus (~250k records) takes **3–4 hours** at this rate. With an API key, the limit rises to **50 requests every 30 seconds**, reducing the initial pull to approximately **30 minutes**.
 
 The `cve/NvdClient` class reads the key via:
 
@@ -81,7 +81,7 @@ If the property is blank, the client operates in anonymous (keyless) mode — no
 
 ### NVD AWAITING_ANALYSIS lag
 
-Newly-published CVEs may carry `vulnStatus = "Awaiting Analysis"` for hours to days while NVD analysts add CVSS scores and CPE applicability data. The mirror faithfully reflects the NVD state at sync time. CVEs in this state appear in the `cve` table but their `cvss_v31_score` and `cve_cpe_match` rows may be empty. Running the daily incremental picks up enrichment when NVD publishes it. This is a property of the NVD data pipeline, not a Castellum defect.
+The CVE corpus (~250k records) is mirrored incrementally; not every record is enriched at pull time. Newly-published CVEs may carry `vulnStatus = "Awaiting Analysis"` for hours to days while NVD analysts add CVSS scores and CPE applicability data. The mirror faithfully reflects the NVD state at sync time. CVEs in this state appear in the `cve` table but their `cvss_v31_score` and `cve_cpe_match` rows may be empty. Running the daily incremental picks up enrichment when NVD publishes it. This is a property of the NVD data pipeline, not a Castellum defect.
 
 ---
 

@@ -78,10 +78,11 @@ curl "http://localhost:8080/api/risk/score?cve=CVE-2021-22681&device=7" \
   -H "Authorization: Bearer $TOKEN"
 # → {"cve":"CVE-2021-22681","deviceId":7,"score":9.8,"epss":0.71,
 #    "inKev":true,"criticality":"CRITICAL","formula":"9.5×1.71×1.5×2/2"}
+#    (÷2 is the v1 normalisation divisor — brings the CRITICAL-tier product into the 0–10 score band)
 ```
 
 **Voice-over:**
-"Castellum scores every CVE-device pair using four signals: CVSS base score, EPSS exploitation probability, CISA KEV membership, and the operator-assigned asset criticality. CVE-2021-22681 — a Rockwell Automation remote code execution — scores 9.8 on this CRITICAL-tier PLC: CVSS 9.5, EPSS 71%, listed in CISA KEV, CRITICAL asset. The composite scorer is a pure deterministic function — same inputs, same output, pinned by golden-file tests."
+"Castellum scores every CVE-device pair using four signals: CVSS base score, EPSS exploitation probability, CISA KEV membership, and the operator-assigned asset criticality. CVE-2021-22681 — a Rockwell Automation remote code execution — scores 9.8 on this CRITICAL-tier PLC: CVSS 9.5, EPSS 71%, listed in CISA KEV, CRITICAL asset. The formula divides by 2 — a v1 normalisation step that keeps the CRITICAL-tier product within the 0–10 score band. The composite scorer is a pure deterministic function — same inputs, same output, pinned by golden-file tests."
 
 **On-screen overlays:** `CVSS × EPSS × KEV × Criticality` | `Score: 9.8 / 10` | `CISA KEV confirmed`
 

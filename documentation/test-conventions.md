@@ -30,9 +30,12 @@ bash scripts/refresh-stix-schemas.sh && cd backend && ./mvnw test
 
 `@WebMvcTest(<Controller>.class)` does not autowire `SecurityConfig` by
 default. Without it, slice tests run with method-level `@PreAuthorize`
-silently disabled — every request appears authenticated. The required
-imports for any slice test of a `@PreAuthorize`-protected controller
-are:
+silently disabled — every request appears authenticated and ADMIN-only
+endpoints return 200 instead of 403 for unprivileged callers. The
+required imports for any slice test of a `@PreAuthorize`-protected
+controller are:
+
+<!-- @Import(SecurityConfig.class) is load-bearing: @WebMvcTest without it causes 403 checks to be silently skipped. -->
 
 ```java
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class,
