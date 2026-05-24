@@ -249,29 +249,11 @@ class AcceptanceSmokeTest {
 
     @Test
     void ac1_modbusProbeDecodesDeviceIdentification() throws Exception {
-        boolean pythonAvailable = canExec("python3");
-        AutoCloseable server;
-        int port;
-
-        if (pythonAvailable && canImportPymodbus()) {
-            // Try to start pyModbus server; fall through to fixture-replay if it fails
-            try {
-                InProcessFixtureReplayServer fixtureServer = new InProcessFixtureReplayServer();
-                fixtureServer.start();
-                server = fixtureServer;
-                port = fixtureServer.getLocalPort();
-            } catch (Exception e) {
-                InProcessFixtureReplayServer fixtureServer = new InProcessFixtureReplayServer();
-                fixtureServer.start();
-                server = fixtureServer;
-                port = fixtureServer.getLocalPort();
-            }
-        } else {
-            InProcessFixtureReplayServer fixtureServer = new InProcessFixtureReplayServer();
-            fixtureServer.start();
-            server = fixtureServer;
-            port = fixtureServer.getLocalPort();
-        }
+        // Live pyModbus path removed per analysis-v6 Decision #6; surrogate is canonical.
+        InProcessFixtureReplayServer fixtureServer = new InProcessFixtureReplayServer();
+        fixtureServer.start();
+        AutoCloseable server = fixtureServer;
+        int port = fixtureServer.getLocalPort();
 
         try {
             MvcResult result = mockMvc.perform(post("/api/ot-probe")

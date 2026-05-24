@@ -138,6 +138,57 @@ CREATE INDEX service_protocol_family_idx ON service (protocol_family)
   WHERE protocol_family IS NOT NULL;  -- Postgres only; H2 mirror omits WHERE
 ```
 
+## Managed-Switch Lab Profile
+
+The `managed-switch-lab` Maven profile activates two acceptance test classes that exercise LLDP and
+CDP probe paths against captured binary fixtures:
+
+| Test class | Decoder under test |
+|------------|--------------------|
+| `LldpProbeAcceptanceTest` | `io.castellum.discovery.LldpDecoder` |
+| `CdpProbeAcceptanceTest`  | `io.castellum.discovery.CdpDecoder`  |
+
+### Activation
+
+```bash
+mvn test -Pmanaged-switch-lab
+```
+
+This sets the system property `castellum.managed-switch-lab=true`, which the test classes read via
+`@EnabledIfSystemProperty(named="castellum.managed-switch-lab", matches="true")`.
+
+Default `mvn test` (no profile) skips both classes silently — no JUnit warning is emitted.
+
+### Fixture-absent skip
+
+Even when the profile is active, each test calls `assumeTrue(fixtureFile.exists(), "managed-switch
+fixture missing")` at the top of the method. If the fixture binary has not been committed, the test
+aborts silently (abort ≠ failure) with the message `"managed-switch fixture missing"`.
+
+### Adding a fixture
+
+Place captured frames at:
+
+- `backend/src/test/resources/discovery/lldp-sample.bin`
+- `backend/src/test/resources/discovery/cdp-sample.bin`
+
+These paths are deferred — capturing real LLDP-MED / CDP frames requires managed-switch
+infrastructure. Once committed, the tests automatically progress from *skipped* to *executed* on the
+next `mvn test -Pmanaged-switch-lab` run.
+
+### Current stub contract
+
+Until real decoder implementations replace the skeletons, both test methods assert:
+
+```java
+assertThatThrownBy(() -> decoder.decode(frameBytes))
+    .isInstanceOf(UnsupportedOperationException.class)
+    .hasMessageContaining("designed-but-untested");
+```
+
+This pins the existing `LldpDecoder` / `CdpDecoder` stub contract and will need updating when the
+stubs are replaced with functional implementations.
+
 ## Verifying the Read-Only Contract
 
 The automated test `AcceptanceSmokeTest.ac2_surrogateAllProbesEmitOnlyReadFunctionCodes`
