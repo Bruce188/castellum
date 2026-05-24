@@ -61,7 +61,7 @@ public class PassiveDiscoveryController {
      * <p>VIEWER role — operators inspecting which probes will fire.
      */
     @GetMapping("/sources")
-    @PreAuthorize("hasRole('VIEWER')")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public List<DiscoverySourceDto> sources() {
         return List.of(
             new DiscoverySourceDto("ARP", true, "Host ARP cache (OS-portable: Linux /proc/net/arp, macOS arp -an, Windows arp -a)"),
@@ -83,7 +83,7 @@ public class PassiveDiscoveryController {
      * ordered by start time descending. VIEWER role.
      */
     @GetMapping("/sweeps")
-    @PreAuthorize("hasRole('VIEWER')")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public List<DiscoverySweepDto> sweeps(
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant since) {
