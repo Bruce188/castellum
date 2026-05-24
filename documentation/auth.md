@@ -177,3 +177,58 @@ Validation rules (in order):
 4. Reject malformed URIs.
 
 Dev default `http://localhost:5173` passes all rules. For production deployments, set a full `https://` origin.
+
+## CVE Endpoint Response Shapes
+
+Both CVE endpoints require at minimum the `VIEWER` role. They return distinct DTO types to control which fields are exposed.
+
+### GET /api/cve?cpe=\<cpe-string\>
+
+Returns an array of `CveSummaryDto` objects. Each object contains the structured CVE fields but **omits `rawJson`** to avoid bandwidth overhead on bulk list responses.
+
+```json
+[
+  {
+    "cveId": "CVE-2020-15778",
+    "published": "2020-07-24T18:15:11Z",
+    "lastModified": "2024-01-04T19:44:31Z",
+    "vulnStatus": "Analyzed",
+    "description": "scp in OpenSSH through 8.3p1 allows ...",
+    "cvssV31Score": 7.8,
+    "cvssV31Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+    "cvssV30Score": null,
+    "cvssV30Vector": null,
+    "cvssV2Score": 6.8,
+    "cvssV2Vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+    "fetchedAt": "2026-05-01T06:01:23Z"
+  }
+]
+```
+
+Fields present on every object: `cveId`, `lastModified`. All remaining fields may be `null` when NVD has not yet published the corresponding data (e.g. CVEs in `Awaiting Analysis` status carry no CVSS scores).
+
+### GET /api/cve/{cveId}
+
+Returns a single `CveDetailDto` object. This is a superset of `CveSummaryDto`: all the same fields plus `rawJson`, which contains the full upstream NVD JSON payload.
+
+```json
+{
+  "cveId": "CVE-2020-15778",
+  "published": "2020-07-24T18:15:11Z",
+  "lastModified": "2024-01-04T19:44:31Z",
+  "vulnStatus": "Analyzed",
+  "description": "scp in OpenSSH through 8.3p1 allows ...",
+  "cvssV31Score": 7.8,
+  "cvssV31Vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H",
+  "cvssV30Score": null,
+  "cvssV30Vector": null,
+  "cvssV2Score": 6.8,
+  "cvssV2Vector": "AV:N/AC:M/Au:N/C:P/I:P/A:P",
+  "fetchedAt": "2026-05-01T06:01:23Z",
+  "rawJson": "{\"id\":\"CVE-2020-15778\", ... }"
+}
+```
+
+`rawJson` is the verbatim NVD JSON string stored during sync. It can be several kilobytes for heavily-annotated CVEs. The list endpoint intentionally omits it; use the detail endpoint when you need the full upstream payload.
+
+Returns HTTP 404 if the CVE identifier is not present in the local mirror.

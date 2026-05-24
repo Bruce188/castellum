@@ -77,6 +77,8 @@ If the property is blank, the client operates in anonymous (keyless) mode — no
 ./scripts/nvd-bulk-sync.sh
 ```
 
+`--since` and `--until` accept either a plain date (`YYYY-MM-DD`, expanded to `T00:00:00Z` by the shell script) or a full ISO-8601 instant (`YYYY-MM-DDTHH:MM:SSZ`). Passing an unrecognised value causes `NvdSyncRunner` to throw `IllegalArgumentException` with a message that echoes the offending argument; the JVM exits with code 1. Exit code 2 is reserved for unknown shell-level arguments (e.g. a misspelled flag name).
+
 ### NVD AWAITING_ANALYSIS lag
 
 Newly-published CVEs may carry `vulnStatus = "Awaiting Analysis"` for hours to days while NVD analysts add CVSS scores and CPE applicability data. The mirror faithfully reflects the NVD state at sync time. CVEs in this state appear in the `cve` table but their `cvss_v31_score` and `cve_cpe_match` rows may be empty. Running the daily incremental picks up enrichment when NVD publishes it. This is a property of the NVD data pipeline, not a Castellum defect.
