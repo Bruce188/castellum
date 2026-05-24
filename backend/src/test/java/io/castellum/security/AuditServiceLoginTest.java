@@ -14,7 +14,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
+import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -39,12 +41,14 @@ class AuditServiceLoginTest {
     }
 
     private String loginAndExtractToken(String username, String password) throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("username", username, "password", password));
+        assertThat(body).contains("\"username\"").contains("\"password\"");
         MvcResult result = mvc.perform(post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
+                .content(body))
             .andReturn();
-        String body = result.getResponse().getContentAsString();
-        return objectMapper.readTree(body).get("token").asText();
+        String responseBody = result.getResponse().getContentAsString();
+        return objectMapper.readTree(responseBody).get("token").asText();
     }
 
     @Test
@@ -62,7 +66,7 @@ class AuditServiceLoginTest {
         int before = auditLogRepository.findAll().size();
         mvc.perform(post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"audmin\",\"password\":\"wrong\"}"))
+                .content(objectMapper.writeValueAsString(Map.of("username", "audmin", "password", "wrong"))))
             .andExpect(status().isUnauthorized());
         boolean found = auditLogRepository.findAll().stream()
             .skip(before)

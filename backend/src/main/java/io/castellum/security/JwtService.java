@@ -87,6 +87,6 @@ public class JwtService {
 
     public long ttlSeconds() { return ttlSeconds; }
 
-    /** Package-private: exposes key for test-only JWT construction. */
+    /** Package-private — intentional: slice tests in the same package forge JWTs with malformed signatures. Never call from production code; pkg-private is the access barrier. */
     SecretKey key() { return key; }
 }

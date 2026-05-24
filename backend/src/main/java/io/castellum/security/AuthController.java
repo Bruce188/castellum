@@ -68,7 +68,7 @@ public class AuthController {
             } else {
                 token = jwtService.issueToken(body.username(), roles);
             }
-            Instant expiresAt = Instant.now().plusSeconds(jwtService.ttlSeconds());
+            Instant expiresAt = jwtService.parse(token).getPayload().getExpiration().toInstant();
             if (userRepository != null) {
                 userRepository.findByUsername(body.username()).ifPresent(user -> {
                     user.setLastLoginAt(Instant.now());

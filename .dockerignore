@@ -7,7 +7,6 @@
 docs/
 documentation/
 *.log
-*.md
 
 # Build artifacts
 backend/target/
