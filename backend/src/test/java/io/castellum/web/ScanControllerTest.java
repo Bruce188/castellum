@@ -5,6 +5,7 @@ import io.castellum.config.SecurityConfig;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
+import io.castellum.scan.ScanExecutionService;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
@@ -46,6 +47,9 @@ class ScanControllerTest {
     private AuditService auditService;
 
     @MockBean
+    private ScanExecutionService scanExecutionService;
+
+    @MockBean
     private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
@@ -69,6 +73,7 @@ class ScanControllerTest {
             .andExpect(jsonPath("$.id").value(42));
 
         verify(auditService).recordEvent(eq("system"), eq("SCAN_SUBMIT"), eq("scan"), anyString(), any());
+        verify(scanExecutionService).executeAsync(saved.getId());
     }
 
     @Test

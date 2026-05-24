@@ -18,5 +18,7 @@ public enum DiscoverySource {
     LLDP,
     CDP,
     /** Active OT/ICS fingerprint probe (Modbus, DNP3, S7comm, BACnet). */
-    OT_PROBE
+    OT_PROBE,
+    /** Active nmap-based network scan (PING_SWEEP, SERVICE_DETECT, OS_FINGERPRINT). */
+    NMAP_SCAN
 }

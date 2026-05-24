@@ -253,6 +253,40 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v12_addsFailureReasonColumn() {
+        // Confirm the column exists via INFORMATION_SCHEMA (migration-level check).
+        Number colCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'SCAN' AND UPPER(COLUMN_NAME) = 'FAILURE_REASON'",
+            Number.class);
+        assertNotNull(colCount, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(colCount.intValue() > 0,
+            "failure_reason column must exist in scan table after V12 migration");
+
+        // Round-trip: NULL is accepted (success-path rows never populate the column).
+        Scan scanWithoutReason = new Scan();
+        scanWithoutReason.setCidr("10.99.0.0/24");
+        scanWithoutReason.setScanType("PING_SWEEP");
+        scanWithoutReason.setStatus(ScanStatus.PENDING);
+        scanWithoutReason.setRequestedAt(Instant.now());
+        Scan savedNull = scanRepository.save(scanWithoutReason);
+        assertNull(savedNull.getFailureReason(),
+            "failure_reason must be null when not set");
+
+        // Round-trip: a long string is accepted (TEXT has no length cap).
+        String longReason = "IOException: " + "x".repeat(490);
+        Scan scanWithReason = new Scan();
+        scanWithReason.setCidr("10.99.1.0/24");
+        scanWithReason.setScanType("PING_SWEEP");
+        scanWithReason.setStatus(ScanStatus.FAILED);
+        scanWithReason.setRequestedAt(Instant.now());
+        scanWithReason.setFailureReason(longReason);
+        Scan savedReason = scanRepository.save(scanWithReason);
+        assertEquals(longReason, savedReason.getFailureReason(),
+            "failure_reason must round-trip a long string via TEXT column");
+    }
+
+    @Test
     void usersV10TokenVersionRoundTrips() {
         // Persist a User and assert tokenVersion defaults to 0
         User u = new User("rt-user", "$2a$12$x", Role.VIEWER, true, Instant.now());
