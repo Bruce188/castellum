@@ -3,11 +3,13 @@ package io.castellum.web;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.web.dto.CveDetailDto;
+import io.castellum.web.dto.CveSummaryDto;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/api/cve")
@@ -23,14 +25,49 @@ public class CveController {
 
     @GetMapping("/{cveId}")
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
-    public Cve getByCveId(@PathVariable String cveId) {
+    public ResponseEntity<CveDetailDto> getByCveId(@PathVariable String cveId) {
         return cveRepository.findByCveId(cveId)
-            .orElseThrow(NoSuchElementException::new);
+            .map(CveController::toDetail)
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
-    public List<Cve> findByCpe(@RequestParam("cpe") String cpe) {
-        return cveMatcher.findVulnerable(cpe);
+    public List<CveSummaryDto> findByCpe(@RequestParam("cpe") String cpe) {
+        return cveMatcher.findVulnerable(cpe).stream().map(CveController::toSummary).toList();
+    }
+
+    private static CveSummaryDto toSummary(Cve c) {
+        return new CveSummaryDto(
+                c.getCveId(),
+                c.getPublished(),
+                c.getLastModified(),
+                c.getVulnStatus(),
+                c.getDescription(),
+                c.getCvssV31Score(),
+                c.getCvssV31Vector(),
+                c.getCvssV30Score(),
+                c.getCvssV30Vector(),
+                c.getCvssV2Score(),
+                c.getCvssV2Vector(),
+                c.getFetchedAt());
+    }
+
+    private static CveDetailDto toDetail(Cve c) {
+        return new CveDetailDto(
+                c.getCveId(),
+                c.getPublished(),
+                c.getLastModified(),
+                c.getVulnStatus(),
+                c.getDescription(),
+                c.getCvssV31Score(),
+                c.getCvssV31Vector(),
+                c.getCvssV30Score(),
+                c.getCvssV30Vector(),
+                c.getCvssV2Score(),
+                c.getCvssV2Vector(),
+                c.getFetchedAt(),
+                c.getRawJson());
     }
 }

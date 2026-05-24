@@ -24,6 +24,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import org.hamcrest.Matchers;
+
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -113,5 +116,34 @@ class CveControllerTest {
         mockMvc.perform(get("/api/cve/CVE-2020-15778")
                 .accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void findByCpe_responseDoesNotExposeRawJson() throws Exception {
+        Cve cve = buildCve("CVE-2020-15778");
+        cve.setRawJson("{\"sentinel\":true}");
+        when(cveMatcher.findVulnerable(any())).thenReturn(List.of(cve));
+
+        mockMvc.perform(get("/api/cve")
+                .param("cpe", "cpe:2.3:a:test:test:1.0")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].cveId").exists())
+            .andExpect(jsonPath("$[0].rawJson").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void getByCveId_responseExposesRawJson() throws Exception {
+        Cve cve = buildCve("CVE-2020-15778");
+        cve.setRawJson("{\"sentinel\":true}");
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.cveId").value("CVE-2020-15778"))
+            .andExpect(jsonPath("$.rawJson").value(Matchers.containsString("sentinel")));
     }
 }
