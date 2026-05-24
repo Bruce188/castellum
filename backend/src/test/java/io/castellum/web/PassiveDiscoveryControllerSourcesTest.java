@@ -86,9 +86,10 @@ class PassiveDiscoveryControllerSourcesTest {
 
     @Test
     @WithMockUser(roles = "ADMIN")
-    void getSources_adminWithoutViewer_returns403() throws Exception {
-        // ADMIN role does not subsume VIEWER in this RBAC model.
+    void getSources_admin_returns200() throws Exception {
+        // ADMIN explicitly granted access alongside VIEWER on /sources and /sweeps
+        // (commit e863c6f: discovery endpoints use hasAnyRole('VIEWER','ADMIN')).
         mockMvc.perform(get("/api/discovery/sources"))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isOk());
     }
 }
