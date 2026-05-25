@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -15,6 +16,7 @@ class BootstrapAdminTest {
 
     @Nested
     @SpringBootTest
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
     @TestPropertySource(properties = {
         "castellum.admin.username=admin",
         "castellum.admin.password-hash=$2a$12$dummy"
@@ -37,6 +39,7 @@ class BootstrapAdminTest {
 
     @Nested
     @SpringBootTest
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
     @TestPropertySource(properties = {
         "castellum.admin.username=",
         "castellum.admin.password-hash="
@@ -56,6 +59,7 @@ class BootstrapAdminTest {
 
     @Nested
     @SpringBootTest
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
     @TestPropertySource(properties = {
         "castellum.admin.username=admin",
         "castellum.admin.password-hash=$2a$12$dummy"
@@ -78,6 +82,7 @@ class BootstrapAdminTest {
 
     @Nested
     @SpringBootTest
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
     @TestPropertySource(properties = {
         "castellum.admin.username=",
         "castellum.admin.password-hash=",
@@ -113,9 +118,11 @@ class BootstrapAdminTest {
 
     @Nested
     @SpringBootTest
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
     @TestPropertySource(properties = {
         "castellum.admin.username=admin",
-        "castellum.admin.password-hash=$2a$12$newadminhash"
+        "castellum.admin.password-hash=$2a$12$newadminhash",
+        "spring.datasource.url=jdbc:h2:mem:test-admin-hash-rotate;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1"
     })
     class AdminHashRotate {
         @Autowired UserRepository userRepository;
@@ -159,6 +166,7 @@ class BootstrapAdminTest {
 
     @Nested
     @SpringBootTest
+    @DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_CLASS)
     @TestPropertySource(properties = {
         "castellum.admin.username=",
         "castellum.admin.password-hash=",
