@@ -3,6 +3,7 @@ package io.castellum.web;
 import io.castellum.discovery.*;
 import io.castellum.web.dto.DiscoverySourceDto;
 import io.castellum.web.dto.DiscoverySweepDto;
+import io.castellum.web.dto.InterfaceInfoDto;
 import io.castellum.web.dto.PassiveDiscoveryRequestDto;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,9 +11,13 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @RestController
@@ -76,6 +81,35 @@ public class PassiveDiscoveryController {
                 ? "Cisco Discovery Protocol (managed-switch profile)"
                 : "Disabled by castellum.discovery.cdp.enabled")
         );
+    }
+
+    /**
+     * Lists the host's up, non-loopback network interfaces — the menu of choices
+     * for the {@code iface} field on {@code POST /api/discovery/passive}.
+     *
+     * <p>ADMIN-only: surface-area for write operations. Returns an empty list
+     * (never null) if {@link NetworkInterface#getNetworkInterfaces()} throws or
+     * yields no qualifying interfaces.
+     */
+    @GetMapping("/interfaces")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<InterfaceInfoDto> interfaces() {
+        List<InterfaceInfoDto> out = new ArrayList<>();
+        try {
+            var nics = NetworkInterface.getNetworkInterfaces();
+            if (nics == null) return out;
+            for (NetworkInterface nic : Collections.list(nics)) {
+                try {
+                    if (!nic.isUp() || nic.isLoopback()) continue;
+                    out.add(new InterfaceInfoDto(nic.getName(), nic.getDisplayName(), nic.getMTU()));
+                } catch (SocketException ignored) {
+                    // Skip this interface — it disappeared between enumeration and inspection.
+                }
+            }
+        } catch (SocketException ignored) {
+            // Best-effort enumeration; return what we have so far.
+        }
+        return out;
     }
 
     /**

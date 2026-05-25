@@ -2,8 +2,10 @@ import type {
   AuditEntry, AuditFilters,
   Criticality, CveDetailDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
-  NetworkService, Page, Scan, ScanRequest,
-  TopRiskDeviceDto,
+  InterfaceInfo, NetworkService,
+  OtProbeRequest, OtProbeResponse,
+  Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
+  Scan, ScanRequest, TopRiskDeviceDto,
 } from './types';
 import { clearAuth, getToken } from '../hooks/useAuth';
 
@@ -118,4 +120,30 @@ export const api = {
     }
     return await response.blob();
   },
+
+  /** GET /api/discovery/interfaces — ADMIN-only. Returns [] on 403 to keep the form usable. */
+  listInterfaces: async (): Promise<InterfaceInfo[]> => {
+    try {
+      return await request<InterfaceInfo[]>('/api/discovery/interfaces');
+    } catch (err) {
+      // VIEWER calls or transient errors should not blow up the panel; the caller
+      // can fall back to a hardcoded interface list.
+      if (err instanceof Error && err.message.startsWith('403')) return [];
+      throw err;
+    }
+  },
+
+  /** POST /api/discovery/passive — ADMIN-only. */
+  discoverPassive: (payload: PassiveDiscoveryRequest) =>
+    request<PassiveDiscoveryResponse>('/api/discovery/passive', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  /** POST /api/ot-probe — ADMIN-only. Read-only fingerprint; never writes to the target. */
+  probeOt: (payload: OtProbeRequest) =>
+    request<OtProbeResponse>('/api/ot-probe', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };

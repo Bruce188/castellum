@@ -141,3 +141,55 @@ export interface AuditFilters {
   page?: number;
   size?: number;             // clamped server-side to 500
 }
+
+// ----- Discovery (passive) -----
+
+/** Passive-discovery sources understood by the backend enum {@code DiscoverySource}. */
+export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP';
+
+export interface PassiveDiscoveryRequest {
+  iface: string;
+  /** 0 means "use the backend default of 30 seconds"; bounded 0..300 on the server. */
+  durationSeconds: number;
+  sources: DiscoverySource[];
+}
+
+export interface PassiveDiscoveryResponse {
+  discovered: number;
+  deviceIds: number[];
+  /** Map of source name → count of neighbors discovered via that source. */
+  perSourceCount: Record<DiscoverySource, number>;
+  sweepId: number | null;
+}
+
+/** GET /api/discovery/interfaces — host-visible up, non-loopback NICs. */
+export interface InterfaceInfo {
+  name: string;
+  displayName: string;
+  mtu: number;
+}
+
+// ----- OT probe -----
+
+/** Matches {@code io.castellum.ot.OtProtocol} enum names. */
+export type OtProtocol = 'MODBUS_TCP' | 'DNP3' | 'S7COMM' | 'BACNET_IP';
+
+export interface OtProbeRequest {
+  host: string;
+  port: number;
+  protocol: OtProtocol;
+}
+
+export interface OtProbeResponse {
+  host: string;
+  port: number;
+  protocol: OtProtocol;
+  vendor: string | null;
+  product: string | null;
+  version: string | null;
+  /** Protocol-native decoded fields; Modbus uses numeric-string keys ("0", "1"). */
+  rawFields: Record<string, string>;
+  deviceId: number;
+  serviceId: number;
+  observedAt: string;
+}
