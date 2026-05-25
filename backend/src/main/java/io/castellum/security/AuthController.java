@@ -26,21 +26,24 @@ public class AuthController {
     private final JwtService jwtService;
     private final AuditService auditService;
     private final LoginRateLimiter rateLimiter;
+    private final ClientAddressResolver clientAddressResolver;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private UserRepository userRepository;
 
     public AuthController(AuthenticationManager authManager, JwtService jwtService,
-                          AuditService auditService, LoginRateLimiter rateLimiter) {
+                          AuditService auditService, LoginRateLimiter rateLimiter,
+                          ClientAddressResolver clientAddressResolver) {
         this.authManager = authManager;
         this.jwtService = jwtService;
         this.auditService = auditService;
         this.rateLimiter = rateLimiter;
+        this.clientAddressResolver = clientAddressResolver;
     }
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest body, HttpServletRequest request) {
-        String ip = request.getRemoteAddr();
+        String ip = clientAddressResolver.resolve(request);
 
         if (!rateLimiter.tryAcquire(ip)) {
             long retryAfter = rateLimiter.retryAfterSeconds(ip);
@@ -62,19 +65,18 @@ public class AuthController {
                     .toList();
             String token;
             if (userRepository != null) {
-                token = userRepository.findByUsername(body.username())
+                java.util.Optional<User> userOpt = userRepository.findByUsername(body.username());
+                token = userOpt
                         .map(user -> jwtService.issueToken(body.username(), roles, user.getTokenVersion()))
                         .orElseGet(() -> jwtService.issueToken(body.username(), roles));
+                userOpt.ifPresent(user -> {
+                    user.setLastLoginAt(Instant.now());
+                    userRepository.save(user);
+                });
             } else {
                 token = jwtService.issueToken(body.username(), roles);
             }
             Instant expiresAt = jwtService.parse(token).getPayload().getExpiration().toInstant();
-            if (userRepository != null) {
-                userRepository.findByUsername(body.username()).ifPresent(user -> {
-                    user.setLastLoginAt(Instant.now());
-                    userRepository.save(user);
-                });
-            }
             auditService.recordEvent(body.username(), "LOGIN_SUCCESS", "auth", body.username(),
                     Map.of("ip", ip == null ? "" : ip));
             return ResponseEntity.ok(new LoginResponse(token, expiresAt, roles));

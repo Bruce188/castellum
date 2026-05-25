@@ -148,7 +148,28 @@ Castellum enforces a per-IP sliding-window rate limit on failed login attempts t
 ```
 CASTELLUM_SECURITY_RATE_LIMIT_LOGIN_WINDOW_SECONDS=60
 CASTELLUM_SECURITY_RATE_LIMIT_LOGIN_MAX_ATTEMPTS=10
+CASTELLUM_SECURITY_RATE_LIMIT_EVICTION_INTERVAL_MILLIS=60000
 ```
+
+### Reverse-proxy client-address resolution
+
+By default Castellum uses `request.getRemoteAddr()` (the direct TCP peer) as the key for rate-limiting.
+When Castellum runs behind a trusted reverse proxy that sets `X-Forwarded-For`, switch to XFF mode:
+
+```
+# Strategy: remote-addr (default) | xff
+CASTELLUM_SECURITY_RATE_LIMIT_CLIENT_ADDRESS_STRATEGY=xff
+
+# Comma-separated CIDRs of trusted proxy IPs (required when strategy=xff)
+CASTELLUM_SECURITY_RATE_LIMIT_TRUSTED_PROXIES=10.0.0.0/24,192.168.1.0/24
+```
+
+In `xff` mode the limiter keys on the **leftmost** IP in `X-Forwarded-For` when the direct caller is
+within the trusted-proxy CIDR list. If the direct caller is **not** in the list, the limiter falls
+back to `remoteAddr` — spoofed headers from untrusted networks are ignored.
+
+Startup validation: if `client-address-strategy=xff` and `trusted-proxies` is empty, the application
+refuses to start. Malformed CIDRs also cause a startup failure.
 
 ### Multi-instance caveat
 

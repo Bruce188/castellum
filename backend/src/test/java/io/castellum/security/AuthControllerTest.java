@@ -57,9 +57,13 @@ class AuthControllerTest {
     @MockBean
     LoginRateLimiter rateLimiter;
 
+    @MockBean
+    ClientAddressResolver clientAddressResolver;
+
     @BeforeEach
     void setupRateLimiter() {
         when(rateLimiter.tryAcquire(any())).thenReturn(true);
+        when(clientAddressResolver.resolve(any())).thenReturn("127.0.0.1");
     }
 
     @SuppressWarnings("unchecked")
