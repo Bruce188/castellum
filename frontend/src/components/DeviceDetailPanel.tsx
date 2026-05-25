@@ -1,20 +1,47 @@
-import type { Device, DeviceRiskDto, NetworkService } from '../api/types';
+import type { Criticality, Device, DeviceRiskDto, NetworkService } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { CveEvidenceTable } from './CveEvidenceTable';
 import { WhyScorePanel } from './WhyScorePanel';
+import { CriticalityInlineEdit } from './CriticalityInlineEdit';
+import { HostnameInlineEdit } from './HostnameInlineEdit';
+import { DecommissionButton } from './DecommissionButton';
+import { api } from '../api/client';
 
 interface Props {
   device: Device | null;
   risk: DeviceRiskDto | null;
   services: NetworkService[];
   onClose: () => void;
+  /** When true, render inline-edit + decommission controls. Defaults to {@code false}. */
+  isAdmin?: boolean;
+  /** Called after a successful PUT/DELETE so the parent can refetch its device list. */
+  onDeviceMutated?: () => void;
 }
 
-export function DeviceDetailPanel({ device, risk, services, onClose }: Props) {
+export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = false, onDeviceMutated }: Props) {
   if (device === null) return null;
 
   const score = risk ? Number(risk.score) : null;
   const tier = toRiskTier(score);
+
+  async function handleCriticalitySave(next: Criticality) {
+    if (device === null) return;
+    await api.updateDevice(device.id, device, { criticality: next });
+    onDeviceMutated?.();
+  }
+
+  async function handleHostnameSave(next: string) {
+    if (device === null) return;
+    await api.updateDevice(device.id, device, { hostname: next });
+    onDeviceMutated?.();
+  }
+
+  async function handleDecommission() {
+    if (device === null) return;
+    await api.deleteDevice(device.id);
+    onDeviceMutated?.();
+    onClose();
+  }
 
   return (
     <aside
@@ -53,11 +80,35 @@ export function DeviceDetailPanel({ device, risk, services, onClose }: Props) {
         <h3 className="text-sm font-semibold mb-1">Device</h3>
         <dl className="text-sm grid grid-cols-[max-content_1fr] gap-x-2 gap-y-1">
           <dt className="text-gray-500">id</dt><dd>{device.id}</dd>
-          <dt className="text-gray-500">criticality</dt><dd>{device.criticality}</dd>
+          <dt className="text-gray-500">hostname</dt>
+          <dd>
+            <HostnameInlineEdit
+              value={device.hostname}
+              isAdmin={isAdmin}
+              onSave={handleHostnameSave}
+            />
+          </dd>
+          <dt className="text-gray-500">criticality</dt>
+          <dd>
+            <CriticalityInlineEdit
+              value={device.criticality}
+              isAdmin={isAdmin}
+              onSave={handleCriticalitySave}
+            />
+          </dd>
           <dt className="text-gray-500">mac</dt><dd>{device.macAddress ?? '—'}</dd>
           <dt className="text-gray-500">first seen</dt><dd>{device.firstSeen ?? '—'}</dd>
           <dt className="text-gray-500">last seen</dt><dd>{device.lastSeen ?? '—'}</dd>
         </dl>
+        {isAdmin && (
+          <div className="mt-3">
+            <DecommissionButton
+              device={device}
+              isAdmin={isAdmin}
+              onConfirmed={handleDecommission}
+            />
+          </div>
+        )}
       </section>
 
       <section className="mb-4">

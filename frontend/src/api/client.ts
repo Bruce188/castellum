@@ -1,6 +1,6 @@
 import type {
   AuditEntry, AuditFilters,
-  CveDetailDto,
+  Criticality, CveDetailDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   NetworkService, Page, Scan, ScanRequest,
   TopRiskDeviceDto,
@@ -27,9 +27,44 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+export interface DeviceUpdatePayload {
+  hostname?: string | null;
+  criticality?: Criticality;
+}
+
 export const api = {
   listDevices: () =>
     request<Page<Device>>('/api/devices?size=200'),
+  updateDevice: (id: number, current: Device, patch: DeviceUpdatePayload) => {
+    // PUT replaces the resource; merge patch over current to preserve required fields (e.g. ipAddress).
+    const body: Record<string, unknown> = {
+      ipAddress: current.ipAddress,
+      hostname: current.hostname,
+      macAddress: current.macAddress,
+      firstSeen: current.firstSeen,
+      lastSeen: current.lastSeen,
+      criticality: current.criticality,
+    };
+    if (Object.prototype.hasOwnProperty.call(patch, 'hostname')) body.hostname = patch.hostname;
+    if (patch.criticality !== undefined) body.criticality = patch.criticality;
+    return request<Device>(`/api/devices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+  deleteDevice: async (id: number): Promise<void> => {
+    const token = getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/devices/${id}`, { method: 'DELETE', headers });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (!response.ok && response.status !== 204) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+  },
   deviceRisk: (id: number) =>
     request<DeviceRiskDto>(`/api/risk/device/${id}`),
   topRisk: (n: number = 10) =>

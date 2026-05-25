@@ -118,4 +118,60 @@ class DeviceControllerTest {
         mockMvc.perform(get("/api/devices").with(anonymous()))
             .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void put_admin_updatesAndEmitsAudit() throws Exception {
+        Device existing = new Device();
+        existing.setId(7L);
+        existing.setIpAddress("10.0.0.7");
+        existing.setCriticality(Criticality.MEDIUM);
+        when(deviceRepository.findById(7L)).thenReturn(Optional.of(existing));
+
+        Device saved = new Device();
+        saved.setId(7L);
+        saved.setIpAddress("10.0.0.7");
+        saved.setHostname("renamed-host");
+        saved.setCriticality(Criticality.CRITICAL);
+        when(deviceRepository.save(any(Device.class))).thenReturn(saved);
+
+        mockMvc.perform(put("/api/devices/7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipAddress\":\"10.0.0.7\",\"hostname\":\"renamed-host\",\"criticality\":\"CRITICAL\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.hostname").value("renamed-host"))
+            .andExpect(jsonPath("$.criticality").value("CRITICAL"));
+
+        verify(auditService).recordEvent(eq("system"), eq("DEVICE_UPDATE"), eq("device"), eq("7"), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void put_viewer_returns403() throws Exception {
+        mockMvc.perform(put("/api/devices/7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ipAddress\":\"10.0.0.7\",\"criticality\":\"HIGH\"}"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void delete_admin_removesAndEmitsAudit() throws Exception {
+        Device existing = new Device();
+        existing.setId(9L);
+        existing.setIpAddress("10.0.0.9");
+        existing.setCriticality(Criticality.LOW);
+        when(deviceRepository.findById(9L)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(delete("/api/devices/9"))
+            .andExpect(status().isNoContent());
+
+        verify(deviceRepository).deleteById(9L);
+        verify(auditService).recordEvent(eq("system"), eq("DEVICE_DELETE"), eq("device"), eq("9"), any());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void delete_viewer_returns403() throws Exception {
+        mockMvc.perform(delete("/api/devices/9"))
+            .andExpect(status().isForbidden());
+    }
 }

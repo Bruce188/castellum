@@ -38,7 +38,9 @@ describe('<DeviceDetailPanel />', () => {
     render(
       <DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />
     );
-    expect(screen.getByText('demo-1')).toBeInTheDocument();
+    // 'demo-1' appears both in the header <h2> and in the hostname read-only span;
+    // assert the header copy specifically.
+    expect(screen.getByRole('heading', { level: 2, name: 'demo-1' })).toBeInTheDocument();
     expect(screen.getByText('7.50')).toBeInTheDocument();
     expect(screen.getByText('22')).toBeInTheDocument();
     expect(screen.getByText('openssh')).toBeInTheDocument();
@@ -77,5 +79,31 @@ describe('<DeviceDetailPanel />', () => {
     expect(scoreBadge).not.toBeNull();
     expect(scoreBadge?.textContent).toBe('—');
     expect(screen.queryByText(/Infinity/)).not.toBeInTheDocument();
+  });
+
+  it('VIEWER (isAdmin omitted) sees no edit affordances and no decommission button', () => {
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />
+    );
+    expect(screen.queryByRole('button', { name: /edit criticality/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit hostname/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^decommission$/i })).not.toBeInTheDocument();
+    // Read-only criticality is still shown.
+    expect(screen.getByTestId('criticality-readonly')).toHaveTextContent('HIGH');
+  });
+
+  it('ADMIN (isAdmin=true) sees edit affordances and decommission button', () => {
+    render(
+      <DeviceDetailPanel
+        device={device}
+        risk={risk}
+        services={services}
+        onClose={() => {}}
+        isAdmin={true}
+      />
+    );
+    expect(screen.getByRole('button', { name: /edit criticality/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /edit hostname/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^decommission$/i })).toBeInTheDocument();
   });
 });

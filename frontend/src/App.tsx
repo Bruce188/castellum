@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScanTriggerForm } from './components/ScanTriggerForm';
 import { RecentScansPanel } from './components/RecentScansPanel';
 import { TopologyView } from './components/TopologyView';
@@ -21,6 +21,25 @@ function App() {
   const [selectedServices, setSelectedServices] = useState<NetworkService[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastScanId, setLastScanId] = useState<number | undefined>(undefined);
+
+  const refetchDevices = useCallback(async () => {
+    if (!auth.token) return;
+    try {
+      const page = await api.listDevices();
+      setDevices(page.content);
+      const results = await Promise.allSettled(
+        page.content.map(d => api.deviceRisk(d.id))
+      );
+      const map = new Map<number, DeviceRiskDto>();
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
+      });
+      setRisksById(map);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'load failed');
+    }
+  }, [auth.token]);
 
   useEffect(() => {
     if (!auth.token) return;
@@ -102,6 +121,8 @@ function App() {
           risk={selectedRisk}
           services={selectedServices}
           onClose={handleBackgroundClick}
+          isAdmin={auth.roles?.includes('ADMIN') ?? false}
+          onDeviceMutated={refetchDevices}
         />
         {devices.length === 0 && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
