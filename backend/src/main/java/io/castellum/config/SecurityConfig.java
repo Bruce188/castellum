@@ -50,7 +50,7 @@ public class SecurityConfig {
             .csrf(c -> c.disable())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(a -> a
-                .requestMatchers("/api/auth/login", "/actuator/health").permitAll()
+                .requestMatchers("/api/auth/login", "/actuator/health", "/error").permitAll()
                 .anyRequest().authenticated())
             .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class)
             .exceptionHandling(e -> e

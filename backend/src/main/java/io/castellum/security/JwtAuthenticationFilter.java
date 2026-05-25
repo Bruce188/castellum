@@ -52,6 +52,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this(jwtService, auditService, null);
     }
 
+    /**
+     * Skip JWT validation entirely for ERROR-dispatch requests. When Spring forwards to
+     * {@code /error} (missing required parameter → 400, no handler → 404, controller throw → 5xx),
+     * there is no {@code Authorization} header in the forwarded request context, causing the filter
+     * to emit a spurious 401 that masks the real status. The {@code /error} endpoint is already
+     * covered by {@code permitAll()} in {@code SecurityConfig}; this override stops the filter
+     * from running on the forward at all.
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getDispatcherType() == jakarta.servlet.DispatcherType.ERROR
+                || "/error".equals(request.getRequestURI());
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
