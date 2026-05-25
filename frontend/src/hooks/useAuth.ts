@@ -7,12 +7,34 @@ const AUTH_EVENT = 'castellum:auth';
 export interface AuthState {
   token: string | null;
   username: string | null;
+  /** Roles extracted from the JWT payload's {@code roles} claim. Defaults to {@code []}. */
+  roles: string[];
+}
+
+/**
+ * Decodes the {@code roles} claim from a raw JWT token without verifying the signature.
+ * Signature verification is the backend's responsibility; here we only need the claim
+ * for UI role-gating decisions.
+ */
+function decodeRoles(token: string | null): string[] {
+  if (!token) return [];
+  try {
+    const [, payload] = token.split('.');
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    const roles = decoded?.roles;
+    if (Array.isArray(roles)) return roles as string[];
+  } catch {
+    // malformed token — safe default
+  }
+  return [];
 }
 
 function read(): AuthState {
+  const token = localStorage.getItem(TOKEN_KEY);
   return {
-    token: localStorage.getItem(TOKEN_KEY),
+    token,
     username: localStorage.getItem(USER_KEY),
+    roles: decodeRoles(token),
   };
 }
 

@@ -71,6 +71,13 @@ castellum:
       core-pool-size: ${CASTELLUM_SCAN_EXECUTOR_CORE_POOL_SIZE:2}
       max-pool-size: ${CASTELLUM_SCAN_EXECUTOR_MAX_POOL_SIZE:4}
       queue-capacity: ${CASTELLUM_SCAN_EXECUTOR_QUEUE_CAPACITY:10}
+  initial-sync:
+    executor:
+      # Single-threaded executor for the one-click initial data-sync background job.
+      # queueCapacity=0: second submit hits AbortPolicy (AtomicBoolean inFlight guard fires first).
+      core-pool-size: ${CASTELLUM_INITIAL_SYNC_EXECUTOR_CORE_POOL_SIZE:1}
+      max-pool-size: ${CASTELLUM_INITIAL_SYNC_EXECUTOR_MAX_POOL_SIZE:1}
+      queue-capacity: ${CASTELLUM_INITIAL_SYNC_EXECUTOR_QUEUE_CAPACITY:0}
   discovery:
     default-duration-seconds: ${DISCOVERY_DURATION_SECONDS:30}
     passive-sweep-cron: ${DISCOVERY_PASSIVE_SWEEP_CRON:0 0 */6 * * *}

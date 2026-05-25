@@ -253,3 +253,12 @@ Returns a single `CveDetailDto` object. This is a superset of `CveSummaryDto`: a
 `rawJson` is the verbatim NVD JSON string stored during sync. It can be several kilobytes for heavily-annotated CVEs. The list endpoint intentionally omits it; use the detail endpoint when you need the full upstream payload.
 
 Returns HTTP 404 if the CVE identifier is not present in the local mirror.
+
+### Initial data sync
+
+- **Endpoint**: `POST /api/admin/initial-sync` (ADMIN-only, `hasRole('ADMIN')`)
+- **Response**: HTTP 202 with body `{ "status": "started" | "already-running", "startedAt": "<ISO8601>" }` — returns immediately; the actual ingest runs on the dedicated `initialSyncTaskExecutor` (1 thread, 0 queue).
+- **Background job**: invokes `NvdSyncService.bulkPull(since, until)` then `EpssIngestionService.ingest()` then `KevIngestionService.ingest()` sequentially on the background thread; per-feed failure isolation ensures a transient NVD network error does not prevent EPSS+KEV from running.
+- **Audit**: an `INITIAL_SYNC_TRIGGERED` audit row is emitted on every click — regardless of whether a sync is already in flight — so operators see every attempt.
+- **Concurrency guard**: an in-memory `AtomicBoolean inFlight` prevents concurrent re-syncs; a second click while a sync is running returns 202 with `"already-running"` and the original `startedAt`.
+- **Frontend signal**: the `EmptyCorpusBanner` component derives its visibility from `GET /api/risk/feeds/status` (polls every 10 s); the banner and its "Sync NVD + EPSS + KEV" button (admin only) disappear once all three `rowCount` fields are non-zero.

@@ -55,3 +55,28 @@ export interface ScanRequest {
   cidr: string;
   type: ScanType;
 }
+
+export interface FeedsStatusDto {
+  epss: {
+    scoreDate: string | null;
+    rowCount: number;
+  };
+  kev: {
+    lastIngestedAt: string | null;
+    entryCount: number;
+  };
+  nvd: {
+    lastModified: string | null;
+    rowCount: number;
+  };
+}
+
+export interface InitialSyncRequest {
+  since?: string;
+  until?: string;
+}
+
+export interface InitialSyncResponse {
+  status: 'started' | 'already-running';
+  startedAt: string;
+}

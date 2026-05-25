@@ -69,9 +69,12 @@ public class RiskController {
         var epssMaxDate = epssRepo.findMaxScoreDate().orElse(null);
         long kevCount = kevRepo.count();
         var kevMaxIngest = kevRepo.findMaxIngestedAt().orElse(null);
+        long nvdCount = cveRepo.count();
+        var nvdLastModified = cveRepo.findMaxLastModified().orElse(null);
         return new FeedsStatusDto(
             new FeedsStatusDto.EpssStatus(epssMaxDate, epssCount),
-            new FeedsStatusDto.KevStatus(kevMaxIngest, kevCount));
+            new FeedsStatusDto.KevStatus(kevMaxIngest, kevCount),
+            new FeedsStatusDto.NvdStatus(nvdLastModified, nvdCount));
     }
 
     @GetMapping("/device/{id}")

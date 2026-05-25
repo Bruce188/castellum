@@ -1,5 +1,6 @@
 import type {
-  Device, DeviceRiskDto, NetworkService, Page, Scan, ScanRequest,
+  Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
+  NetworkService, Page, Scan, ScanRequest,
 } from './types';
 import { clearAuth, getToken } from '../hooks/useAuth';
 
@@ -36,4 +37,11 @@ export const api = {
     request<Scan>(`/api/scans/${id}`),
   listScans: (size = 10) =>
     request<Page<Scan>>(`/api/scans?size=${size}&sort=requestedAt,desc`),
+  feedsStatus: () =>
+    request<FeedsStatusDto>('/api/risk/feeds/status'),
+  triggerInitialSync: (body?: InitialSyncRequest) =>
+    request<InitialSyncResponse>('/api/admin/initial-sync', {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : '{}',
+    }),
 };

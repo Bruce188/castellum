@@ -39,6 +39,15 @@ public class AsyncConfig {
     @Value("${castellum.scan.executor.queue-capacity:10}")
     private int queueCapacity;
 
+    @Value("${castellum.initial-sync.executor.core-pool-size:1}")
+    private int initialSyncCorePoolSize;
+
+    @Value("${castellum.initial-sync.executor.max-pool-size:1}")
+    private int initialSyncMaxPoolSize;
+
+    @Value("${castellum.initial-sync.executor.queue-capacity:0}")
+    private int initialSyncQueueCapacity;
+
     @Bean("scanTaskExecutor")
     public ThreadPoolTaskExecutor scanTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -46,6 +55,29 @@ public class AsyncConfig {
         executor.setMaxPoolSize(maxPoolSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix("scan-exec-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Dedicated single-threaded executor for the initial data-sync background job.
+     *
+     * <p>Pool is intentionally minimal (corePoolSize=1, maxPoolSize=1, queueCapacity=0)
+     * so at most one sync runs at a time. The {@code AtomicBoolean inFlight} guard in
+     * {@code InitialSyncService} short-circuits before submit, so the {@code AbortPolicy}
+     * here is a belt-and-braces defence only.
+     *
+     * <p>Isolation from {@code scanTaskExecutor} prevents a multi-hour NVD bulk pull from
+     * starving scan-dispatch slots.
+     */
+    @Bean("initialSyncTaskExecutor")
+    public ThreadPoolTaskExecutor initialSyncTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(initialSyncCorePoolSize);
+        executor.setMaxPoolSize(initialSyncMaxPoolSize);
+        executor.setQueueCapacity(initialSyncQueueCapacity);
+        executor.setThreadNamePrefix("initial-sync-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;
