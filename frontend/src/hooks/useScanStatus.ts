@@ -33,7 +33,7 @@ export function useScanStatus(scanId: number | null): Scan | null {
         const s = await api.getScan(id);
         if (cancelled) return;
         setScan(s);
-        if (s.status === 'COMPLETED' || s.status === 'FAILED') {
+        if (s.status === 'COMPLETE' || s.status === 'FAILED') {
           if (handle !== null) window.clearInterval(handle);
           try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
         }

@@ -1,6 +1,6 @@
 export type Criticality = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type ScanType = 'PING_SWEEP' | 'SERVICE_DETECT' | 'OS_FINGERPRINT';
-export type ScanStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type ScanStatus = 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED';
 export type RiskTier = 'low' | 'med' | 'high' | 'crit' | 'unknown';
 
 export interface Device {
@@ -48,6 +48,7 @@ export interface Scan {
   status: ScanStatus;
   requestedAt: string;
   completedAt: string | null;
+  failureReason?: string | null;
 }
 
 export interface ScanRequest {

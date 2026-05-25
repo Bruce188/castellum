@@ -5,7 +5,11 @@ import { useScanStatus } from '../hooks/useScanStatus';
 
 const SCAN_TYPES: ScanType[] = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT'];
 
-export function ScanTriggerForm() {
+interface Props {
+  onScanSubmitted?: (id: number) => void;
+}
+
+export function ScanTriggerForm({ onScanSubmitted }: Props) {
   const [cidr, setCidr] = useState('192.168.1.0/24');
   const [type, setType] = useState<ScanType>('PING_SWEEP');
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
@@ -18,6 +22,7 @@ export function ScanTriggerForm() {
     try {
       const result = await api.triggerScan({ cidr, type });
       setActiveScanId(result.id);
+      onScanSubmitted?.(result.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'submit failed');
     }

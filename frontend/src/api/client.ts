@@ -34,4 +34,6 @@ export const api = {
     request<{ id: number }>('/api/scan', { method: 'POST', body: JSON.stringify(req) }),
   getScan: (id: number) =>
     request<Scan>(`/api/scans/${id}`),
+  listScans: (size = 10) =>
+    request<Page<Scan>>(`/api/scans?size=${size}&sort=requestedAt,desc`),
 };

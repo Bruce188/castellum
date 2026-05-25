@@ -145,4 +145,14 @@ test.describe('Castellum QA sweep', () => {
     // either way is acceptable, just shouldn't crash
     expect(typeof loggedIn).toBe('boolean');
   });
+
+  test('13. recent scans panel shows newly submitted scan within 2s', async ({ page }) => {
+    await signIn(page, ADMIN);
+    // submit a scan via the form, then watch panel
+    const cidr = page.locator('input').filter({ hasNot: page.locator('[type="password"]') }).first();
+    await cidr.fill('127.0.0.1/32');
+    await page.getByRole('button', { name: /scan|trigger|submit/i }).first().click();
+    // panel should pick it up via optimistic insert or first poll
+    await expect(page.getByText(/127\.0\.0\.1\/32/).first()).toBeVisible({ timeout: 5000 });
+  });
 });

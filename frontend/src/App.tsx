@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScanTriggerForm } from './components/ScanTriggerForm';
+import { RecentScansPanel } from './components/RecentScansPanel';
 import { TopologyView } from './components/TopologyView';
 import { DeviceDetailPanel } from './components/DeviceDetailPanel';
 import { Login } from './components/Login';
@@ -16,6 +17,7 @@ function App() {
   const [selectedRisk, setSelectedRisk] = useState<DeviceRiskDto | null>(null);
   const [selectedServices, setSelectedServices] = useState<NetworkService[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastScanId, setLastScanId] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (!auth.token) return;
@@ -67,9 +69,9 @@ function App() {
   }
 
   return (
-    <div className="grid grid-rows-[auto_1fr] h-screen">
+    <div className="grid grid-rows-[auto_auto_1fr] h-screen">
       <header className="flex items-center justify-between gap-4">
-        <ScanTriggerForm />
+        <ScanTriggerForm onScanSubmitted={setLastScanId} />
         <div className="flex items-center gap-3 pr-4 text-sm text-gray-600">
           <span>{auth.username}</span>
           <button
@@ -81,6 +83,7 @@ function App() {
           </button>
         </div>
       </header>
+      <RecentScansPanel latestSubmittedId={lastScanId} />
       <main className="relative">
         <TopologyView
           devices={devices}
