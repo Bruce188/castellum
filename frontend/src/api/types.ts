@@ -80,3 +80,23 @@ export interface InitialSyncResponse {
   status: 'started' | 'already-running';
   startedAt: string;
 }
+
+export interface AuditEntry {
+  id: number;
+  occurredAt: string;        // ISO8601
+  actor: string;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  payload: string | null;    // serialized JSON string
+}
+
+export interface AuditFilters {
+  since?: string;            // ISO8601
+  until?: string;
+  action?: string;
+  actor?: string;
+  resourceType?: string;
+  page?: number;
+  size?: number;             // clamped server-side to 500
+}

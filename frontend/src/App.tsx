@@ -4,6 +4,7 @@ import { RecentScansPanel } from './components/RecentScansPanel';
 import { TopologyView } from './components/TopologyView';
 import { DeviceDetailPanel } from './components/DeviceDetailPanel';
 import { EmptyCorpusBanner } from './components/EmptyCorpusBanner';
+import AuditLogPanel from './components/AuditLogPanel';
 import { Login } from './components/Login';
 import { api } from './api/client';
 import { clearAuth, useAuth } from './hooks/useAuth';
@@ -70,7 +71,7 @@ function App() {
   }
 
   return (
-    <div className="grid grid-rows-[auto_auto_auto_1fr] h-screen">
+    <div className="grid grid-rows-[auto_auto_auto_auto_1fr] h-screen">
       <EmptyCorpusBanner isAdmin={auth.roles?.includes('ADMIN') ?? false} />
       <header className="flex items-center justify-between gap-4">
         <ScanTriggerForm onScanSubmitted={setLastScanId} />
@@ -86,6 +87,7 @@ function App() {
         </div>
       </header>
       <RecentScansPanel latestSubmittedId={lastScanId} />
+      <AuditLogPanel isAdmin={auth.roles?.includes('ADMIN') ?? false} />
       <main className="relative">
         <TopologyView
           devices={devices}

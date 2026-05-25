@@ -309,4 +309,17 @@ class FlywayMigrationIntegrationTest {
         assertNotNull(columnCount, "INFORMATION_SCHEMA.COLUMNS query must return a result");
         assertTrue(columnCount.intValue() > 0, "token_version column must exist in users table per V10 migration");
     }
+
+    @Test
+    void v13_addsAuditLogTimeActionIndex() {
+        // Confirm the index exists via INFORMATION_SCHEMA.INDEXES
+        Number indexCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES " +
+            "WHERE UPPER(INDEX_NAME) = 'IDX_AUDIT_LOG_TIME_ACTION' " +
+            "AND UPPER(TABLE_NAME) = 'AUDIT_LOG'",
+            Number.class);
+        assertNotNull(indexCount, "INFORMATION_SCHEMA.INDEXES query must return a result");
+        assertTrue(indexCount.intValue() >= 1,
+            "idx_audit_log_time_action index must exist on audit_log after V13 migration");
+    }
 }

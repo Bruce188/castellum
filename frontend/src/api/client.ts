@@ -1,4 +1,5 @@
 import type {
+  AuditEntry, AuditFilters,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   NetworkService, Page, Scan, ScanRequest,
 } from './types';
@@ -44,4 +45,36 @@ export const api = {
       method: 'POST',
       body: body ? JSON.stringify(body) : '{}',
     }),
+  listAudit: (filters: AuditFilters) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+    });
+    if (!params.has('sort')) params.set('sort', 'occurredAt,desc');
+    return request<Page<AuditEntry>>(`/api/audit?${params.toString()}`);
+  },
+  downloadAuditCsv: async (filters: AuditFilters): Promise<Blob> => {
+    const token = getToken();
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '' && k !== 'page' && k !== 'size') {
+        params.set(k, String(v));
+      }
+    });
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/audit/csv?${params.toString()}`, { headers });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (response.status === 413) {
+      const body = await response.json();
+      throw new Error(`CSV cap exceeded: filteredCount=${body.filteredCount}, limit=${body.limit}`);
+    }
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return await response.blob();
+  },
 };

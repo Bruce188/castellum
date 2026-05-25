@@ -11,6 +11,11 @@ vi.mock('../components/EmptyCorpusBanner', () => ({
   EmptyCorpusBanner: () => <div data-testid="empty-corpus-banner" />,
 }));
 
+// Mock AuditLogPanel so App.smoke tests don't need audit API network call.
+vi.mock('../components/AuditLogPanel', () => ({
+  default: () => <div data-testid="audit-log-panel" />,
+}));
+
 import App from '../App';
 
 // A minimal JWT with payload { "roles": ["ADMIN"] } — not a real signed token;

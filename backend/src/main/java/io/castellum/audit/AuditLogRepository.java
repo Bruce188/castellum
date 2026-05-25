@@ -15,8 +15,13 @@ import java.util.Optional;
  * <p>Spring Data recognises {@code save} and {@code findById} / {@code findAll}
  * as built-in operations even on the minimal {@link Repository} base, so no
  * custom {@code @Query} annotations are needed here.
+ *
+ * <p>{@link AuditLogReadFragment} contributes the read-only {@code Specification}
+ * query methods (paged + sorted + count) — implemented by {@link AuditLogRepositoryImpl}.
+ * Crucially, this fragment exposes NO {@code delete} methods, so the reflection guard
+ * {@code AuditLogRepositoryTest.auditLogRepository_declaresNoDeleteMethods} stays green.
  */
-public interface AuditLogRepository extends Repository<AuditLog, Long> {
+public interface AuditLogRepository extends Repository<AuditLog, Long>, AuditLogReadFragment {
 
     /**
      * Persist a new audit event. Always creates a new row (insert-only) because
