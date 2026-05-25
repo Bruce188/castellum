@@ -16,6 +16,11 @@ vi.mock('../components/AuditLogPanel', () => ({
   default: () => <div data-testid="audit-log-panel" />,
 }));
 
+// Mock ThreatsDashboard so App.smoke tests don't need /api/risk/top + /api/risk/feeds/status.
+vi.mock('../components/ThreatsDashboard', () => ({
+  ThreatsDashboard: () => <div data-testid="threats-dashboard" />,
+}));
+
 import App from '../App';
 
 // A minimal JWT with payload { "roles": ["ADMIN"] } — not a real signed token;

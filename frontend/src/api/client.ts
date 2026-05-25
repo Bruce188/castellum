@@ -1,7 +1,9 @@
 import type {
   AuditEntry, AuditFilters,
+  CveDetailDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   NetworkService, Page, Scan, ScanRequest,
+  TopRiskDeviceDto,
 } from './types';
 import { clearAuth, getToken } from '../hooks/useAuth';
 
@@ -30,6 +32,10 @@ export const api = {
     request<Page<Device>>('/api/devices?size=200'),
   deviceRisk: (id: number) =>
     request<DeviceRiskDto>(`/api/risk/device/${id}`),
+  topRisk: (n: number = 10) =>
+    request<TopRiskDeviceDto[]>(`/api/risk/top?n=${n}`),
+  cveDetail: (cveId: string) =>
+    request<CveDetailDto>(`/api/cve/${encodeURIComponent(cveId)}`),
   listServicesForDevice: (id: number) =>
     request<NetworkService[]>(`/api/services?deviceId=${id}`),
   triggerScan: (req: ScanRequest) =>

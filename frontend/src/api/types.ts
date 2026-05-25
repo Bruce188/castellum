@@ -31,6 +31,47 @@ export interface DeviceRiskDto {
   deviceId: number;
   score: string;
   topCveIds: string[];
+  /** Optional component breakdown used by the "why this score?" UI. Absent on legacy responses. */
+  components?: ScoreComponents | null;
+}
+
+/** Breakdown of a device's composite risk score into its input components. */
+export interface ScoreComponents {
+  /** CVSS base score on the 0-10 scale (max across the device's matched CVEs). */
+  cvssMax: string;
+  /** EPSS exploit-probability score in [0.00, 1.00] (max across matched CVEs). */
+  epssMax: string;
+  /** True if any matched CVE appears in CISA's KEV catalog. */
+  kevPresent: boolean;
+  /** Criticality weight: LOW=0.00, MEDIUM=0.25, HIGH=0.50, CRITICAL=1.00. */
+  criticalityWeight: string;
+}
+
+/** Read-only DTO returned by GET /api/risk/top — fleet-ranked risk leaderboard. */
+export interface TopRiskDeviceDto {
+  deviceId: number;
+  hostname: string | null;
+  ipAddress: string;
+  criticality: Criticality;
+  score: string;
+  kevCount: number;
+}
+
+/** Read-only DTO returned by GET /api/cve/{cveId}. Includes the upstream NVD rawJson. */
+export interface CveDetailDto {
+  cveId: string;
+  published: string | null;
+  lastModified: string;
+  vulnStatus: string | null;
+  description: string | null;
+  cvssV31Score: string | null;
+  cvssV31Vector: string | null;
+  cvssV30Score: string | null;
+  cvssV30Vector: string | null;
+  cvssV2Score: string | null;
+  cvssV2Vector: string | null;
+  fetchedAt: string | null;
+  rawJson: string | null;
 }
 
 export interface Page<T> {

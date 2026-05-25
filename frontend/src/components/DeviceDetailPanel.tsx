@@ -1,5 +1,7 @@
 import type { Device, DeviceRiskDto, NetworkService } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
+import { CveEvidenceTable } from './CveEvidenceTable';
+import { WhyScorePanel } from './WhyScorePanel';
 
 interface Props {
   device: Device | null;
@@ -83,16 +85,16 @@ export function DeviceDetailPanel({ device, risk, services, onClose }: Props) {
         )}
       </section>
 
-      <section>
-        <h3 className="text-sm font-semibold mb-1">Top CVEs</h3>
-        {risk && risk.topCveIds.length > 0 ? (
-          <ul className="text-sm list-disc pl-5">
-            {risk.topCveIds.map(id => <li key={id}>{id}</li>)}
-          </ul>
-        ) : (
-          <p className="text-sm text-gray-500">No matched CVEs.</p>
-        )}
+      <section className="mb-4">
+        <h3 className="text-sm font-semibold mb-1">CVE Evidence</h3>
+        <CveEvidenceTable cveIds={risk?.topCveIds ?? []} />
       </section>
+
+      {risk?.components && (
+        <section className="mb-4">
+          <WhyScorePanel risk={risk} />
+        </section>
+      )}
     </aside>
   );
 }
