@@ -37,6 +37,7 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
           onChange={e => setCidr(e.target.value)}
           className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm w-44"
           required
+          title="CIDR notation, e.g. 192.168.1.0/24 — the subnet the scanner will sweep."
         />
       </label>
       <label className="text-sm font-medium">Type
@@ -44,6 +45,7 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
           value={type}
           onChange={e => setType(e.target.value as ScanType)}
           className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm"
+          title="Scan type: PING_SWEEP (host discovery) | SERVICE_DETECT (port + banner) | OS_FINGERPRINT (OS guess)."
         >
           {SCAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>

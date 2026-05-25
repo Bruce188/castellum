@@ -1,101 +1,32 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ScanTriggerForm } from './components/ScanTriggerForm';
-import { RecentScansPanel } from './components/RecentScansPanel';
-import { TopologyView } from './components/TopologyView';
-import { DeviceDetailPanel } from './components/DeviceDetailPanel';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { EmptyCorpusBanner } from './components/EmptyCorpusBanner';
-import AuditLogPanel from './components/AuditLogPanel';
-import { ThreatsDashboard } from './components/ThreatsDashboard';
 import { Login } from './components/Login';
-import { api } from './api/client';
+import { Sidebar } from './components/Sidebar';
+import { TopologyPage } from './pages/TopologyPage';
+import { ScansPage } from './pages/ScansPage';
+import { ThreatsPage } from './pages/ThreatsPage';
+import { CvesPage } from './pages/CvesPage';
+import { AuditPage } from './pages/AuditPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { clearAuth, useAuth } from './hooks/useAuth';
-import type { Device, DeviceRiskDto, NetworkService } from './api/types';
 import './index.css';
 
-function App() {
+/**
+ * Authenticated shell — sidebar + topbar + routed main pane.
+ *
+ * Exported separately from the default {@link App} so tests can mount the shell
+ * inside a `MemoryRouter` without spinning up a `BrowserRouter` that owns the
+ * jsdom `window.history` instance.
+ */
+export function AppShell() {
   const auth = useAuth();
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
-  const [selectedRisk, setSelectedRisk] = useState<DeviceRiskDto | null>(null);
-  const [selectedServices, setSelectedServices] = useState<NetworkService[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [lastScanId, setLastScanId] = useState<number | undefined>(undefined);
-
-  const refetchDevices = useCallback(async () => {
-    if (!auth.token) return;
-    try {
-      const page = await api.listDevices();
-      setDevices(page.content);
-      const results = await Promise.allSettled(
-        page.content.map(d => api.deviceRisk(d.id))
-      );
-      const map = new Map<number, DeviceRiskDto>();
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
-      });
-      setRisksById(map);
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'load failed');
-    }
-  }, [auth.token]);
-
-  useEffect(() => {
-    if (!auth.token) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const page = await api.listDevices();
-        if (cancelled) return;
-        setDevices(page.content);
-        const results = await Promise.allSettled(
-          page.content.map(d => api.deviceRisk(d.id))
-        );
-        if (cancelled) return;
-        const map = new Map<number, DeviceRiskDto>();
-        results.forEach((r, i) => {
-          if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
-        });
-        setRisksById(map);
-      } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'load failed');
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [auth.token]);
-
-  if (!auth.token) return <Login />;
-
-  async function handleNodeClick(id: number) {
-    const dev = devices.find(d => d.id === id) ?? null;
-    setSelectedDevice(dev);
-    if (dev === null) return;
-    try {
-      const [services, risk] = await Promise.all([
-        api.listServicesForDevice(id),
-        api.deviceRisk(id),
-      ]);
-      setSelectedServices(services);
-      setSelectedRisk(risk);
-    } catch {
-      setSelectedServices([]);
-      setSelectedRisk(null);
-    }
-  }
-
-  function handleBackgroundClick() {
-    setSelectedDevice(null);
-    setSelectedRisk(null);
-    setSelectedServices([]);
-  }
-
+  const isAdmin = auth.roles?.includes('ADMIN') ?? false;
   return (
-    <div className="grid grid-rows-[auto_auto_auto_auto_auto_1fr] h-screen">
-      <EmptyCorpusBanner isAdmin={auth.roles?.includes('ADMIN') ?? false} />
-      <header className="flex items-center justify-between gap-4">
-        <ScanTriggerForm onScanSubmitted={setLastScanId} />
-        <div className="flex items-center gap-3 pr-4 text-sm text-gray-600">
+    <div className="flex h-screen">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0">
+        <EmptyCorpusBanner isAdmin={isAdmin} />
+        <div className="flex items-center justify-end gap-3 px-4 py-2 border-b border-gray-200 bg-white text-sm text-gray-600">
           <span>{auth.username}</span>
           <button
             type="button"
@@ -105,39 +36,32 @@ function App() {
             Sign out
           </button>
         </div>
-      </header>
-      <RecentScansPanel latestSubmittedId={lastScanId} />
-      <ThreatsDashboard />
-      <AuditLogPanel isAdmin={auth.roles?.includes('ADMIN') ?? false} />
-      <main className="relative">
-        <TopologyView
-          devices={devices}
-          risksById={risksById}
-          onNodeClick={handleNodeClick}
-          onBackgroundClick={handleBackgroundClick}
-        />
-        <DeviceDetailPanel
-          device={selectedDevice}
-          risk={selectedRisk}
-          services={selectedServices}
-          onClose={handleBackgroundClick}
-          isAdmin={auth.roles?.includes('ADMIN') ?? false}
-          onDeviceMutated={refetchDevices}
-        />
-        {devices.length === 0 && !loadError && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <p className="text-gray-500 text-center max-w-md pointer-events-auto">
-              No devices yet. Submit a scan above or POST <code>/api/devices</code> to populate the graph.
-            </p>
-          </div>
-        )}
-        {loadError && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-red-600">Failed to load: {loadError}</p>
-          </div>
-        )}
-      </main>
+        <div className="flex-1 min-h-0">
+          <Routes>
+            <Route path="/" element={<TopologyPage />} />
+            <Route path="/scans" element={<ScansPage />} />
+            <Route path="/threats" element={<ThreatsPage />} />
+            <Route path="/cves" element={<CvesPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+        </div>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Root component. Short-circuits to {@link Login} when no JWT is present;
+ * otherwise mounts the routed {@link AppShell} inside a {@link BrowserRouter}.
+ */
+function App() {
+  const auth = useAuth();
+  if (!auth.token) return <Login />;
+  return (
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
   );
 }
 

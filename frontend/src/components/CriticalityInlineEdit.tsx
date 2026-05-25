@@ -68,6 +68,7 @@ export function CriticalityInlineEdit({ value, isAdmin, onSave, disabled }: Prop
         onBlur={() => { if (!saving) setEditing(false); }}
         autoFocus
         className="border border-gray-300 rounded px-1 py-0.5 text-sm"
+        title="Criticality: LOW / MEDIUM / HIGH / CRITICAL — drives the composite risk score (CRITICAL weights 1.00, LOW weights 0.00)."
       >
         {OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
