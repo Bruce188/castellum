@@ -10,7 +10,6 @@ import './index.css';
 
 function App() {
   const auth = useAuth();
-  if (!auth.token) return <Login />;
   const [devices, setDevices] = useState<Device[]>([]);
   const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -19,6 +18,7 @@ function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!auth.token) return;
     let cancelled = false;
     (async () => {
       try {
@@ -39,7 +39,9 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [auth.token]);
+
+  if (!auth.token) return <Login />;
 
   async function handleNodeClick(id: number) {
     const dev = devices.find(d => d.id === id) ?? null;
