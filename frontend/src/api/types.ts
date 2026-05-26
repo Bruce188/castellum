@@ -68,7 +68,16 @@ export interface TopRiskDeviceDto {
   kevCount: number;
 }
 
-/** Read-only summary returned by GET /api/cve/fleet listing. Excludes rawJson. */
+/**
+ * Read-only summary returned by GET /api/cve/fleet listing. Excludes rawJson.
+ *
+ * <p><b>v3-F1 enrichment fields:</b> {@link #kev} is never null (defaults to false);
+ * {@link #epssScore} and {@link #compositeScore} arrive from the backend as
+ * Jackson-serialized BigDecimal strings — callers convert via {@code Number(x)}
+ * before any arithmetic / comparison. {@code epssScore} is the raw probability
+ * in [0, 1]; {@code compositeScore} is clamped to [0.00, 10.00]. Both are
+ * {@code null} when no signal exists (no EPSS row / no CVSS metric).
+ */
 export interface CveSummaryDto {
   cveId: string;
   published: string | null;
@@ -82,9 +91,21 @@ export interface CveSummaryDto {
   cvssV2Score: string | null;
   cvssV2Vector: string | null;
   fetchedAt: string | null;
+  /** CISA KEV listing membership; never null (defaults to false on the wire). */
+  kev: boolean;
+  /** Raw EPSS probability in [0, 1] as a Jackson-serialized BigDecimal string; null if no row. */
+  epssScore: string | null;
+  /** Composite risk score in [0.00, 10.00] as a string; null if no CVSS metric. */
+  compositeScore: string | null;
 }
 
-/** Read-only DTO returned by GET /api/cve/{cveId}. Includes the upstream NVD rawJson. */
+/**
+ * Read-only DTO returned by GET /api/cve/{cveId}. Includes the upstream NVD rawJson.
+ *
+ * <p><b>v3-F1 enrichment fields:</b> appended AFTER {@link #rawJson}. Same semantics
+ * as {@link CveSummaryDto} — composite uses {@code Criticality.MEDIUM} on this endpoint
+ * since there's no device context (per analysis Decision 3).
+ */
 export interface CveDetailDto {
   cveId: string;
   published: string | null;
@@ -99,7 +120,16 @@ export interface CveDetailDto {
   cvssV2Vector: string | null;
   fetchedAt: string | null;
   rawJson: string | null;
+  /** CISA KEV listing membership; never null. */
+  kev: boolean;
+  /** Raw EPSS probability in [0, 1] as a string; null if no row. */
+  epssScore: string | null;
+  /** Composite risk score in [0.00, 10.00] as a string; null if no CVSS metric. */
+  compositeScore: string | null;
 }
+
+/** Sort key for {@code GET /api/cve/fleet}. {@code undefined} → backend default (cvssV31Score DESC). */
+export type CveFleetSort = 'composite' | 'cvss' | 'kev' | 'epss';
 
 export interface Page<T> {
   content: T[];
