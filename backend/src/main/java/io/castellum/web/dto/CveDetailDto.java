@@ -9,9 +9,15 @@ import java.time.Instant;
  * so callers with sufficient privilege can access the full upstream NVD payload.
  *
  * <p>Sibling of {@link CveSummaryDto}: the only difference is the presence of
- * {@code rawJson} at the end. The codebase has no springdoc-openapi or
- * {@code io.swagger.v3.oas.annotations} on the classpath; record Javadoc is the
- * project's convention for field documentation.
+ * {@code rawJson} at the end of the original 12-field tuple. The codebase has no
+ * springdoc-openapi or {@code io.swagger.v3.oas.annotations} on the classpath; record
+ * Javadoc is the project's convention for field documentation.
+ *
+ * <p><b>v3-F1 enrichment fields (kev, epssScore, compositeScore):</b> appended AFTER
+ * {@code rawJson}. {@code kev} is never null; {@code epssScore} is the raw probability
+ * in [0, 1]; {@code compositeScore} is clamped to [0.00, 10.00]. For the detail
+ * endpoint, composite uses {@code Criticality.MEDIUM} (no device context). See
+ * {@link CveSummaryDto} for the full fleet-mode semantics.
  *
  * @param cveId         NVD CVE identifier (e.g. {@code CVE-2020-15778}).
  * @param published     timestamp when NVD first published this entry; may be {@code null}.
@@ -27,6 +33,9 @@ import java.time.Instant;
  * @param fetchedAt     timestamp when Castellum last fetched this record from NVD; nullable.
  * @param rawJson       the full upstream NVD JSON payload (potentially multi-KB); intentionally
  *                      only exposed on the detail endpoint to avoid bandwidth waste on list calls.
+ * @param kev           CISA KEV listing membership; never {@code null} (defaults to {@code FALSE}).
+ * @param epssScore     raw EPSS probability in [0, 1]; {@code null} if no {@code epss_score} row exists.
+ * @param compositeScore composite risk score in [0.00, 10.00]; {@code null} if no CVSS metric is populated.
  */
 public record CveDetailDto(
         String cveId,
@@ -41,4 +50,7 @@ public record CveDetailDto(
         BigDecimal cvssV2Score,
         String cvssV2Vector,
         Instant fetchedAt,
-        String rawJson) {}
+        String rawJson,
+        Boolean kev,
+        BigDecimal epssScore,
+        BigDecimal compositeScore) {}
