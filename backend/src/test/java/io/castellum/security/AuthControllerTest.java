@@ -60,6 +60,12 @@ class AuthControllerTest {
     @MockBean
     ClientAddressResolver clientAddressResolver;
 
+    @MockBean
+    PasswordChangeRateLimiter passwordChangeRateLimiter;
+
+    @MockBean
+    org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
     @BeforeEach
     void setupRateLimiter() {
         when(rateLimiter.tryAcquire(any())).thenReturn(true);

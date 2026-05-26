@@ -193,3 +193,35 @@ export interface OtProbeResponse {
   serviceId: number;
   observedAt: string;
 }
+
+/** Mirror of the backend {@code Role} enum. */
+export type UserRole = 'ADMIN' | 'VIEWER';
+
+/** Login response payload. {@code mustChangePassword} signals first-login rotation. */
+export interface LoginResult {
+  token: string;
+  expiresAt: string;
+  roles: string[];
+  mustChangePassword: boolean;
+}
+
+/** Read-only projection of a managed user. {@code passwordHash} is never returned. */
+export interface UserDto {
+  id: number;
+  username: string;
+  role: UserRole;
+  enabled: boolean;
+  createdAt: string | null;
+  lastLoginAt: string | null;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  role: UserRole;
+  initialPassword: string;
+}
+
+export interface ChangePasswordRequest {
+  oldPassword: string;
+  newPassword: string;
+}

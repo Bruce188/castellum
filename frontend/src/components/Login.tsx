@@ -23,12 +23,12 @@ export function Login() {
         setError(res.status === 401 ? 'Invalid credentials' : `Login failed: ${res.status}`);
         return;
       }
-      const data = (await res.json()) as { token: string };
+      const data = (await res.json()) as { token: string; mustChangePassword?: boolean };
       if (!data.token) {
         setError('Login response missing token');
         return;
       }
-      setAuth(data.token, username);
+      setAuth(data.token, username, Boolean(data.mustChangePassword));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error');
     } finally {

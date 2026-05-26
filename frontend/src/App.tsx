@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { EmptyCorpusBanner } from './components/EmptyCorpusBanner';
+import { ForcePasswordRotation } from './components/ForcePasswordRotation';
 import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { TopologyPage } from './pages/TopologyPage';
@@ -58,6 +59,9 @@ export function AppShell() {
 function App() {
   const auth = useAuth();
   if (!auth.token) return <Login />;
+  // First-login flow: render the rotation overlay in place of the routed app.
+  // No BrowserRouter / Routes are mounted, so no navigation can match.
+  if (auth.mustChangePassword) return <ForcePasswordRotation />;
   return (
     <BrowserRouter>
       <AppShell />
