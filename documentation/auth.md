@@ -5,6 +5,7 @@
 | Method | Path | Required role |
 |--------|------|---------------|
 | POST | `/api/auth/login` | `permitAll` |
+| POST | `/api/auth/change-password` | authenticated (any role) |
 | GET | `/api/devices`, `/api/devices/{id}` | `VIEWER`+ |
 | POST | `/api/devices` | `ADMIN` |
 | PUT | `/api/devices/{id}` | `ADMIN` |
@@ -15,12 +16,18 @@
 | DELETE | `/api/services/{id}` | `ADMIN` |
 | POST | `/api/scan` | `ADMIN` |
 | GET | `/api/scans`, `/api/scans/{id}` | `VIEWER`+ |
-| GET | `/api/cve`, `/api/cve/{cveId}` | `VIEWER`+ |
-| GET | `/api/risk/score`, `/api/risk/feeds/status`, `/api/risk/device/{id}` | `VIEWER`+ |
+| GET | `/api/cve`, `/api/cve/{cveId}`, `/api/cve/fleet` | `VIEWER`+ |
+| GET | `/api/risk/score`, `/api/risk/feeds/status`, `/api/risk/device/{id}`, `/api/risk/top` | `VIEWER`+ |
 | POST | `/api/discovery/passive` | `ADMIN` |
+| GET | `/api/discovery/interfaces` | `ADMIN` (degrades to 403→[] in client) |
 | POST | `/api/ot-probe` | `ADMIN` |
 | GET | `/api/graph/shortest-path` | `VIEWER`+ |
 | POST | `/api/threat-intel/export`, `/api/threat-intel/push/taxii`, `/api/threat-intel/push/misp` | `ADMIN` |
+| GET / POST | `/api/integrations/{taxii\|misp\|stix}` | `ADMIN` |
+| GET / POST / PUT | `/api/users`, `/api/users/{id}` | `ADMIN` |
+| GET / POST | `/api/scan/policy/*` | `ADMIN` |
+| GET | `/api/audit` | `ADMIN` |
+| GET | `/api/audit/csv` | `ADMIN` |
 | GET | `/actuator/health` | `permitAll` |
 
 `VIEWER`+ = `hasAnyRole('VIEWER','ADMIN')`. `ADMIN` = `hasRole('ADMIN')`.
@@ -174,6 +181,65 @@ refuses to start. Malformed CIDRs also cause a startup failure.
 ### Multi-instance caveat
 
 The in-memory limiter is **single-instance only**. Operators running multiple replicas must front Castellum with a shared rate-limiter (Redis-backed Bucket4j, an API gateway, or a load-balancer-level rule) and set `CASTELLUM_SECURITY_RATE_LIMIT_LOGIN_MAX_ATTEMPTS` to a high value locally. AC-7 NIST compliance is then satisfied at the gateway layer.
+
+## Change password
+
+```
+POST /api/auth/change-password
+```
+
+Any authenticated user can rotate their own password. The request
+body carries the *current* password (re-authenticated against the
+stored BCrypt hash) plus the proposed new password:
+
+```json
+{
+  "currentPassword": "the-old-one",
+  "newPassword": "the-new-one-min-12-chars"
+}
+```
+
+Successful rotation:
+- Re-hashes the new password with BCrypt strength-12.
+- Increments `token_version` so every outstanding JWT for the user is
+  rejected on the next request. The caller's own current token is
+  invalidated too — the client must re-login after rotation.
+- Clears `must_change_password` if it was set.
+- Emits `PASSWORD_CHANGE` audit event.
+
+Failure modes:
+- 401 if `currentPassword` does not match the stored hash.
+- 400 with `{"error":"weak_password","message":"..."}` if the new
+  password fails the strength check (currently: ≥ 12 chars, must
+  differ from current).
+- 429 if the per-actor `PasswordChangeRateLimiter` sliding window
+  (5 attempts / 60s by default) is exhausted.
+
+## First-login forced rotation
+
+The bootstrap-admin and viewer initializers set
+`must_change_password = true` whenever they create OR update a user
+from environment-variable hashes. `LoginResponse` exposes a
+`mustChangePassword: boolean` field; when true the frontend mounts
+`ForcePasswordRotation` in place of the routed app — no navigation
+matches until the user successfully POSTs to
+`/api/auth/change-password`.
+
+## User management
+
+ADMIN-only CRUD over `/api/users`:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/users` | List all users (id, username, role, enabled, lastLogin). |
+| POST | `/api/users` | Create a user. Body: `{username, password, role}`. Password BCrypt-hashed at strength 12; `mustChangePassword=true` set by default so the operator's chosen password is rotated on first login. |
+| PUT | `/api/users/{id}` | Update role / enabled state. |
+
+`/api/users/{username}/disable` (POST, also ADMIN-only) remains the
+fast-path for revoking access — it sets `enabled=false` and bumps
+`token_version` atomically. Use this for "rage-revoke" scenarios; use
+`PUT /api/users/{id}` with `{enabled: false}` for normal admin
+deactivations.
 
 ## Security Headers
 

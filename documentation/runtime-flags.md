@@ -81,3 +81,45 @@ sudo setcap cap_net_raw+eip /usr/local/bin/castellum-launcher
 ```
 
 Caveat: `setcap` on the JDK binary itself is brittle — `java` binary updates wipe the capability. Prefer `setcap` on a wrapper script that exec's the real `java`.
+
+## 7. Environment variables
+
+Environment-driven configuration. The backend resolves these via Spring's standard `Environment` bean.
+
+### `CASTELLUM_INTEGRATION_KEY`
+
+AES-256 key (32 bytes, hex- or base64-encoded depending on operator
+preference; the cipher reads the raw byte length) used to encrypt
+TAXII / MISP credentials at rest in the `integration_config` table.
+Required when the threat-intel-push integrations (TAXII, MISP) are
+configured. Read by `AesGcmCipher` at boot — startup fails fast with a
+clear error if the variable is missing while at least one
+`integration_config` row exists. Generation:
+
+```bash
+openssl rand -hex 32
+```
+
+Rotation is non-trivial: changing the key requires re-encrypting every
+row in `integration_config` with the new key. The current
+implementation does not include a rotation helper; rotation today is
+"truncate the table, re-enter credentials in the UI under the new
+key." A future feature will add a `ROTATION_KEY` env that runs a
+one-shot re-encrypt on boot.
+
+### `CASTELLUM_JWT_SECRET`
+
+HMAC-SHA256 signing key (32+ bytes) for issued JWTs. Read by
+`JwtService` at boot. Missing → boot fails with an explicit error.
+Generate with `openssl rand -hex 32`. Rotation invalidates every
+outstanding token instantly; combine with `tokenVersion` bump in
+`AuthController` for per-user invalidation.
+
+### `CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD`
+
+Optional. When set on first boot (before the `users` table has any
+admin), creates an `admin` user with this password and marks
+`must_change_password = true` so the operator is forced to rotate on
+first login. Subsequent boots ignore the variable. If unset on first
+boot, a random 32-character password is generated, logged once at
+INFO, and the operator must capture it from the log.
