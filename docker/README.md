@@ -1,5 +1,12 @@
 # docker/ — self-hosted smoke stacks for castellum threat-intel pushes
 
+> WARNING: smoke-test fixtures only. The default credentials baked into
+> these compose files (`admin:Password0` for medallion, `admin@admin.test`
+> / `admin` for MISP, `changeme-root` / `example` for MariaDB) are public
+> image baselines — NOT secrets. NEVER deploy these compose files
+> unmodified to any reachable network: change every password, restrict
+> port bindings to `127.0.0.1`, and add real network policy first.
+
 Two minimal compose files that stand up real TAXII 2.1 and MISP servers on
 localhost so the backend's `POST /api/threat-intel/push/taxii` and
 `POST /api/threat-intel/push/misp` paths can be exercised against actual
@@ -292,13 +299,15 @@ fixes — already captured as deferred work in `docs/progress.md`:
 
 ## Audit-table snapshot
 
-After the smoke run, `threat_intel_push` records every push attempt (even
-failures, before the exception aborts the txn). The TAXII / MISP 500s
-captured above never reached the insert because the exception fires inside
-the same `@Transactional` boundary that performs the audit write — the
-rollback removes the row. The EXPORT rows below come from the
-`POST /api/threat-intel/export` smoke (which streams to a `.tar.gz` and
-records the bundle id without round-tripping to a remote server):
+After the smoke run, `threat_intel_push` records every push attempt that
+completes the upstream call. The TAXII / MISP 500s captured above never
+reached the insert because the audit-writer (`ThreatIntelService.recordPush`,
+already annotated `@Transactional(propagation = REQUIRES_NEW)`) is called
+*after* `taxiiClient.push` / `mispClient.push` returns; an `IOException`
+from the HTTP layer short-circuits the writer call entirely. The EXPORT
+rows below come from the `POST /api/threat-intel/export` smoke (which
+streams to a `.tar.gz` and records the bundle id without round-tripping to
+a remote server):
 
 ```text
  id | push_target |                  bundle_id                   | status_code |          occurred_at          |  excerpt
@@ -318,10 +327,13 @@ docker exec castellum-pg psql -U castellum -d castellum -c \
    ORDER BY occurred_at DESC LIMIT 10;"
 ```
 
-A future improvement (`docs/progress.md` Deferred) is to move the audit
-insert to `REQUIRES_NEW` so failure responses are persisted even when the
-caller transaction rolls back. The corresponding non-blocking finding is
-noted in the F6 review file under `audit-write semantics`.
+A future improvement (`docs/progress.md` Deferred) is to wrap the
+`taxiiClient.push` / `mispClient.push` call in a try/catch and invoke
+`recordPush(... statusCode, "error: " + e.getMessage(), ...)` from the
+catch block so failure responses leave an audit trail. The audit writer
+itself is already `REQUIRES_NEW`; the gap is purely that the writer is
+never reached on the exception path. The corresponding non-blocking
+finding is noted in the F6 review file under `audit-write semantics`.
 
 ## Failure modes captured this run
 
@@ -335,7 +347,7 @@ noted in the F6 review file under `audit-write semantics`.
 | 6 | MISP nginx       | 301 to https://localhost (no TLS terminator)      | Default nginx redirects 80→443                        | Added `NOREDIR: "true"` env on misp-core   |
 | 7 | backend → TAXII  | 422 "Root exception: 'manifest'"                  | 233 MB bundle malformed under medallion's STIX cache  | Stream bundle, cap objects (deferred)      |
 | 8 | backend → MISP   | 500 OutOfMemoryError                               | Full export materialised in single byte[]             | Stream bundle, cap heap (deferred)         |
-| 9 | audit table      | TAXII/MISP failures not visible in `threat_intel_push` | Audit insert in same @Transactional that rolls back | Move audit to `REQUIRES_NEW` (deferred)    |
+| 9 | audit table      | TAXII/MISP failures not visible in `threat_intel_push` | Writer called only after HTTP push returns; IOException short-circuits it (writer is already `REQUIRES_NEW`) | Wrap push in try/catch, call `recordPush` from catch (deferred) |
 
 All four entries 7-9 are tracked in `docs/progress.md` under Deferred for a
 future "bundle streaming" feature.
