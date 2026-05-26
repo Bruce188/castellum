@@ -1,5 +1,4 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { EmptyCorpusBanner } from './components/EmptyCorpusBanner';
 import { ForcePasswordRotation } from './components/ForcePasswordRotation';
 import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
@@ -27,7 +26,6 @@ export function AppShell() {
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
-        <EmptyCorpusBanner isAdmin={isAdmin} />
         <div className="flex items-center justify-end gap-3 px-4 py-2 border-b border-gray-200 bg-white text-sm text-gray-600">
           <span>{auth.username}</span>
           <button

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TopologyView } from '../components/TopologyView';
 import { DeviceDetailPanel } from '../components/DeviceDetailPanel';
+import { EmptyCorpusBanner } from '../components/EmptyCorpusBanner';
 import { OnboardingCard } from '../components/OnboardingCard';
 import { ScanTriggerForm } from '../components/ScanTriggerForm';
 import { api } from '../api/client';
@@ -95,8 +96,11 @@ export function TopologyPage() {
     setSelectedServices([]);
   }
 
+  const isAdmin = auth.roles?.includes('ADMIN') ?? false;
+
   return (
-    <div className="grid grid-rows-[auto_1fr] h-full">
+    <div className="grid grid-rows-[auto_auto_1fr] h-full">
+      <EmptyCorpusBanner isAdmin={isAdmin} />
       <header className="flex items-center justify-between gap-4">
         <ScanTriggerForm />
       </header>
@@ -112,7 +116,7 @@ export function TopologyPage() {
           risk={selectedRisk}
           services={selectedServices}
           onClose={handleBackgroundClick}
-          isAdmin={auth.roles?.includes('ADMIN') ?? false}
+          isAdmin={isAdmin}
           onDeviceMutated={refetchDevices}
         />
         {scanCount !== null && <OnboardingCard scanCount={scanCount} />}
