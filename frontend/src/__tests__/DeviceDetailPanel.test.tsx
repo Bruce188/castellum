@@ -12,6 +12,7 @@ const device: Device = {
   lastSeen: null,
   criticality: 'HIGH',
   discoveryScope: 'DOCKER_BRIDGE',
+  lastSeenIface: null,
 };
 
 const risk: DeviceRiskDto = {
@@ -116,5 +117,24 @@ describe('<DeviceDetailPanel />', () => {
     expect(chip).toBeInTheDocument();
     expect(chip).toHaveTextContent('DOCKER_BRIDGE');
     expect(chip).toHaveStyle({ backgroundColor: 'rgb(37, 99, 235)' });
+  });
+
+  it('lastSeenIface_renders_when_present', () => {
+    const ifaceDevice: Device = { ...device, lastSeenIface: 'eth0' };
+    render(
+      <DeviceDetailPanel device={ifaceDevice} risk={risk} services={services} onClose={() => {}} />
+    );
+    const dt = screen.getByText('last seen iface');
+    expect(dt).toBeInTheDocument();
+    // The <dd> immediately follows the <dt> in the same dl grid.
+    expect(dt.nextElementSibling).toHaveTextContent('eth0');
+  });
+
+  it('lastSeenIface_omitted_when_null', () => {
+    // device fixture already has lastSeenIface = null.
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />
+    );
+    expect(screen.queryByText('last seen iface')).not.toBeInTheDocument();
   });
 });
