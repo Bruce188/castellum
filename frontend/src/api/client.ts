@@ -163,8 +163,6 @@ export const api = {
     }
     return (await response.json()) as { id: number };
   },
-  getScan: (id: number) =>
-    request<Scan>(`/api/scans/${id}`),
   getScanDetail: (id: number) =>
     request<ScanDetail>(`/api/scans/${id}`),
   listScans: (size = 10) =>

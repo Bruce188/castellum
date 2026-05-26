@@ -38,7 +38,7 @@ describe('<RecentScansPanel /> navigation', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
         <Routes>
-          <Route path="/" element={<RecentScansPanel latestSubmittedId={null} />} />
+          <Route path="/" element={<RecentScansPanel />} />
           <Route path="/scans/:id" element={<ScanDetailSentinel />} />
         </Routes>
       </MemoryRouter>
