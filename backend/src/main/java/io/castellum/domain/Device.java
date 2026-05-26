@@ -35,6 +35,9 @@ public class Device {
     @Column(name = "discovery_scope", nullable = false)
     private DiscoveryScope discoveryScope = DiscoveryScope.HOME;
 
+    @Column(name = "last_seen_iface")
+    private String lastSeenIface;
+
     public Device() {}
 
     public Device(Long id, String ipAddress, String hostname, String macAddress, Instant firstSeen, Instant lastSeen) {
@@ -79,4 +82,7 @@ public class Device {
 
     public DiscoveryScope getDiscoveryScope() { return discoveryScope; }
     public void setDiscoveryScope(DiscoveryScope discoveryScope) { this.discoveryScope = discoveryScope; }
+
+    public String getLastSeenIface() { return lastSeenIface; }
+    public void setLastSeenIface(String lastSeenIface) { this.lastSeenIface = lastSeenIface; }
 }

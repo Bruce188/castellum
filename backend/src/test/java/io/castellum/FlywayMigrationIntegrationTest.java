@@ -392,4 +392,29 @@ class FlywayMigrationIntegrationTest {
         assertTrue(indexCount.intValue() >= 1,
             "idx_audit_log_time_action index must exist on audit_log after V13 migration");
     }
+
+    @Test
+    void v18DeviceLastSeenIfaceRoundTrip() {
+        // Confirm column existence via INFORMATION_SCHEMA.
+        Number colCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'LAST_SEEN_IFACE'",
+            Number.class);
+        assertNotNull(colCount, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(colCount.intValue() > 0,
+            "last_seen_iface column must exist in device table after V18 migration");
+
+        // Round-trip via raw JDBC — INSERT a row carrying last_seen_iface, SELECT back, assert.
+        Instant now = Instant.now();
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, last_seen_iface) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            "10.99.18.1", now, now, "MEDIUM", "HOME", "docker0"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT last_seen_iface FROM device WHERE ip_address = '10.99.18.1'"
+        );
+        assertEquals("docker0", row.get("last_seen_iface"),
+            "last_seen_iface must round-trip after V18 migration");
+    }
 }

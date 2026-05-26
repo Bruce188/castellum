@@ -58,6 +58,12 @@ public class DeviceUpsertService {
             if (e.getHostname() == null && d.hostname() != null) {
                 e.setHostname(d.hostname());
             }
+            // iface uses overwrite-only-when-non-null — the inverse of mac/hostname's
+            // fill-only-when-prior-null. ARP rescan SHOULD replace stale iface (cable swap);
+            // NMAP/OT rescan carries no iface and MUST NOT clobber the prior value.
+            if (d.iface() != null) {
+                e.setLastSeenIface(d.iface());
+            }
             return repo.save(e);
         } else {
             Instant now = d.observedAt();
@@ -71,6 +77,7 @@ public class DeviceUpsertService {
                 Criticality.MEDIUM
             );
             fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
+            fresh.setLastSeenIface(d.iface());
             return repo.save(fresh);
         }
     }
@@ -148,6 +155,11 @@ public class DeviceUpsertService {
                 if (existing.getHostname() == null && d.hostname() != null) {
                     existing.setHostname(d.hostname());
                 }
+                // iface overwrite-only-when-non-null (inverse of mac/hostname). See
+                // upsert(Discovery) for rationale.
+                if (d.iface() != null) {
+                    existing.setLastSeenIface(d.iface());
+                }
                 slots.add(new Slot(true, updates.size()));
                 updates.add(existing);
             } else {
@@ -155,6 +167,7 @@ public class DeviceUpsertService {
                 Device fresh = new Device(null, d.ipAddress(), d.hostname(), d.macAddress(),
                     now, now, Criticality.MEDIUM);
                 fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
+                fresh.setLastSeenIface(d.iface());
                 slots.add(new Slot(false, inserts.size()));
                 inserts.add(fresh);
             }
