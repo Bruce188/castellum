@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react';
 import cytoscape from 'cytoscape';
 // @ts-expect-error - cose-bilkent has no shipped types
 import coseBilkent from 'cytoscape-cose-bilkent';
-import type { Device, DeviceRiskDto } from '../api/types';
+import type { Device, DeviceRiskDto, DiscoveryScope } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
+import { scopeBorderColor } from '../lib/scopeColors';
 import { buildSubnetEdges } from '../lib/subnetEdges';
 import { type HighlightPath, makeEdgeKey } from './topologyConstants';
 
@@ -30,9 +31,23 @@ interface Props {
   onBackgroundClick: () => void;
   /** When set, marks the listed nodes/edges with {@code path-highlight}. */
   highlightPath?: HighlightPath | null;
+  /**
+   * Per-scope visibility map. Unset keys default to {@code true}; nodes with a
+   * scope keyed {@code false} are filtered BEFORE edge-building so dangling
+   * subnet edges are structurally impossible.
+   */
+  scopeVisibility?: Record<DiscoveryScope, boolean>;
 }
 
-export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath }: Props) {
+const SCOPE_CLASS: Record<DiscoveryScope, string | null> = {
+  HOME: null,
+  DOCKER_BRIDGE: 'scope-docker-bridge',
+  LINK_LOCAL: 'scope-link-local',
+  LOOPBACK: 'scope-loopback',
+  PUBLIC: 'scope-public',
+};
+
+export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath, scopeVisibility }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   /**
@@ -67,6 +82,13 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         { selector: 'node.risk-high',    style: { 'background-color': tierColor.high } },
         { selector: 'node.risk-crit',    style: { 'background-color': tierColor.crit } },
         { selector: 'node.risk-unknown', style: { 'background-color': tierColor.unknown } },
+        // Per-scope border overrides — appended AFTER node.risk-* so Cytoscape's
+        // last-matching-selector resolution wins for non-HOME nodes. HOME nodes
+        // get no scope-* class and keep the default '#1f2937' border above.
+        { selector: 'node.scope-docker-bridge', style: { 'border-width': 2, 'border-color': scopeBorderColor.DOCKER_BRIDGE } },
+        { selector: 'node.scope-link-local',   style: { 'border-width': 2, 'border-color': scopeBorderColor.LINK_LOCAL } },
+        { selector: 'node.scope-loopback',     style: { 'border-width': 2, 'border-color': scopeBorderColor.LOOPBACK } },
+        { selector: 'node.scope-public',       style: { 'border-width': 2, 'border-color': scopeBorderColor.PUBLIC } },
         { selector: 'edge', style: { 'line-color': '#9ca3af', 'curve-style': 'straight' as const, opacity: 0.5, width: 1 } },
         // Attack-path overlay — bright red ring on nodes, dashed red stroke on edges.
         { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': '#dc2626' } },
@@ -94,10 +116,17 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     const cy = cyRef.current;
     if (!cy) return;
 
-    const nodes = devices.map(d => {
+    // Filter by scope visibility BEFORE building edges so dangling subnet edges
+    // are structurally impossible. Unset keys default to true (legend not mounted).
+    const visibleDevices = scopeVisibility
+      ? devices.filter(d => scopeVisibility[d.discoveryScope] ?? true)
+      : devices;
+
+    const nodes = visibleDevices.map(d => {
       const risk = risksById.get(d.id);
       const score = risk ? Number(risk.score) : null;
       const tier = toRiskTier(score);
+      const scopeClass = SCOPE_CLASS[d.discoveryScope];
       return {
         data: {
           id: String(d.id),
@@ -105,11 +134,11 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           ip: d.ipAddress,
           riskTier: tier,
         },
-        classes: `risk-${tier}`,
+        classes: scopeClass ? `risk-${tier} ${scopeClass}` : `risk-${tier}`,
       };
     });
 
-    const edges = buildSubnetEdges(devices);
+    const edges = buildSubnetEdges(visibleDevices);
 
     // When a path is provided, add ad-hoc edges for path pairs that aren't
     // already covered by the subnet-edge layer (the attack graph may traverse
@@ -139,7 +168,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       randomize: false,
     };
     cy.layout(layoutOptions).run();
-  }, [devices, risksById, highlightPath]);
+  }, [devices, risksById, highlightPath, scopeVisibility]);
 
   // Apply path-highlight classes — kept in its own effect so re-highlighting
   // does not re-run the layout. Reads the latest highlightPath each render.
