@@ -107,6 +107,12 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
           <dt className="text-gray-500">mac</dt><dd>{device.macAddress ?? '—'}</dd>
           <dt className="text-gray-500">first seen</dt><dd>{device.firstSeen ?? '—'}</dd>
           <dt className="text-gray-500">last seen</dt><dd>{device.lastSeen ?? '—'}</dd>
+          {device.lastSeenIface !== null && (
+            <>
+              <dt className="text-gray-500">last seen iface</dt>
+              <dd>{device.lastSeenIface}</dd>
+            </>
+          )}
         </dl>
         {isAdmin && (
           <div className="mt-3">

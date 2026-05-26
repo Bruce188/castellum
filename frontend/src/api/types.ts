@@ -13,6 +13,15 @@ export interface Device {
   lastSeen: string | null;
   criticality: Criticality;
   discoveryScope: DiscoveryScope;
+  /**
+   * Most recent network interface name (from the host running Castellum) that
+   * observed this device's MAC in an ARP table — populated by ARP rescan, never
+   * by NMAP/OT rescan. Null when the device has never been ARP-observed
+   * (typical for NMAP-only seeded rows or devices on segments Castellum does
+   * not span). Surfaces in {@link DeviceDetailPanel} as a hint for which
+   * physical or virtual network bound the device.
+   */
+  lastSeenIface: string | null;
 }
 
 export interface NetworkService {

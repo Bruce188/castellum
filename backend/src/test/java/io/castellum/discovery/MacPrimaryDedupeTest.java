@@ -116,7 +116,7 @@ class MacPrimaryDedupeTest {
         when(deviceRepository.findByMacAddressIn(any(Collection.class))).thenReturn(List.of(existing));
 
         Discovery freshObservation = new Discovery("10.0.0.99", "aa:bb:cc:dd:ee:ff", null,
-            DiscoverySource.ARP, Instant.parse("2026-04-30T00:00:00Z"));
+            DiscoverySource.ARP, Instant.parse("2026-04-30T00:00:00Z"), null);
 
         upsertService.upsertAll(List.of(freshObservation));
 
@@ -132,7 +132,7 @@ class MacPrimaryDedupeTest {
     void upsertAll_emptyMacPartition_skipsMacLookup() {
         // No MAC-bearing discoveries → findByMacAddressIn must NOT be called.
         Discovery ipOnly = new Discovery("10.0.2.1", null, null, DiscoverySource.MDNS,
-            Instant.parse("2026-04-30T00:00:00Z"));
+            Instant.parse("2026-04-30T00:00:00Z"), null);
 
         upsertService.upsertAll(List.of(ipOnly));
 

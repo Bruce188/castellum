@@ -117,7 +117,8 @@ public class ScanExecutionService {
                     null,           // MAC not available from nmap text output
                     host.hostname(),
                     DiscoverySource.NMAP_SCAN,
-                    now
+                    now,
+                    null            // iface not available from nmap text output
                 );
                 Device device = deviceUpsertService.upsert(discovery);
 

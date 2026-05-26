@@ -32,7 +32,7 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_newIp_insertsNewRow() {
-        Discovery d = new Discovery("10.0.0.1", "aa:bb:cc:dd:ee:01", "host1", DiscoverySource.ARP, T1);
+        Discovery d = new Discovery("10.0.0.1", "aa:bb:cc:dd:ee:01", "host1", DiscoverySource.ARP, T1, null);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.1");
@@ -48,7 +48,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // Upsert with a different MAC — existing MAC must be preserved
-        Discovery d = new Discovery("10.0.0.2", "11:22:33:44:55:66", null, DiscoverySource.ARP, T2);
+        Discovery d = new Discovery("10.0.0.2", "11:22:33:44:55:66", null, DiscoverySource.ARP, T2, null);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.2").orElseThrow();
@@ -61,7 +61,7 @@ class DeviceUpsertServiceTest {
         Device seed = new Device(null, "10.0.0.3", null, null, T1, T1);
         repo.save(seed);
 
-        Discovery d = new Discovery("10.0.0.3", "ca:fe:ba:be:00:01", null, DiscoverySource.ARP, T2);
+        Discovery d = new Discovery("10.0.0.3", "ca:fe:ba:be:00:01", null, DiscoverySource.ARP, T2, null);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.3").orElseThrow();
@@ -73,7 +73,7 @@ class DeviceUpsertServiceTest {
         Device seed = new Device(null, "10.0.0.4", null, null, T1, T1);
         repo.save(seed);
 
-        Discovery d = new Discovery("10.0.0.4", null, "new-hostname", DiscoverySource.MDNS, T2);
+        Discovery d = new Discovery("10.0.0.4", null, "new-hostname", DiscoverySource.MDNS, T2, null);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.4").orElseThrow();
@@ -82,9 +82,9 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_idempotent_sameInputTwice_oneRow() {
-        Discovery d = new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T1);
+        Discovery d = new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T1, null);
         service.upsert(d);
-        service.upsert(new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T2));
+        service.upsert(new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T2, null));
 
         assertThat(repo.count()).isEqualTo(1L);
         var found = repo.findByIpAddress("10.0.0.5").orElseThrow();
@@ -93,7 +93,7 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_newIp_setsDiscoveryScopeFromClassifier() {
-        Discovery d = new Discovery("172.17.0.2", "aa:bb:cc:dd:ee:11", "docker-sibling", DiscoverySource.ARP, T1);
+        Discovery d = new Discovery("172.17.0.2", "aa:bb:cc:dd:ee:11", "docker-sibling", DiscoverySource.ARP, T1, null);
         service.upsert(d);
 
         var found = repo.findByIpAddress("172.17.0.2").orElseThrow();
@@ -107,11 +107,60 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // Upsert with a brand-new MAC + hostname. Update path must NOT touch scope.
-        Discovery d = new Discovery("169.254.73.152", "11:22:33:44:55:66", "renamed-host", DiscoverySource.ARP, T2);
+        Discovery d = new Discovery("169.254.73.152", "11:22:33:44:55:66", "renamed-host", DiscoverySource.ARP, T2, null);
         service.upsert(d);
 
         var found = repo.findByIpAddress("169.254.73.152").orElseThrow();
         assertThat(found.getDiscoveryScope()).isEqualTo(DiscoveryScope.LINK_LOCAL);
         assertThat(found.getLastSeen()).isEqualTo(T2); // sanity — upsert did fire
+    }
+
+    @Test
+    void deviceLastSeenIfaceFieldPersists() {
+        Device device = new Device(null, "10.0.6.1", "iface-host", "aa:bb:cc:dd:ee:60", T1, T1);
+        device.setLastSeenIface("eth0");
+        Device saved = repo.save(device);
+
+        Device fetched = repo.findById(saved.getId()).orElseThrow();
+        assertThat(fetched.getLastSeenIface()).isEqualTo("eth0");
+    }
+
+    @Test
+    void nmapUpsertDoesNotClobberPriorArpIface() {
+        // Seed an ARP-discovered device with iface "eth0"
+        Device seed = new Device(null, "10.0.7.1", null, "aa:bb:cc:dd:ee:70", T1, T1);
+        seed.setLastSeenIface("eth0");
+        repo.save(seed);
+
+        // NMAP-sourced rescan carries no iface (null) — must NOT overwrite the prior value.
+        Discovery nmap = new Discovery("10.0.7.1", null, "nmap-hostname", DiscoverySource.NMAP_SCAN, T2, null);
+        service.upsert(nmap);
+
+        var after = repo.findByIpAddress("10.0.7.1").orElseThrow();
+        assertThat(after.getLastSeenIface()).isEqualTo("eth0");
+    }
+
+    @Test
+    void arpUpsertReplacesPriorIface() {
+        // Seed with iface "eth0"
+        Device seed = new Device(null, "10.0.7.2", null, "aa:bb:cc:dd:ee:71", T1, T1);
+        seed.setLastSeenIface("eth0");
+        repo.save(seed);
+
+        // ARP rescan with a different iface — must overwrite (cable swap / reattach).
+        Discovery arp = new Discovery("10.0.7.2", "aa:bb:cc:dd:ee:71", null, DiscoverySource.ARP, T2, "docker0");
+        service.upsert(arp);
+
+        var after = repo.findByIpAddress("10.0.7.2").orElseThrow();
+        assertThat(after.getLastSeenIface()).isEqualTo("docker0");
+    }
+
+    @Test
+    void upsert_newIp_setsLastSeenIfaceFromDiscovery() {
+        Discovery d = new Discovery("10.0.7.3", "aa:bb:cc:dd:ee:72", null, DiscoverySource.ARP, T1, "wlan0");
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("10.0.7.3").orElseThrow();
+        assertThat(found.getLastSeenIface()).isEqualTo("wlan0");
     }
 }
