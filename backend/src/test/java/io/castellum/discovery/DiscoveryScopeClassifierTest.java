@@ -24,6 +24,8 @@ class DiscoveryScopeClassifierTest {
             // HOME — verbatim spec lines 362-363
             Arguments.of("192.168.68.50", DiscoveryScope.HOME),
             Arguments.of("192.168.68.51", DiscoveryScope.HOME),   // host.docker.internal alias — IP wins
+            // HOME — 10.0.0.0/8 RFC 1918 branch coverage
+            Arguments.of("10.0.0.1", DiscoveryScope.HOME),
             // DOCKER_BRIDGE — verbatim spec lines 364-365
             Arguments.of("172.17.0.2", DiscoveryScope.DOCKER_BRIDGE),
             Arguments.of("172.18.0.3", DiscoveryScope.DOCKER_BRIDGE),

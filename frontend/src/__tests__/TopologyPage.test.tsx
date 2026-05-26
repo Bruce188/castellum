@@ -1,4 +1,4 @@
-import { render, act } from '@testing-library/react';
+import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Device, DeviceRiskDto, Page, Scan } from '../api/types';
 
@@ -80,6 +80,7 @@ const RISK: DeviceRiskDto = { deviceId: 1, score: '4.50', topCveIds: [] };
 
 describe('<TopologyPage /> mount fanout', () => {
   beforeEach(() => {
+    localStorage.clear();
     mockApi.listDevices.mockResolvedValue(DEVICES_PAGE);
     mockApi.deviceRisk.mockResolvedValue(RISK);
     mockApi.listScans.mockResolvedValue(SCANS_PAGE);
@@ -111,5 +112,29 @@ describe('<TopologyPage /> mount fanout', () => {
     expect(mockApi.deviceRisk).toHaveBeenCalledTimes(DEVICES.length);
     const calledIds = mockApi.deviceRisk.mock.calls.map(call => call[0]).sort();
     expect(calledIds).toEqual(DEVICES.map(d => d.id).sort());
+  });
+
+  describe('scope visibility persistence', () => {
+    it('hydrates LOOPBACK=false from localStorage on mount', async () => {
+      localStorage.setItem(
+        'castellum.topology.scope-visibility',
+        JSON.stringify({ HOME: true, DOCKER_BRIDGE: true, LINK_LOCAL: true, LOOPBACK: false, PUBLIC: true }),
+      );
+      render(<TopologyPage />);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      const loopback = screen.getByRole('checkbox', { name: /LOOPBACK/i });
+      expect(loopback).not.toBeChecked();
+    });
+
+    it('persists PUBLIC=false to localStorage when toggled', async () => {
+      render(<TopologyPage />);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      const publicBox = screen.getByRole('checkbox', { name: /PUBLIC/i });
+      fireEvent.click(publicBox);
+      const raw = localStorage.getItem('castellum.topology.scope-visibility');
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw as string);
+      expect(parsed.PUBLIC).toBe(false);
+    });
   });
 });
