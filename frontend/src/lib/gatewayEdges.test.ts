@@ -75,6 +75,10 @@ describe('buildGatewayEdges', () => {
     expect(dockerEdges).toHaveLength(2);
     expect(dockerEdges.every(e => e.data.source === '3')).toBe(true);
     expect(dockerEdges.map(e => e.data.target).sort()).toEqual(['4', '5']);
+
+    // 172.18.0/24 gateway edge: .3 → .2 (lowest-IP fallback)
+    const docker24 = gatewayEdges.find(e => e.data.gatewayIp === '172.18.0.2');
+    expect(docker24).toMatchObject({ data: { source: '5', target: '4' } });
   });
 
   it('docker_bridge_without_host_remains_orphan', () => {
@@ -86,6 +90,8 @@ describe('buildGatewayEdges', () => {
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
     // No HOME device matches docker-host heuristic → zero synthetic edges.
     expect(dockerEdges).toHaveLength(0);
+    // DOCKER_BRIDGE devices still cluster by /24: 1 gateway-kind edge expected.
+    expect(edges).toHaveLength(1);
   });
 
   describe('localStorage_override_routes_from_overridden_ip', () => {
