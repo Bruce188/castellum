@@ -2,6 +2,7 @@ package io.castellum.web;
 
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
+import io.castellum.discovery.DiscoveryScope;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.risk.Criticality;
@@ -173,5 +174,19 @@ class DeviceControllerTest {
     void delete_viewer_returns403() throws Exception {
         mockMvc.perform(delete("/api/devices/9"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_returnsDiscoveryScopeInPayload() throws Exception {
+        Device existing = new Device();
+        existing.setId(42L);
+        existing.setIpAddress("172.17.0.2");
+        existing.setCriticality(Criticality.MEDIUM);
+        existing.setDiscoveryScope(DiscoveryScope.DOCKER_BRIDGE);
+        when(deviceRepository.findById(42L)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(get("/api/devices/42"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.discoveryScope").value("DOCKER_BRIDGE"));
     }
 }

@@ -28,16 +28,22 @@ import java.util.Set;
  *   <li>Primary key: {@code ipAddress} (UNIQUE column).</li>
  *   <li>Existing row: update {@code lastSeen}; fill {@code macAddress} and {@code hostname}
  *       only if the existing values are {@code null}.</li>
- *   <li>New row: create with {@link Criticality#MEDIUM} default.</li>
+ *   <li>New row: create with {@link Criticality#MEDIUM} default and
+ *       {@link io.castellum.discovery.DiscoveryScope} derived from {@code ipAddress} via
+ *       {@link DiscoveryScopeClassifier#classify(String)}.</li>
+ *   <li>Existing row: scope is NEVER touched, so an operator-set
+ *       override (future endpoint) survives subsequent sweeps.</li>
  * </ul>
  */
 @Service
 public class DeviceUpsertService {
 
     private final DeviceRepository repo;
+    private final DiscoveryScopeClassifier scopeClassifier;
 
-    public DeviceUpsertService(DeviceRepository repo) {
+    public DeviceUpsertService(DeviceRepository repo, DiscoveryScopeClassifier scopeClassifier) {
         this.repo = repo;
+        this.scopeClassifier = scopeClassifier;
     }
 
     @Transactional
@@ -64,6 +70,7 @@ public class DeviceUpsertService {
                 now,
                 Criticality.MEDIUM
             );
+            fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
             return repo.save(fresh);
         }
     }
@@ -147,6 +154,7 @@ public class DeviceUpsertService {
                 Instant now = d.observedAt();
                 Device fresh = new Device(null, d.ipAddress(), d.hostname(), d.macAddress(),
                     now, now, Criticality.MEDIUM);
+                fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
                 slots.add(new Slot(false, inserts.size()));
                 inserts.add(fresh);
             }

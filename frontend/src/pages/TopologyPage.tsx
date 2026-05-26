@@ -1,12 +1,33 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TopologyView } from '../components/TopologyView';
+import { TopologyLegend } from '../components/TopologyLegend';
 import { DeviceDetailPanel } from '../components/DeviceDetailPanel';
 import { EmptyCorpusBanner } from '../components/EmptyCorpusBanner';
 import { OnboardingCard } from '../components/OnboardingCard';
 import { ScanTriggerForm } from '../components/ScanTriggerForm';
 import { api } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
-import type { Device, DeviceRiskDto, NetworkService } from '../api/types';
+import type { Device, DeviceRiskDto, DiscoveryScope, NetworkService } from '../api/types';
+
+const SCOPE_STORAGE_KEY = 'castellum.topology.scope-visibility';
+const DEFAULT_VISIBILITY: Record<DiscoveryScope, boolean> = {
+  HOME: true,
+  DOCKER_BRIDGE: true,
+  LINK_LOCAL: true,
+  LOOPBACK: true,
+  PUBLIC: true,
+};
+
+function loadVisibility(): Record<DiscoveryScope, boolean> {
+  try {
+    const raw = localStorage.getItem(SCOPE_STORAGE_KEY);
+    if (!raw) return DEFAULT_VISIBILITY;
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_VISIBILITY, ...parsed };
+  } catch {
+    return DEFAULT_VISIBILITY;
+  }
+}
 
 /**
  * Topology landing page — replaces the all-in-one shell from the pre-router build.
@@ -25,6 +46,7 @@ export function TopologyPage() {
   const [selectedServices, setSelectedServices] = useState<NetworkService[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scanCount, setScanCount] = useState<number | null>(null);
+  const [scopeVisibility, setScopeVisibility] = useState<Record<DiscoveryScope, boolean>>(() => loadVisibility());
 
   // Single source of truth for the device-and-risk fanout. Used by both the
   // mount-effect below and the `onDeviceMutated` callback passed into
@@ -133,6 +155,14 @@ export function TopologyPage() {
           risksById={risksById}
           onNodeClick={handleNodeClick}
           onBackgroundClick={handleBackgroundClick}
+          scopeVisibility={scopeVisibility}
+        />
+        <TopologyLegend
+          visibility={scopeVisibility}
+          onChange={next => {
+            setScopeVisibility(next);
+            try { localStorage.setItem(SCOPE_STORAGE_KEY, JSON.stringify(next)); } catch { /* quota / SSR — drop silently */ }
+          }}
         />
         <DeviceDetailPanel
           device={selectedDevice}

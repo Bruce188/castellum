@@ -28,9 +28,9 @@ const shortestPath = vi.mocked(api.shortestPath);
 
 const DEVICES_PAGE = {
   content: [
-    { id: 1, ipAddress: '10.0.0.1', hostname: 'attacker-foothold', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH' as const },
-    { id: 2, ipAddress: '10.0.0.5', hostname: 'pivot-host', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM' as const },
-    { id: 3, ipAddress: '172.16.0.10', hostname: 'crown-jewels', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL' as const },
+    { id: 1, ipAddress: '10.0.0.1', hostname: 'attacker-foothold', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH' as const, discoveryScope: 'HOME' as const },
+    { id: 2, ipAddress: '10.0.0.5', hostname: 'pivot-host', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM' as const, discoveryScope: 'HOME' as const },
+    { id: 3, ipAddress: '172.16.0.10', hostname: 'crown-jewels', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL' as const, discoveryScope: 'HOME' as const },
   ],
   totalElements: 3, totalPages: 1, number: 0, size: 200,
 };

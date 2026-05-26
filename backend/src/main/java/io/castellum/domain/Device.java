@@ -1,5 +1,6 @@
 package io.castellum.domain;
 
+import io.castellum.discovery.DiscoveryScope;
 import io.castellum.risk.Criticality;
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -29,6 +30,10 @@ public class Device {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Criticality criticality = Criticality.MEDIUM;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "discovery_scope", nullable = false)
+    private DiscoveryScope discoveryScope = DiscoveryScope.HOME;
 
     public Device() {}
 
@@ -71,4 +76,7 @@ public class Device {
 
     public Criticality getCriticality() { return criticality; }
     public void setCriticality(Criticality criticality) { this.criticality = criticality; }
+
+    public DiscoveryScope getDiscoveryScope() { return discoveryScope; }
+    public void setDiscoveryScope(DiscoveryScope discoveryScope) { this.discoveryScope = discoveryScope; }
 }

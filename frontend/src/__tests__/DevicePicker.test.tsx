@@ -4,10 +4,10 @@ import { DevicePicker } from '../components/DevicePicker';
 import type { Device } from '../api/types';
 
 const DEVICES: Device[] = [
-  { id: 1, ipAddress: '10.0.0.1', hostname: 'web-prod', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH' },
-  { id: 2, ipAddress: '10.0.0.2', hostname: 'web-staging', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM' },
-  { id: 3, ipAddress: '172.16.0.5', hostname: 'db-primary', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL' },
-  { id: 4, ipAddress: '172.16.0.6', hostname: null, macAddress: null, firstSeen: null, lastSeen: null, criticality: 'LOW' },
+  { id: 1, ipAddress: '10.0.0.1', hostname: 'web-prod', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH', discoveryScope: 'HOME' },
+  { id: 2, ipAddress: '10.0.0.2', hostname: 'web-staging', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM', discoveryScope: 'HOME' },
+  { id: 3, ipAddress: '172.16.0.5', hostname: 'db-primary', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL', discoveryScope: 'HOME' },
+  { id: 4, ipAddress: '172.16.0.6', hostname: null, macAddress: null, firstSeen: null, lastSeen: null, criticality: 'LOW', discoveryScope: 'HOME' },
 ];
 
 describe('<DevicePicker />', () => {

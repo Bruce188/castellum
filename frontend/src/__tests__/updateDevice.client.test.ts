@@ -16,6 +16,7 @@ const current: Device = {
   firstSeen: null,
   lastSeen: null,
   criticality: 'MEDIUM',
+  discoveryScope: 'HOME',
 };
 
 describe('api.updateDevice()', () => {

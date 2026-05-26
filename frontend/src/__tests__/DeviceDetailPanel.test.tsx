@@ -11,6 +11,7 @@ const device: Device = {
   firstSeen: null,
   lastSeen: null,
   criticality: 'HIGH',
+  discoveryScope: 'DOCKER_BRIDGE',
 };
 
 const risk: DeviceRiskDto = {
@@ -105,5 +106,15 @@ describe('<DeviceDetailPanel />', () => {
     expect(screen.getByRole('button', { name: /edit criticality/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /edit hostname/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^decommission$/i })).toBeInTheDocument();
+  });
+
+  it('panel_rendersScopeChipBelowHostname', () => {
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />
+    );
+    const chip = screen.getByTestId('scope-chip');
+    expect(chip).toBeInTheDocument();
+    expect(chip).toHaveTextContent('DOCKER_BRIDGE');
+    expect(chip).toHaveStyle({ backgroundColor: 'rgb(37, 99, 235)' });
   });
 });
