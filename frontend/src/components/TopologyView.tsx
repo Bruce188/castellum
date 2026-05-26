@@ -5,6 +5,7 @@ import coseBilkent from 'cytoscape-cose-bilkent';
 import type { Device, DeviceRiskDto } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { buildSubnetEdges } from '../lib/subnetEdges';
+import { type HighlightPath, makeEdgeKey } from './topologyConstants';
 
 cytoscape.use(coseBilkent);
 
@@ -22,21 +23,6 @@ interface CoseBilkentLayoutOptions extends cytoscape.BaseLayoutOptions {
   randomize?: boolean;
 }
 
-/**
- * Optional path highlight overlay. {@link #nodeIds} is the ordered list of
- * device ids on the path (including endpoints); {@link #edgeKeys} contains
- * undirected edge identifiers in {@code min(a,b)-max(a,b)} form so we don't
- * have to care which direction Cytoscape stored the edge in.
- *
- * <p>When supplied, the view ADDS the corresponding nodes and one synthetic
- * edge per pair to the graph (so the path is visible even between devices
- * that share no /24) and applies the {@code path-highlight} class to them.
- */
-export interface HighlightPath {
-  nodeIds: number[];
-  edgeKeys?: string[];
-}
-
 interface Props {
   devices: Device[];
   risksById: Map<number, DeviceRiskDto>;
@@ -44,11 +30,6 @@ interface Props {
   onBackgroundClick: () => void;
   /** When set, marks the listed nodes/edges with {@code path-highlight}. */
   highlightPath?: HighlightPath | null;
-}
-
-/** Canonical undirected edge key — used by both view and caller so they match. */
-export function makeEdgeKey(a: number, b: number): string {
-  return a <= b ? `${a}-${b}` : `${b}-${a}`;
 }
 
 export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath }: Props) {

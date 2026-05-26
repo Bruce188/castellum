@@ -55,8 +55,31 @@ export function TopologyPage() {
 
   useEffect(() => {
     if (!auth.token) return;
-    void refetchDevices();
-  }, [auth.token, refetchDevices]);
+    let cancelled = false;
+    const run = async () => {
+      if (cancelled) return;
+      try {
+        const page = await api.listDevices();
+        if (cancelled) return;
+        setDevices(page.content);
+        const results = await Promise.allSettled(
+          page.content.map(d => api.deviceRisk(d.id))
+        );
+        if (cancelled) return;
+        const map = new Map<number, DeviceRiskDto>();
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
+        });
+        setRisksById(map);
+        setLoadError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : 'load failed');
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [auth.token]);
 
   // Track scan count so the onboarding card can self-dismiss.
   useEffect(() => {

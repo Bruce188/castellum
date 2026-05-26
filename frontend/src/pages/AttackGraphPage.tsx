@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { DevicePicker } from '../components/DevicePicker';
-import { TopologyView, type HighlightPath, makeEdgeKey } from '../components/TopologyView';
+import { TopologyView } from '../components/TopologyView';
+import { type HighlightPath, makeEdgeKey } from '../components/topologyConstants';
 import { api } from '../api/client';
 import type { Device, DeviceRiskDto, HopDto, ShortestPathResponse } from '../api/types';
 

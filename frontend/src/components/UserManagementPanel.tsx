@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api/client';
 import type { UserDto, UserRole } from '../api/types';
 
@@ -28,7 +28,7 @@ export function UserManagementPanel({ isAdmin }: Props) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  async function reload(targetPage: number = page) {
+  const reload = useCallback(async (targetPage: number = 0) => {
     setLoading(true);
     setError(null);
     try {
@@ -41,13 +41,29 @@ export function UserManagementPanel({ isAdmin }: Props) {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
-    void reload(0);
-    // intentional: re-run only when admin gate flips
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await api.listUsers(0, 25);
+        if (cancelled) return;
+        setUsers(result.content);
+        setPage(result.number);
+        setTotalPages(Math.max(result.totalPages, 1));
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'failed to load users');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
   }, [isAdmin]);
 
   if (!isAdmin) {

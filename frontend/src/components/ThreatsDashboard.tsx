@@ -25,8 +25,9 @@ export function ThreatsDashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    setState(INITIAL);
-    (async () => {
+    const load = async () => {
+      if (cancelled) return;
+      setState(INITIAL);
       try {
         const [top, feeds] = await Promise.all([api.topRisk(10), api.feedsStatus()]);
         if (cancelled) return;
@@ -42,7 +43,8 @@ export function ThreatsDashboard() {
           feeds: null,
         });
       }
-    })();
+    };
+    void load();
     return () => { cancelled = true; };
   }, []);
 
