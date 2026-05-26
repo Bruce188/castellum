@@ -88,6 +88,8 @@ export interface DeviceUpdatePayload {
 export const api = {
   listDevices: () =>
     request<Page<Device>>('/api/devices?size=200'),
+  getDevice: (id: number) =>
+    request<Device>(`/api/devices/${id}`),
   updateDevice: (id: number, current: Device, patch: DeviceUpdatePayload) => {
     // PUT replaces the resource; merge patch over current to preserve required fields (e.g. ipAddress).
     const body: Record<string, unknown> = {
@@ -124,9 +126,10 @@ export const api = {
     request<TopRiskDeviceDto[]>(`/api/risk/top?n=${n}`),
   cveDetail: (cveId: string) =>
     request<CveDetailDto>(`/api/cve/${encodeURIComponent(cveId)}`),
-  listFleetCves: (page: number = 0, size: number = 20, minScore?: number) => {
+  listFleetCves: (page: number = 0, size: number = 20, minScore?: number, deviceId?: number) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (minScore !== undefined) params.set('minScore', String(minScore));
+    if (deviceId !== undefined) params.set('deviceId', String(deviceId));
     return request<Page<CveSummaryDto>>(`/api/cve/fleet?${params.toString()}`);
   },
   listServicesForDevice: (id: number) =>
