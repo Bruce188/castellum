@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { CveSummaryDto, Page } from '../api/types';
 
@@ -21,18 +22,24 @@ function severityClass(score: string | null): string {
 }
 
 export function CvesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawId = searchParams.get('deviceId');
+  const parsedId = rawId !== null ? Number(rawId) : NaN;
+  const deviceId = Number.isFinite(parsedId) ? parsedId : null;
+
   const [page, setPage] = useState<Page<CveSummaryDto> | null>(null);
   const [pageNumber, setPageNumber] = useState(0);
   const [severity, setSeverity] = useState<SeverityFilter>('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deviceLabel, setDeviceLabel] = useState<string | null>(null);
 
   const fetchPage = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const minScore = severity === 'all' ? undefined : SEVERITY_THRESHOLDS[severity];
-      const result = await api.listFleetCves(pageNumber, PAGE_SIZE, minScore);
+      const result = await api.listFleetCves(pageNumber, PAGE_SIZE, minScore, deviceId ?? undefined);
       setPage(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load CVEs');
@@ -40,7 +47,7 @@ export function CvesPage() {
     } finally {
       setLoading(false);
     }
-  }, [pageNumber, severity]);
+  }, [pageNumber, severity, deviceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +57,7 @@ export function CvesPage() {
       setError(null);
       try {
         const minScore = severity === 'all' ? undefined : SEVERITY_THRESHOLDS[severity];
-        const result = await api.listFleetCves(pageNumber, PAGE_SIZE, minScore);
+        const result = await api.listFleetCves(pageNumber, PAGE_SIZE, minScore, deviceId ?? undefined);
         if (cancelled) return;
         setPage(result);
       } catch (err) {
@@ -63,7 +70,28 @@ export function CvesPage() {
     };
     void run();
     return () => { cancelled = true; };
-  }, [pageNumber, severity]);
+  }, [pageNumber, severity, deviceId]);
+
+  useEffect(() => {
+    if (deviceId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const dev = await api.getDevice(deviceId);
+        if (cancelled) return;
+        setDeviceLabel(`${dev.hostname ?? 'unknown'} (${dev.ipAddress})`);
+      } catch {
+        if (cancelled) return;
+        setDeviceLabel(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      // Reset label on cleanup so a subsequent deviceId param shows the bare-id
+      // fallback until the fresh lookup resolves.
+      setDeviceLabel(null);
+    };
+  }, [deviceId]);
 
   const onSeverityChange = (next: SeverityFilter) => {
     setSeverity(next);
@@ -78,6 +106,21 @@ export function CvesPage() {
           {page ? `${page.totalElements} CVEs, page ${page.number + 1}/${Math.max(page.totalPages, 1)}` : ''}
         </div>
       </div>
+
+      {deviceId !== null && (
+        <div className="inline-flex items-center gap-2 mb-3 px-2 py-1 text-sm bg-blue-50 border border-blue-200 rounded">
+          <span>Device filter: {deviceLabel ?? `device #${deviceId}`}</span>
+          <button
+            type="button"
+            data-testid="cves-chip-dismiss"
+            aria-label="Clear device filter"
+            onClick={() => setSearchParams({})}
+            className="text-blue-700 hover:text-blue-900"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-3">
         <label className="text-sm text-gray-700">Severity floor:</label>

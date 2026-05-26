@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 
 public interface CveRepository extends JpaRepository<Cve, Long> {
 
@@ -19,4 +20,8 @@ public interface CveRepository extends JpaRepository<Cve, Long> {
     Page<Cve> findByCvssV31ScoreIsNotNull(Pageable pageable);
 
     Page<Cve> findByCvssV31ScoreGreaterThanEqual(BigDecimal minScore, Pageable pageable);
+
+    Page<Cve> findByIdInAndCvssV31ScoreIsNotNull(Set<Long> ids, Pageable pageable);
+
+    Page<Cve> findByIdInAndCvssV31ScoreGreaterThanEqual(Set<Long> ids, BigDecimal minScore, Pageable pageable);
 }
