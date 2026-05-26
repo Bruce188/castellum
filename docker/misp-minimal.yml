@@ -1,0 +1,105 @@
+# MISP minimal stack for castellum smoke-testing.
+#
+# About MISP:
+#   MISP (Malware Information Sharing Platform) is a community-driven
+#   threat-intel platform. Castellum's PUSH_MISP path posts STIX 2.1 bundles
+#   to the /events/restSearch endpoint via API key.
+#
+# About this image:
+#   coolacid/misp-docker:core-latest is the community-packaged MISP server
+#   image (https://github.com/coolacid/docker-misp). It expects two sidecars:
+#     - mariadb (MySQL-compatible, image: mariadb:10.6)
+#     - redis   (image: redis:7-alpine)
+#   The MISP web UI is served by nginx inside the core container on :80.
+#   We re-map to 8088 on the host to avoid clashing with the castellum
+#   backend at :8081 and the medallion stack at :5000.
+#
+# Why this stack:
+#   Castellum's pushMisp() smoke path needs a real MISP instance to verify
+#   API-key handling, distribution-level handling, and the
+#   "misp_event_id" extraction from the upstream response. Unit tests cover
+#   the JSON contract with MockRestServiceServer; this stack catches issues
+#   those mocks cannot — auth-header capitalization, redirect handling,
+#   nginx body-size limits.
+#
+# First-boot warning:
+#   MISP takes 1-3 MINUTES on first boot to seed MariaDB, generate the
+#   sample organisation, and start php-fpm/cron. Use:
+#     docker compose -f docker/misp-minimal.yml logs -f misp-core
+#   to follow boot progress. Poll http://localhost:8088/users/login for a 200
+#   before attempting login.
+#
+# Default credentials (coolacid/misp-docker baseline):
+#   email:    admin@admin.test
+#   password: admin
+#   org:      ORGNAME
+#   You are FORCED to change the password on first browser login. After
+#   changing it, fetch the API key (an "auth key" in MISP parlance):
+#     1. Log in via http://localhost:8088/
+#     2. Go to "My Profile" (top-right user menu) -> "Auth Keys" -> "Add"
+#        OR fetch via API once you know the key:
+#          curl -k -H "Authorization: <api-key>" \
+#               -H "Accept: application/json" \
+#               http://localhost:8088/users/view/me.json
+#   Export the resulting key as MISP_API_KEY in the castellum .env before
+#   running pushMisp.
+#
+# Persistence: anonymous volumes only. `docker compose -f docker/misp-minimal.yml down -v`
+# resets the entire stack (mariadb data, redis state, MISP configs).
+
+services:
+  misp-db:
+    image: mariadb:10.6
+    container_name: castellum-misp-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: changeme-root
+      MYSQL_DATABASE: misp
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: example
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  misp-redis:
+    image: redis:7-alpine
+    container_name: castellum-misp-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+  misp-core:
+    image: coolacid/misp-docker:core-latest
+    container_name: castellum-misp-core
+    restart: unless-stopped
+    depends_on:
+      misp-db:
+        condition: service_healthy
+      misp-redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8088:80"
+    environment:
+      MYSQL_HOST: misp-db
+      MYSQL_USER: misp
+      MYSQL_PASSWORD: example
+      MYSQL_DATABASE: misp
+      REDIS_FQDN: misp-redis
+      HOSTNAME: "http://localhost:8088"
+      INIT: "true"
+      CRON_USER_ID: "1"
+      DISIPV6: "true"
+      # Disable nginx 80->443 redirect so callers can use plain HTTP via
+      # the host-mapped port; smoke testing has no TLS terminator.
+      NOREDIR: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost/users/login || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
