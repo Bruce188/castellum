@@ -13,7 +13,7 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import(DeviceUpsertService.class)
+@Import({DeviceUpsertService.class, DiscoveryScopeClassifier.class})
 class DeviceUpsertServiceTest {
 
     @Autowired
@@ -89,5 +89,29 @@ class DeviceUpsertServiceTest {
         assertThat(repo.count()).isEqualTo(1L);
         var found = repo.findByIpAddress("10.0.0.5").orElseThrow();
         assertThat(found.getLastSeen()).isEqualTo(T2);
+    }
+
+    @Test
+    void upsert_newIp_setsDiscoveryScopeFromClassifier() {
+        Discovery d = new Discovery("172.17.0.2", "aa:bb:cc:dd:ee:11", "docker-sibling", DiscoverySource.ARP, T1);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("172.17.0.2").orElseThrow();
+        assertThat(found.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+    }
+
+    @Test
+    void upsert_existingRow_preservesDiscoveryScope() {
+        Device seed = new Device(null, "169.254.73.152", null, "aa:bb:cc:dd:ee:22", T1, T1);
+        seed.setDiscoveryScope(DiscoveryScope.LINK_LOCAL);
+        repo.save(seed);
+
+        // Upsert with a brand-new MAC + hostname. Update path must NOT touch scope.
+        Discovery d = new Discovery("169.254.73.152", "11:22:33:44:55:66", "renamed-host", DiscoverySource.ARP, T2);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("169.254.73.152").orElseThrow();
+        assertThat(found.getDiscoveryScope()).isEqualTo(DiscoveryScope.LINK_LOCAL);
+        assertThat(found.getLastSeen()).isEqualTo(T2); // sanity — upsert did fire
     }
 }
