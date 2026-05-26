@@ -5,7 +5,7 @@ import coseBilkent from 'cytoscape-cose-bilkent';
 import type { Device, DeviceRiskDto, DiscoveryScope } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
-import { buildSubnetEdges } from '../lib/subnetEdges';
+import { buildGatewayEdges } from '../lib/gatewayEdges';
 import { type HighlightPath, makeEdgeKey } from './topologyConstants';
 
 cytoscape.use(coseBilkent);
@@ -90,6 +90,13 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         { selector: 'node.scope-loopback',     style: { 'border-width': 2, 'border-color': scopeBorderColor.LOOPBACK } },
         { selector: 'node.scope-public',       style: { 'border-width': 2, 'border-color': scopeBorderColor.PUBLIC } },
         { selector: 'edge', style: { 'line-color': '#9ca3af', 'curve-style': 'straight' as const, opacity: 0.5, width: 1 } },
+        // Gateway-hub edges (peer → gateway-of-/24) — solid, slightly heavier
+        // than baseline so the hub structure reads through the layout.
+        { selector: 'edge[kind = "gateway"]', style: { 'line-color': '#9ca3af', 'line-style': 'solid' as const, width: 2, opacity: 0.7 } },
+        // Docker-bridge synthetic edges (docker-host → DOCKER_BRIDGE device) —
+        // dashed in the DOCKER_BRIDGE scope color so they read visually as a
+        // distinct overlay rather than physical L2 adjacency.
+        { selector: 'edge[kind = "docker-bridge"]', style: { 'line-color': scopeBorderColor.DOCKER_BRIDGE, 'line-style': 'dashed' as const, width: 2, opacity: 0.8 } },
         // Attack-path overlay — bright red ring on nodes, dashed red stroke on edges.
         { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': '#dc2626' } },
         { selector: 'edge.path-highlight', style: { 'line-color': '#dc2626', 'line-style': 'dashed' as const, opacity: 1, width: 3 } },
@@ -138,7 +145,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       };
     });
 
-    const edges = buildSubnetEdges(visibleDevices);
+    const edges = buildGatewayEdges(visibleDevices);
 
     // When a path is provided, add ad-hoc edges for path pairs that aren't
     // already covered by the subnet-edge layer (the attack graph may traverse
