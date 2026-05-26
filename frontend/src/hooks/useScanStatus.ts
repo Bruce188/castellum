@@ -30,7 +30,7 @@ export function useScanStatus(scanId: number | null): Scan | null {
 
     const tick = async () => {
       try {
-        const s = await api.getScan(id);
+        const s = await api.getScanDetail(id);
         if (cancelled) return;
         setScan(s);
         if (s.status === 'COMPLETE' || s.status === 'FAILED') {

@@ -2,6 +2,7 @@ package io.castellum.web;
 
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
+import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
@@ -24,6 +25,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
@@ -52,6 +57,9 @@ class ScanControllerTest {
 
     @MockBean
     private ScanSubmissionRateLimiter scanRateLimiter;
+
+    @MockBean
+    private DeviceRepository deviceRepository;
 
     @MockBean
     private CastellumUserDetailsService castellumUserDetailsService;
@@ -130,5 +138,60 @@ class ScanControllerTest {
     void anon_returns401() throws Exception {
         mockMvc.perform(get("/api/scans").with(anonymous()))
             .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void getById_existingScan_returnsScanDetailDtoWithDiscoveredDeviceIds() throws Exception {
+        Instant lo = Instant.parse("2024-01-01T00:00:00Z");
+        Instant hi = Instant.parse("2024-01-01T00:05:00Z");
+        Scan scan = new Scan();
+        scan.setId(7L);
+        scan.setCidr("10.0.0.0/24");
+        scan.setScanType("PING_SWEEP");
+        scan.setStatus(ScanStatus.COMPLETE);
+        scan.setRequestedAt(lo);
+        scan.setCompletedAt(hi);
+
+        when(scanRepository.findById(7L)).thenReturn(Optional.of(scan));
+        when(deviceRepository.findIdsByFirstSeenBetween(eq(lo), eq(hi)))
+            .thenReturn(List.of(101L, 102L));
+
+        mockMvc.perform(get("/api/scans/7"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(7))
+            .andExpect(jsonPath("$.cidr").value("10.0.0.0/24"))
+            .andExpect(jsonPath("$.status").value("COMPLETE"))
+            .andExpect(jsonPath("$.discoveredDeviceIds.length()").value(2))
+            .andExpect(jsonPath("$.discoveredDeviceIds[0]").value(101))
+            .andExpect(jsonPath("$.discoveredDeviceIds[1]").value(102));
+    }
+
+    @Test
+    void getById_scanWithNoDiscoveredDevices_returnsEmptyList() throws Exception {
+        Instant lo = Instant.parse("2024-01-01T00:00:00Z");
+        Instant hi = Instant.parse("2024-01-01T00:05:00Z");
+        Scan scan = new Scan();
+        scan.setId(7L);
+        scan.setCidr("10.0.0.0/24");
+        scan.setScanType("PING_SWEEP");
+        scan.setStatus(ScanStatus.COMPLETE);
+        scan.setRequestedAt(lo);
+        scan.setCompletedAt(hi);
+
+        when(scanRepository.findById(7L)).thenReturn(Optional.of(scan));
+        when(deviceRepository.findIdsByFirstSeenBetween(any(), any()))
+            .thenReturn(List.of());
+
+        mockMvc.perform(get("/api/scans/7"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.discoveredDeviceIds.length()").value(0));
+    }
+
+    @Test
+    void getById_missingScan_returns404() throws Exception {
+        when(scanRepository.findById(99999L)).thenReturn(Optional.empty());
+        mockMvc.perform(get("/api/scans/99999"))
+            .andExpect(status().isNotFound());
+        verifyNoInteractions(deviceRepository);
     }
 }

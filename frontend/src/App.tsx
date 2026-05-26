@@ -4,6 +4,7 @@ import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { TopologyPage } from './pages/TopologyPage';
 import { ScansPage } from './pages/ScansPage';
+import { ScanDetailPage } from './pages/ScanDetailPage';
 import { ThreatsPage } from './pages/ThreatsPage';
 import { CvesPage } from './pages/CvesPage';
 import { AttackGraphPage } from './pages/AttackGraphPage';
@@ -40,6 +41,7 @@ export function AppShell() {
           <Routes>
             <Route path="/" element={<TopologyPage />} />
             <Route path="/scans" element={<ScansPage />} />
+            <Route path="/scans/:id" element={<ScanDetailPage />} />
             <Route path="/threats" element={<ThreatsPage />} />
             <Route path="/cves" element={<CvesPage />} />
             <Route path="/attack-graph" element={<AttackGraphPage isAdmin={isAdmin} />} />

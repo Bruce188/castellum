@@ -109,6 +109,18 @@ export interface Scan {
   retryCount?: number;
 }
 
+export interface ScanDetail {
+  id: number;
+  cidr: string;
+  scanType: ScanType;
+  status: ScanStatus;
+  requestedAt: string;
+  completedAt: string | null;
+  failureReason?: string | null;
+  retryCount?: number;
+  discoveredDeviceIds: number[];
+}
+
 export interface ScanRequest {
   cidr: string;
   type: ScanType;

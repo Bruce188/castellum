@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useScanStatus } from '../hooks/useScanStatus';
 import { api } from '../api/client';
-import type { Scan } from '../api/types';
+import type { ScanDetail } from '../api/types';
 
 const STORAGE_KEY = 'castellum.lastScanId';
 
@@ -13,15 +13,16 @@ function flushMicrotasks(): Promise<void> {
 describe('useScanStatus', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    const mockScan: Scan = {
+    const mockScan: ScanDetail = {
       id: 0,
       cidr: '10.0.0.0/24',
       scanType: 'SERVICE_DETECT',
       status: 'RUNNING',
       requestedAt: '2026-01-01T00:00:00Z',
       completedAt: null,
+      discoveredDeviceIds: [],
     };
-    vi.spyOn(api, 'getScan').mockResolvedValue(mockScan);
+    vi.spyOn(api, 'getScanDetail').mockResolvedValue(mockScan);
   });
 
   afterEach(() => {
@@ -33,7 +34,7 @@ describe('useScanStatus', () => {
     window.localStorage.setItem(STORAGE_KEY, '42');
     renderHook(() => useScanStatus(null));
     await flushMicrotasks();
-    const calls = (api.getScan as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const calls = (api.getScanDetail as unknown as { mock: { calls: unknown[][] } }).mock.calls;
     expect(calls.length).toBe(1);
     expect(calls[0][0]).toBe(42);
   });
@@ -41,7 +42,7 @@ describe('useScanStatus', () => {
   it('useScanStatus_withExplicitScanId_issuesExactlyOneGetScanOnMount', async () => {
     renderHook(() => useScanStatus(99));
     await flushMicrotasks();
-    const calls = (api.getScan as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const calls = (api.getScanDetail as unknown as { mock: { calls: unknown[][] } }).mock.calls;
     expect(calls.length).toBe(1);
     expect(calls[0][0]).toBe(99);
   });
@@ -52,11 +53,11 @@ describe('useScanStatus', () => {
       const { unmount } = renderHook(() => useScanStatus(7));
       // First synchronous tick from mount — count it.
       await Promise.resolve();
-      const callsBefore = (api.getScan as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+      const callsBefore = (api.getScanDetail as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
       unmount();
       vi.advanceTimersByTime(15_000);
       await Promise.resolve();
-      const callsAfter = (api.getScan as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+      const callsAfter = (api.getScanDetail as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
       // After unmount, no new calls (interval was cleared).
       expect(callsAfter).toBe(callsBefore);
     } finally {

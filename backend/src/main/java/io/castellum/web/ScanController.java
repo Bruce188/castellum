@@ -1,6 +1,7 @@
 package io.castellum.web;
 
 import io.castellum.audit.AuditService;
+import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
@@ -8,6 +9,7 @@ import io.castellum.scan.CidrValidator;
 import io.castellum.scan.ScanExecutionService;
 import io.castellum.scan.ScanSizeGuard;
 import io.castellum.scan.ScanSubmissionRateLimiter;
+import io.castellum.web.dto.ScanDetailDto;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +24,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.RejectedExecutionException;
@@ -35,15 +38,18 @@ public class ScanController {
     private final AuditService auditService;
     private final ScanExecutionService scanExecutionService;
     private final ScanSubmissionRateLimiter scanRateLimiter;
+    private final DeviceRepository deviceRepository;
 
     public ScanController(ScanRepository scanRepository,
                           AuditService auditService,
                           ScanExecutionService scanExecutionService,
-                          ScanSubmissionRateLimiter scanRateLimiter) {
+                          ScanSubmissionRateLimiter scanRateLimiter,
+                          DeviceRepository deviceRepository) {
         this.scanRepository = scanRepository;
         this.auditService = auditService;
         this.scanExecutionService = scanExecutionService;
         this.scanRateLimiter = scanRateLimiter;
+        this.deviceRepository = deviceRepository;
     }
 
     @PostMapping("/api/scan")
@@ -91,9 +97,19 @@ public class ScanController {
 
     @GetMapping("/api/scans/{id}")
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
-    public Scan getById(@PathVariable Long id) {
-        return scanRepository.findById(id)
+    public ScanDetailDto getById(@PathVariable Long id) {
+        Scan scan = scanRepository.findById(id)
             .orElseThrow(NoSuchElementException::new);
+        Instant lo = scan.getRequestedAt();
+        Instant hi = scan.getCompletedAt() != null ? scan.getCompletedAt() : Instant.now();
+        List<Long> ids = (lo == null)
+            ? List.of()
+            : deviceRepository.findIdsByFirstSeenBetween(lo, hi);
+        return new ScanDetailDto(
+            scan.getId(), scan.getCidr(), scan.getScanType(), scan.getStatus(),
+            scan.getRequestedAt(), scan.getCompletedAt(),
+            scan.getFailureReason(), scan.getRetryCount(),
+            ids);
     }
 
     @GetMapping("/api/scans")
