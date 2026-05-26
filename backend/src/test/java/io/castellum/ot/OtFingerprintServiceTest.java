@@ -4,6 +4,7 @@ import io.castellum.audit.AuditLog;
 import io.castellum.audit.AuditLogRepository;
 import io.castellum.audit.AuditService;
 import io.castellum.discovery.DeviceUpsertService;
+import io.castellum.discovery.DiscoveryScopeClassifier;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkServiceRepository;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.*;
 @Import({
     OtFingerprintService.class,
     DeviceUpsertService.class,
+    DiscoveryScopeClassifier.class,
     AuditService.class,
     JacksonAutoConfiguration.class
 })
