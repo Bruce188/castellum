@@ -8,7 +8,7 @@ import type {
   InterfaceInfo, NetworkService,
   OtProbeRequest, OtProbeResponse,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
-  Scan, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest,
+  Scan, ScanDetail, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest,
   ShortestPathResponse,
   SyncStatusResponse,
   TopRiskDeviceDto,
@@ -165,6 +165,8 @@ export const api = {
   },
   getScan: (id: number) =>
     request<Scan>(`/api/scans/${id}`),
+  getScanDetail: (id: number) =>
+    request<ScanDetail>(`/api/scans/${id}`),
   listScans: (size = 10) =>
     request<Page<Scan>>(`/api/scans?size=${size}&sort=requestedAt,desc`),
   feedsStatus: () =>

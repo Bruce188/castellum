@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Scan, ScanStatus } from '../api/types';
 
@@ -39,6 +40,7 @@ interface Props {
 }
 
 export function RecentScansPanel({ latestSubmittedId }: Props) {
+  const navigate = useNavigate();
   const [scans, setScans] = useState<Scan[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hiddenRef = useRef(document.hidden);
@@ -164,7 +166,21 @@ export function RecentScansPanel({ latestSubmittedId }: Props) {
     >
       <div className="flex flex-col gap-1 min-w-max">
         {scans.map(scan => (
-          <div key={scan.id} className="flex items-center gap-3 text-xs text-gray-700">
+          <div
+            key={scan.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate(`/scans/${scan.id}`)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                navigate(`/scans/${scan.id}`);
+              }
+            }}
+            aria-label={`Open scan ${scan.id}`}
+            data-testid={`scan-row-${scan.id}`}
+            className="flex items-center gap-3 text-xs text-gray-700 cursor-pointer hover:bg-gray-50 rounded px-1"
+          >
             <span className="font-mono text-gray-500 w-10 text-right">#{scan.id}</span>
             <span className="font-mono w-32">{scan.cidr}</span>
             <span className="w-28 text-gray-500">{scan.scanType}</span>
