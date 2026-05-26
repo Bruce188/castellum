@@ -73,6 +73,19 @@ export function HostnameInlineEdit({ value, isAdmin, onSave, disabled }: Props) 
         className="px-1 py-0.5 hover:bg-gray-100 rounded text-left"
       >
         {value ?? '—'}
+        <svg
+          data-testid="edit-affordance"
+          aria-hidden="true"
+          width="12"
+          height="12"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className="inline-block ml-1 text-gray-400"
+        >
+          <path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" />
+        </svg>
       </button>
     );
   }

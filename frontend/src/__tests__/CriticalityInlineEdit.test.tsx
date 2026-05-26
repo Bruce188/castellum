@@ -41,4 +41,15 @@ describe('<CriticalityInlineEdit />', () => {
     fireEvent.change(screen.getByRole('combobox', { name: /criticality/i }), { target: { value: 'HIGH' } });
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it('ADMIN display mode renders the pencil-icon edit affordance', () => {
+    render(<CriticalityInlineEdit value="MEDIUM" isAdmin={true} onSave={vi.fn()} />);
+    const btn = screen.getByRole('button', { name: /edit criticality/i });
+    expect(btn.querySelector('[data-testid="edit-affordance"]')).toBeInTheDocument();
+  });
+
+  it('VIEWER display mode does not render the edit affordance', () => {
+    render(<CriticalityInlineEdit value="MEDIUM" isAdmin={false} onSave={vi.fn()} />);
+    expect(screen.queryByTestId('edit-affordance')).not.toBeInTheDocument();
+  });
 });
