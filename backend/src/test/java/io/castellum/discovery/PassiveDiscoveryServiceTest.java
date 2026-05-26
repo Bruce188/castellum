@@ -6,6 +6,7 @@ import io.castellum.risk.Criticality;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -197,5 +198,24 @@ class PassiveDiscoveryServiceTest {
 
         assertThat(resp.perSourceCount().get(DiscoverySource.ARP)).isEqualTo(2);
         assertThat(resp.perSourceCount().get(DiscoverySource.MDNS)).isEqualTo(1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void arpDiscoveryPropagatesIfaceIntoDevice() throws Exception {
+        // Single ARP neighbor observed on iface "eth0" — assert the iface field is carried
+        // through the toDiscovery orchestration into the upsertAll call.
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.5.1", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
+        service.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> captured = captor.getValue();
+        assertThat(captured).hasSize(1);
+        assertThat(captured.get(0).iface()).isEqualTo("eth0");
     }
 }

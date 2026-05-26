@@ -9,7 +9,8 @@ public record Discovery(
     String macAddress,
     String hostname,
     DiscoverySource source,
-    Instant observedAt
+    Instant observedAt,
+    String iface
 ) {
     public Discovery {
         Objects.requireNonNull(ipAddress, "ipAddress must not be null");

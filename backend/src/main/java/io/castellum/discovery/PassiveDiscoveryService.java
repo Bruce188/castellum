@@ -249,6 +249,6 @@ public class PassiveDiscoveryService {
     }
 
     private Discovery toDiscovery(DiscoveredNeighbor n, DiscoverySource source, Instant observedAt) {
-        return new Discovery(n.ipAddress(), n.macAddress(), n.hostname(), source, observedAt);
+        return new Discovery(n.ipAddress(), n.macAddress(), n.hostname(), source, observedAt, n.iface());
     }
 }

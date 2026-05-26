@@ -182,7 +182,7 @@ public class OtFingerprintService {
 
         // Upsert Device
         Device device = deviceUpsertService.upsert(
-            new Discovery(host, null, null, DiscoverySource.OT_PROBE, now));
+            new Discovery(host, null, null, DiscoverySource.OT_PROBE, now, null));
 
         // Upsert NetworkService
         NetworkService svc = networkServiceRepository
