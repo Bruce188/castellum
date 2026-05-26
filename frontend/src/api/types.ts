@@ -2,6 +2,7 @@ export type Criticality = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type ScanType = 'PING_SWEEP' | 'SERVICE_DETECT' | 'OS_FINGERPRINT';
 export type ScanStatus = 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED';
 export type RiskTier = 'low' | 'med' | 'high' | 'crit' | 'unknown';
+export type DiscoveryScope = 'HOME' | 'DOCKER_BRIDGE' | 'LINK_LOCAL' | 'LOOPBACK' | 'PUBLIC';
 
 export interface Device {
   id: number;
@@ -11,6 +12,7 @@ export interface Device {
   firstSeen: string | null;
   lastSeen: string | null;
   criticality: Criticality;
+  discoveryScope: DiscoveryScope;
 }
 
 export interface NetworkService {

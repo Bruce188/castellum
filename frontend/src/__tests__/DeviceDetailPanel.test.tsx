@@ -11,6 +11,7 @@ const device: Device = {
   firstSeen: null,
   lastSeen: null,
   criticality: 'HIGH',
+  discoveryScope: 'DOCKER_BRIDGE',
 };
 
 const risk: DeviceRiskDto = {

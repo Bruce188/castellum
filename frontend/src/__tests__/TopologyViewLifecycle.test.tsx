@@ -52,8 +52,8 @@ const factoryMock = cytoscape as unknown as ReturnType<typeof vi.fn> & { __mocks
 const mocks = factoryMock.__mocks;
 
 const devicesA: Device[] = [
-  { id: 1, ipAddress: '10.0.0.1', hostname: 'a', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM' as const },
-  { id: 2, ipAddress: '10.0.0.2', hostname: 'b', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM' as const },
+  { id: 1, ipAddress: '10.0.0.1', hostname: 'a', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM' as const, discoveryScope: 'HOME' as const },
+  { id: 2, ipAddress: '10.0.0.2', hostname: 'b', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM' as const, discoveryScope: 'HOME' as const },
 ];
 
 describe('<TopologyView /> lifecycle', () => {

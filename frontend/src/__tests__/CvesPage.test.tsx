@@ -81,6 +81,7 @@ const sampleDevice: Device = {
   firstSeen: '2024-01-01T00:00:00Z',
   lastSeen: '2024-01-02T00:00:00Z',
   criticality: 'MEDIUM',
+  discoveryScope: 'HOME',
 };
 
 function renderWith(initialPath = '/cves') {
