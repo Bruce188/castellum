@@ -87,7 +87,12 @@ public class CveController {
             if (s.getVendor() == null || s.getProduct() == null || s.getVersion() == null) {
                 continue;
             }
-            String cpe23 = "cpe:2.3:a:" + s.getVendor() + ":" + s.getProduct() + ":" + s.getVersion();
+            // CPE 2.3 requires lowercase per NIST IR 7695 §6.1.2.5; category `a` (application)
+            // matches NetworkService domain (application-layer only — not OS `o` or hardware `h`).
+            String cpe23 = "cpe:2.3:a:"
+                    + s.getVendor().toLowerCase(java.util.Locale.ROOT) + ":"
+                    + s.getProduct().toLowerCase(java.util.Locale.ROOT) + ":"
+                    + s.getVersion().toLowerCase(java.util.Locale.ROOT);
             for (Cve cve : cveMatcher.findVulnerable(cpe23)) {
                 cveFks.add(cve.getId());
             }
