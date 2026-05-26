@@ -324,7 +324,7 @@ docker exec castellum-pg psql -U castellum -d castellum -c \
   "SELECT id, push_target, bundle_id, status_code, occurred_at,
           LEFT(response_excerpt, 80) AS excerpt
    FROM threat_intel_push
-   ORDER BY occurred_at DESC LIMIT 10;"
+   ORDER BY occurred_at DESC LIMIT 5;"
 ```
 
 A future improvement (`docs/progress.md` Deferred) is to wrap the

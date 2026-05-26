@@ -83,7 +83,7 @@ services:
       misp-redis:
         condition: service_healthy
     ports:
-      - "8088:80"
+      - "127.0.0.1:8088:80"
     environment:
       MYSQL_HOST: misp-db
       MYSQL_USER: misp

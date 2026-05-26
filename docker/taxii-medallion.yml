@@ -34,7 +34,7 @@ services:
     image: sbirtane/medallion-taxii-server:latest
     container_name: castellum-medallion
     ports:
-      - "5000:80"
+      - "127.0.0.1:5000:80"
     volumes:
       - ./medallion-config.json:/app/medallion_config.json:ro
       - ./medallion-seed.json:/etc/medallion/medallion-seed.json:ro
