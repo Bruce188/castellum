@@ -6,6 +6,8 @@ interface Props {
   isAdmin: boolean;
 }
 
+const SYNC_INFLIGHT_KEY = 'castellum.sync.inFlight';
+
 const isEmpty = (s: FeedsStatusDto | null): boolean =>
   s === null ||
   s.nvd.rowCount === 0 ||
@@ -40,8 +42,7 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
    * microtask — stale localStorage is corrected before the user can interact.
    */
   const [syncInFlight, setSyncInFlight] = useState<boolean>(
-    () => typeof window !== 'undefined' &&
-          localStorage.getItem('castellum.sync.inFlight') === 'true'
+    () => localStorage.getItem(SYNC_INFLIGHT_KEY) === 'true'
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -88,10 +89,10 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
     api.syncStatus().then((r) => {
       if (cancelled) return;
       if (r.running) {
-        localStorage.setItem('castellum.sync.inFlight', 'true');
+        localStorage.setItem(SYNC_INFLIGHT_KEY, 'true');
         setSyncInFlight(true);
       } else {
-        localStorage.removeItem('castellum.sync.inFlight');
+        localStorage.removeItem(SYNC_INFLIGHT_KEY);
         setSyncInFlight(false);
       }
     }).catch(() => { /* swallow — fast-path remains authoritative until next tick */ });
@@ -106,7 +107,7 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
       api.syncStatus().then((r) => {
         if (cancelled) return;
         if (!r.running) {
-          localStorage.removeItem('castellum.sync.inFlight');
+          localStorage.removeItem(SYNC_INFLIGHT_KEY);
           setSyncInFlight(false);
         }
       }).catch(() => { /* keep polling */ });
@@ -124,7 +125,7 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
     setError(null);
     try {
       await api.triggerInitialSync();
-      localStorage.setItem('castellum.sync.inFlight', 'true');
+      localStorage.setItem(SYNC_INFLIGHT_KEY, 'true');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'sync trigger failed');
       setSyncInFlight(false);
