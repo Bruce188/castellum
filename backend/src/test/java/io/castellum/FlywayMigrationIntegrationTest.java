@@ -344,6 +344,41 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v15_integrationConfigTableExists_andRowsRoundTrip() {
+        // Table presence
+        Number tableCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES " +
+            "WHERE UPPER(TABLE_NAME) = 'INTEGRATION_CONFIG'",
+            Number.class);
+        assertNotNull(tableCount);
+        assertTrue(tableCount.intValue() >= 1, "integration_config table must exist after V15");
+
+        // Required column shape — encrypted_credentials is the secret-bearing column.
+        Number encryptedColCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'INTEGRATION_CONFIG' " +
+            "AND UPPER(COLUMN_NAME) = 'ENCRYPTED_CREDENTIALS'",
+            Number.class);
+        assertNotNull(encryptedColCount);
+        assertTrue(encryptedColCount.intValue() >= 1,
+            "encrypted_credentials column must exist after V15");
+
+        // Round-trip via raw JDBC (the column accepts a small byte payload).
+        byte[] payload = new byte[]{0x01, 0x02, 0x03, 0x04, 0x05};
+        jdbcTemplate.update(
+            "INSERT INTO integration_config (integration_type, config_json, encrypted_credentials) " +
+            "VALUES (?, ?, ?)",
+            "TAXII", "{\"url\":\"https://taxii.example\"}", payload
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT integration_type, config_json FROM integration_config " +
+            "WHERE integration_type = 'TAXII'"
+        );
+        assertEquals("TAXII", row.get("integration_type"));
+        assertEquals("{\"url\":\"https://taxii.example\"}", row.get("config_json"));
+    }
+
+    @Test
     void v13_addsAuditLogTimeActionIndex() {
         // Confirm the index exists via INFORMATION_SCHEMA.INDEXES
         Number indexCount = jdbcTemplate.queryForObject(

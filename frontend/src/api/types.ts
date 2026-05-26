@@ -278,3 +278,41 @@ export interface ShortestPathResponse {
   cumulativeRisk: string | null;
   pathFound: boolean;
 }
+
+// ----- Integrations (TAXII / MISP) -----
+
+/** Identifier for the threat-intel push integration backing a config row. */
+export type IntegrationType = 'TAXII' | 'MISP';
+
+/** Non-secret TAXII config keys persisted in {@code config_json}. */
+export interface TaxiiConfigPayload {
+  url: string;
+  apiRoot?: string;
+  collectionId?: string;
+  username?: string;
+}
+
+/** Non-secret MISP config keys persisted in {@code config_json}. */
+export interface MispConfigPayload {
+  url: string;
+}
+
+/** Response shape for GET/PUT /api/integrations/{type}. */
+export interface IntegrationConfigDto {
+  id: number;
+  integrationType: IntegrationType;
+  config: Record<string, unknown>;
+  credentialsSet: boolean;
+  lastPushAt: string | null;
+  lastPushStatus: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Response shape for POST /api/integrations/{type}/push. */
+export interface IntegrationPushResponse {
+  status: 'ok' | 'error';
+  bundleId: string | null;
+  pushedAt: string;
+  lastPushStatus: string;
+}

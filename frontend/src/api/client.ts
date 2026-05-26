@@ -4,6 +4,7 @@ import type {
   CreateUserRequest,
   Criticality, CveDetailDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
+  IntegrationConfigDto, IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
   OtProbeRequest, OtProbeResponse,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
@@ -310,6 +311,52 @@ export const api = {
     request<ShortestPathResponse>(
       `/api/graph/shortest-path?from=${params.from}&to=${params.to}`
     ),
+
+  /**
+   * POST /api/threat-intel/export — ADMIN-only. Streams a STIX 2.1 JSON
+   * bundle as a {@link Blob} suitable for download via an anchor element.
+   */
+  exportStixBundle: async (): Promise<Blob> => {
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/threat-intel/export`, {
+      method: 'POST',
+      headers,
+    });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return await response.blob();
+  },
+
+  /** GET /api/integrations/{type} — ADMIN-only. Throws {@code Error('404 ...')} when not configured. */
+  getIntegrationConfig: (type: IntegrationType) =>
+    request<IntegrationConfigDto>(`/api/integrations/${type}`),
+
+  /**
+   * PUT /api/integrations/{type} — ADMIN-only. {@code config} is non-secret JSON;
+   * {@code credentials} is encrypted server-side via AES-256-GCM.
+   */
+  saveIntegrationConfig: (
+    type: IntegrationType,
+    payload: { config: Record<string, unknown>; credentials: string },
+  ) =>
+    request<IntegrationConfigDto>(`/api/integrations/${type}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  /** POST /api/integrations/{type}/push — ADMIN-only. Returns push outcome + timestamp. */
+  pushIntegration: (type: IntegrationType) =>
+    request<IntegrationPushResponse>(`/api/integrations/${type}/push`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
 
   /** POST /api/users/{username}/disable — ADMIN-only. */
   disableUser: async (username: string): Promise<void> => {
