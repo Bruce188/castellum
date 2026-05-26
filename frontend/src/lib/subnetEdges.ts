@@ -9,7 +9,7 @@ export interface SubnetEdge {
   };
 }
 
-function ipv4Slash24(ip: string): string | null {
+export function ipv4Slash24(ip: string): string | null {
   const parts = ip.split('.');
   if (parts.length !== 4) return null;
   for (const p of parts) {
