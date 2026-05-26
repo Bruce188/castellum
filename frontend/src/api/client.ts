@@ -10,6 +10,7 @@ import type {
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
   Scan, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest,
   ShortestPathResponse,
+  SyncStatusResponse,
   TopRiskDeviceDto,
   UserDto, UserRole,
 } from './types';
@@ -170,6 +171,8 @@ export const api = {
       method: 'POST',
       body: body ? JSON.stringify(body) : '{}',
     }),
+  syncStatus: () =>
+    request<SyncStatusResponse>('/api/admin/sync/status'),
   listAudit: (filters: AuditFilters) => {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([k, v]) => {

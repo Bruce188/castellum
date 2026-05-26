@@ -5,6 +5,7 @@ vi.mock('../api/client', () => ({
   api: {
     feedsStatus: vi.fn(),
     triggerInitialSync: vi.fn(),
+    syncStatus: vi.fn(),
   },
 }));
 
@@ -14,6 +15,7 @@ import { api } from '../api/client';
 const mockApi = api as unknown as {
   feedsStatus: ReturnType<typeof vi.fn>;
   triggerInitialSync: ReturnType<typeof vi.fn>;
+  syncStatus: ReturnType<typeof vi.fn>;
 };
 
 const EMPTY_STATUS = {
@@ -31,13 +33,16 @@ const FULL_STATUS = {
 describe('<EmptyCorpusBanner />', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    localStorage.clear();
     mockApi.feedsStatus.mockResolvedValue(EMPTY_STATUS);
     mockApi.triggerInitialSync.mockResolvedValue({ status: 'started', startedAt: '2026-01-01T00:00:00Z' });
+    mockApi.syncStatus.mockResolvedValue({ running: false, startedAt: null });
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it('(a) renders nothing when all rowCounts are non-zero', async () => {
@@ -143,5 +148,67 @@ describe('<EmptyCorpusBanner />', () => {
       await Promise.resolve();
     });
     expect(mockApi.feedsStatus).toHaveBeenCalledTimes(3);
+  });
+
+  // --- New cases for localStorage persistence (Task 2.3) ---
+
+  it('(h) localStorage fast-path — button disabled immediately; backend confirms running', async () => {
+    localStorage.setItem('castellum.sync.inFlight', 'true');
+    mockApi.syncStatus.mockResolvedValue({ running: true, startedAt: '2026-05-26T00:00:00Z' });
+
+    render(<EmptyCorpusBanner isAdmin={true} />);
+
+    // Before any microtask flush the initial state from localStorage applies
+    expect(screen.getByRole('button', { name: /Syncing/i })).toBeDisabled();
+
+    // After microtask: backend confirmed running — still disabled
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: /Syncing/i })).toBeDisabled();
+  });
+
+  it('(i) localStorage stale — backend reports not running; button re-enabled and localStorage cleared', async () => {
+    localStorage.setItem('castellum.sync.inFlight', 'true');
+    mockApi.syncStatus.mockResolvedValue({ running: false, startedAt: null });
+
+    render(<EmptyCorpusBanner isAdmin={true} />);
+
+    // Flush microtasks so mount-confirm useEffect resolves
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByRole('button', { name: /Sync NVD/i })).not.toBeDisabled();
+    expect(localStorage.getItem('castellum.sync.inFlight')).toBeNull();
+  });
+
+  it('(j) polled transition — after 5s poll reports not running, button re-enabled and interval cleared', async () => {
+    localStorage.setItem('castellum.sync.inFlight', 'true');
+
+    // First syncStatus (mount confirm) → still running; subsequent calls → not running
+    mockApi.syncStatus
+      .mockResolvedValueOnce({ running: true, startedAt: '2026-05-26T00:00:00Z' })
+      .mockResolvedValue({ running: false, startedAt: null });
+
+    render(<EmptyCorpusBanner isAdmin={true} />);
+
+    // Flush mount confirm — backend says running
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: /Syncing/i })).toBeDisabled();
+
+    const callsAfterMount = mockApi.syncStatus.mock.calls.length;
+
+    // Advance 5s — the poll fires, backend says not running
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getByRole('button', { name: /Sync NVD/i })).not.toBeDisabled();
+    expect(localStorage.getItem('castellum.sync.inFlight')).toBeNull();
+
+    // Advance another 5s — no further syncStatus calls (interval was cleared)
+    const callsAfterTransition = mockApi.syncStatus.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(mockApi.syncStatus.mock.calls.length).toBe(callsAfterTransition);
+    expect(mockApi.syncStatus.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 });
