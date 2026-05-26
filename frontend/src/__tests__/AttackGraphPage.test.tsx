@@ -20,7 +20,6 @@ vi.mock('../components/TopologyView', () => ({
       data-highlight-nodes={highlightPath?.nodeIds?.join(',') ?? ''}
     />
   ),
-  makeEdgeKey: (a: number, b: number) => (a <= b ? `${a}-${b}` : `${b}-${a}`),
 }));
 
 const listDevices = vi.mocked(api.listDevices);
