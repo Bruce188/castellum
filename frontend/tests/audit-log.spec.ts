@@ -17,6 +17,7 @@ async function signIn(page: Page, who: { username: string; password: string }) {
 test.describe('audit log viewer', () => {
   test('admin sees new audit row within 5s of triggering a scan', async ({ page }) => {
     await signIn(page, ADMIN);
+    await page.goto(`${APP}/audit`);
 
     // Verify the AuditLogPanel is rendered (ADMIN-only)
     await expect(page.getByRole('heading', { name: /Audit Log/i })).toBeVisible({ timeout: 5000 });
