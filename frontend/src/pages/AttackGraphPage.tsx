@@ -132,7 +132,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 h-full overflow-auto">
+    <div className="flex flex-col gap-4 p-4 h-full overflow-auto">
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Attack Graph Explorer</h2>
         <p className="text-xs text-gray-600">
@@ -215,7 +215,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
           </p>
         )}
       </section>
-      <section className="min-h-[400px] border border-gray-200 rounded bg-gray-50">
+      <section className="h-[600px] border border-gray-200 rounded bg-gray-50">
         <TopologyView
           devices={devices}
           risksById={risksById}
