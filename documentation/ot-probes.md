@@ -103,6 +103,68 @@ Sends two UDP datagrams to the target unicast address:
 Note: SVC 0x0C = decimal 12 = ReadProperty. Do not confuse with 0x0E hex (= decimal 14 =
 CreateObject), which is a write-classified service and is never used.
 
+## Passive discovery endpoints
+
+`POST /api/ot-probe` covers the active read-only fingerprint. The complementary passive-
+discovery surface is exposed under `/api/discovery`:
+
+| Method + path | Role | Behaviour |
+|---------------|------|-----------|
+| `POST /api/discovery/passive` | ADMIN | Run a one-shot passive sweep on the given interface using the requested sources (ARP, MDNS, PCAP, LLDP, CDP). Returns a `PassiveDiscoveryResponse` with `discovered` count, per-source breakdown, upserted device ids, and a `sweepId`. |
+| `GET /api/discovery/sources` | VIEWER, ADMIN | Reports the configured availability of each discovery source (ARP and MDNS always enabled; PCAP/LLDP/CDP gated by `castellum.discovery.{pcap,lldp,cdp}.enabled`). |
+| `GET /api/discovery/interfaces` | ADMIN | Lists the host's up, non-loopback network interfaces — the menu of choices for the `iface` field on the sweep endpoint. Returns `InterfaceInfoDto[]` (`{name, displayName, mtu}`). Best-effort enumeration: an empty list is returned (never null) if `NetworkInterface.getNetworkInterfaces()` throws or yields no qualifying interfaces. |
+| `GET /api/discovery/sweeps` | VIEWER, ADMIN | Lists sweeps started after `since` (default = `now - 24h`), ordered by start time descending. |
+
+The `interfaces` endpoint is ADMIN-only because it surfaces NIC names that are otherwise
+not exposed to operators — and because the passive sweep that consumes the list is itself
+ADMIN-only. A VIEWER request returns `403 Forbidden`.
+
+## Frontend control surfaces
+
+The frontend mounts two panels for the OT/discovery surface:
+
+### `DiscoveryControlPanel`
+
+Lives at `frontend/src/components/DiscoveryControlPanel.tsx`. Drives the passive-discovery
+endpoint. On mount it calls `api.listInterfaces()` to populate the interface dropdown; the
+list is replaced when the response has at least one entry, otherwise the panel keeps its
+hard-coded fallback (`eth0`, `wlan0`). The fallback exists so the panel remains usable
+when called by a VIEWER — `api.listInterfaces()` swallows a `403` and returns `[]` so the
+panel does not throw, and the controls render disabled with an "ADMIN required" notice. A
+VIEWER can therefore see exactly what an ADMIN would be able to trigger, without the
+backend ever observing the call.
+
+The source checkboxes track three of the five backend sources (`ARP`, `MDNS`, `PCAP`); LLDP
+and CDP are deferred to the managed-switch profile and not surfaced in the panel.
+
+### `OtProbePanel`
+
+Lives at `frontend/src/components/OtProbePanel.tsx`. Wraps `POST /api/ot-probe`. The
+protocol dropdown lists Modbus/TCP, DNP3, S7comm, and BACnet/IP; picking a protocol
+auto-fills the default port (502 / 20000 / 102 / 47808). The form is gated on `isAdmin`
+and renders read-only with disabled inputs and an amber "ADMIN required" badge for
+VIEWERs — backend RBAC remains the source of truth regardless. The result panel renders
+vendor / product / version / device id / service id / observed-at as a `<dl>`, with a
+collapsible `<details>` block exposing the raw protocol fields.
+
+### Client-side 403 graceful degrade
+
+`frontend/src/api/client.ts` exposes `listInterfaces()` with a narrow try/catch — a `403`
+response is converted to `[]` rather than thrown so callers can safely render the
+fallback list. All other status codes (including transient `5xx` handled by the bounded
+retry wrapper) propagate.
+
+```ts
+listInterfaces: async (): Promise<InterfaceInfo[]> => {
+  try {
+    return await request<InterfaceInfo[]>('/api/discovery/interfaces');
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('403')) return [];
+    throw err;
+  }
+},
+```
+
 ## Concurrency and Timeouts
 
 | Config key | Default | Env var |

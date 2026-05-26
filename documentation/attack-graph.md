@@ -150,3 +150,67 @@ The `AcceptanceSmokeTest.ac1_shortestPathReturnsOrderedHopsWithCumulativeRisk` f
 | `GraphProperties` | Spring `@ConfigurationProperties(prefix = "castellum.graph")` — caps, defaults. |
 | `GraphTooLargeException` | Thrown on `max-devices` overflow; mapped to HTTP 503. |
 | `GraphController` | REST endpoint `GET /api/graph/shortest-path`. |
+
+## Frontend — Attack Graph Explorer
+
+The `/attack-graph` route mounts `AttackGraphPage` (`frontend/src/pages/AttackGraphPage.tsx`).
+The page is **ADMIN-only**: when `auth.roles` does not include `ADMIN`, the page renders an
+informational notice (`data-testid="attack-graph-admin-required"`) and no controls. The role
+check happens at the page level rather than the route level, so VIEWERs see a friendly
+explanation instead of a navigation dead-end.
+
+### Device selection — `DevicePicker`
+
+`frontend/src/components/DevicePicker.tsx` is an autocomplete combo box used twice on the
+page — once for the `from` device, once for the `to` device. Filtering is case-insensitive
+on hostname and substring-match on IP; the dropdown is capped at 50 entries so an unfiltered
+fleet of thousands does not blow up the DOM. The selection commits upward via an
+`onChange(id: number | null)` callback so the page owns the source-of-truth ids.
+
+### Path overlay — `TopologyView.highlightPath`
+
+`frontend/src/components/TopologyView.tsx` exposes an optional `highlightPath` prop of type
+`HighlightPath | null`. The `HighlightPath` shape carries the ordered `nodeIds` along the
+path (including endpoints) and an optional `edgeKeys` list of canonical undirected edge
+identifiers. Canonicalization runs through `makeEdgeKey(a, b)` which returns
+`min(a,b)-max(a,b)` — both the view and the caller use this helper so the keys match
+regardless of which direction Cytoscape stored the edge in.
+
+When `highlightPath` is supplied, the view applies the `path-highlight` CSS class to the
+listed nodes and edges (red ring on nodes, dashed red stroke on edges). The view also adds
+one synthetic edge per pair that is not already in the subnet-edge layer, so the path is
+visible even between devices on different `/24` subnets — `EXPLOITABLE_VULN` edges can
+cross subnets, and the subnet layer alone would leave gaps in the overlay.
+
+Highlight application lives in a dedicated effect so re-highlighting does not re-run the
+`cose-bilkent` layout — the graph layout is preserved across path computations.
+
+### Page composition
+
+`AttackGraphPage` is built from three callbacks against `api`:
+
+1. On mount, `api.listDevices()` followed by `api.deviceRisk(d.id)` per device for the
+   right-pane `TopologyView`.
+2. On "Compute path" click, `api.shortestPath({ from, to })` (typed as
+   `ShortestPathResponse`).
+3. The path's `hops` array is folded into a `HighlightPath` via `makeEdgeKey` and threaded
+   into `<TopologyView highlightPath={...} />` for the right-pane overlay; the same data
+   feeds the left-pane numbered breakdown (one `<li>` per hop, with `edgeType`, CVE id, and
+   MITRE ATT&CK technique id surfaced when present).
+
+The breakdown's row-reduce uses `ReactElement` (imported as
+`import type { ReactElement } from 'react'`) rather than the legacy `JSX.Element` global —
+this is intentional, because under the React 19.2 + Vite 8 typing surface the
+`JSX.Element` global is no longer auto-imported from `react/jsx-runtime` and resolving it
+forces a TypeScript namespace lookup that the build does not configure. `ReactElement` is
+the type-import equivalent and works without additional config. The same pattern applies
+elsewhere in the frontend wherever the row-reduce idiom shows up.
+
+### Loading and error states
+
+- `loading=true` while `api.shortestPath` is in flight — the compute button text flips to
+  "Computing path..." and is disabled. The "same device" guard (`fromId === toId`) also
+  disables the button.
+- `error` is the canonical `<status> <statusText>` string from the bounded retry wrapper.
+- `pathFound: false` renders a "no reachable attack path" notice
+  (`data-testid="attack-graph-no-path"`) instead of an empty breakdown.

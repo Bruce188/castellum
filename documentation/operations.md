@@ -8,15 +8,17 @@
 
 ## Overview
 
-This runbook covers the five operational concerns that come up most frequently during initial deployment and day-to-day operation:
+This runbook covers the operational concerns that come up most frequently during initial deployment and day-to-day operation:
 
 1. [NVD API-key registration](#1-nvd-api-key-registration) — mandatory for practical bulk CVE sync performance.
 2. [Suricata wiring (direction B — ingest only)](#2-suricata-wiring-direction-b) — how to feed Suricata alerts into Castellum's audit log.
 3. [TLS termination guidance](#3-tls-termination-guidance) — Castellum does not terminate TLS; reverse-proxy setup required.
 4. [Bootstrap admin checklist](#4-bootstrap-admin-checklist) — pre-flight environment variables before first start.
 5. [Runtime flags pointer](#5-runtime-flags-and-jvm-configuration) — pcap4j JVM flags and CAP_NET_RAW capability for passive discovery.
+6. [Scan-policy lifecycle](#6-scan-policy-lifecycle) — cron-driven scans, auto-retry, rate-limit, and scope-cap controls (V14).
+7. [Integration credential rotation](#7-integration-credential-rotation) — `CASTELLUM_INTEGRATION_KEY` rotation procedure for the V15 `integration_config` table.
 
-For the security posture underpinning these decisions see [documentation/threat-model.md](threat-model.md). For the NIST 800-53 compliance mapping (including SC-8 TLS and AC-7 rate-limiting gaps) see [documentation/compliance.md](compliance.md).
+For the security posture underpinning these decisions see [documentation/threat-model.md](threat-model.md). For the NIST 800-53 compliance mapping see [documentation/compliance.md](compliance.md).
 
 ---
 
@@ -208,9 +210,15 @@ services:
 
 ### Rate limiting at the reverse proxy
 
-Since Castellum does not implement login rate-limiting in v1 (see NIST 800-53 AC-7 non-claim in [documentation/compliance.md](compliance.md)), the reverse proxy is the recommended location for this control:
+Castellum implements in-application rate limiting on `/api/auth/login` (`LoginRateLimiter`,
+10 fails per 60 s by default), `/api/auth/change-password`
+(`PasswordChangeRateLimiter`, 3 attempts per 60 s by default), and `POST /api/scan`
+(`ScanSubmissionRateLimiter`, 20 per 60-minute window). The reverse proxy is still
+recommended for defence in depth — the in-process counters reset on process restart, so
+a deliberate-crash brute-force loop could otherwise bypass the cap.
 
-**nginx example** — limit the login endpoint to 10 requests per minute per IP:
+**nginx example** — additional protective layer in front of the in-app limiter for the
+login endpoint at 10 requests per minute per IP:
 
 ```nginx
 http {
@@ -224,6 +232,8 @@ http {
     }
 }
 ```
+
+See [documentation/auth.md](auth.md) for the full set of in-application limiter tunables.
 
 ---
 
@@ -270,6 +280,10 @@ export TAXII_PASSWORD=<pass>
 # MISP push target:
 export MISP_BASE_URL=https://misp.example.com
 export MISP_API_KEY=<key>
+
+# AES-256 base64 master key used by AesGcmCipher to encrypt integration_config
+# credentials at rest (see §7). Required before the first PUT /api/integrations call.
+export CASTELLUM_INTEGRATION_KEY=<base64-aes256-key>
 
 # Risk feed refresh cron (default: 06:00 UTC daily):
 export RISK_REFRESH_CRON="0 0 6 * * *"
@@ -395,6 +409,203 @@ export LOGGING_LEVEL_IO_CASTELLUM_SECURITY=DEBUG
 
 ---
 
+## 6. Scan-Policy Lifecycle
+
+### Schema (V14)
+
+Migration `V14__scan_policy.sql` introduces two artefacts:
+
+```sql
+CREATE TABLE scan_policy (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    cron_expression TEXT NOT NULL,
+    cidr TEXT NOT NULL,
+    scan_type TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_triggered_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_scan_policy_enabled ON scan_policy (enabled);
+
+ALTER TABLE scan ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;
+```
+
+`scan_policy` rows are managed through `POST /api/scan-policy` (create), `PUT
+/api/scan-policy/{id}/disable`, `PUT /api/scan-policy/{id}/enable`, and `DELETE
+/api/scan-policy/{id}`. All four endpoints are ADMIN-only. The `retry_count` column on
+`scan` counts auto-retry attempts (see "Auto-retry" below).
+
+### Cron-driven poller — `ScanPolicyScheduler`
+
+`io.castellum.scan.ScanPolicyScheduler` wakes every 60 s (tunable via
+`castellum.scan-policy.poll-interval-millis`) and iterates the enabled policies. For each
+policy, it parses the cron expression with Spring's `CronExpression.parse(...)` and fires
+the policy if its next-fire time relative to `last_triggered_at` has elapsed. Firing
+inserts a fresh `scan` row in `PENDING` status, updates `scan_policy.last_triggered_at`,
+emits `SCAN_POLICY_TRIGGER` to the audit log, and dispatches `ScanExecutionService#executeAsync`.
+
+The scheduler runs as the system actor `scheduler` and bypasses
+`ScanSubmissionRateLimiter` — the assumption is that the operator who created the policy
+already accepted the cadence at policy-creation time. The scope guard runs regardless
+(see "Scope cap" below) so a misconfigured policy fails closed at the next tick rather
+than at create time.
+
+### Submission rate limit — `ScanSubmissionRateLimiter`
+
+Operator-initiated `POST /api/scan` calls go through `ScanSubmissionRateLimiter`, a
+per-actor sliding-window limiter mirroring `LoginRateLimiter`. Defaults: 20 submissions
+per 60-minute window per authenticated username, tunable via
+`castellum.security.rate-limit.scan-window-seconds` (default `3600`) and
+`castellum.security.rate-limit.scan-max-attempts` (default `20`). Overflow returns 429
+with a `Retry-After` header. Keying is by username, not source IP, because the threat is
+a single legitimate operator saturating `scanTaskExecutor`, not credential stuffing.
+
+### Scope cap — `ScanSizeGuard`
+
+`ScanSizeGuard.requireBoundedScope(cidr)` rejects any CIDR whose prefix is below `/22`
+(1024 hosts). A `/16` against an unresponsive subnet at the F11 `--host-timeout 30s`
+would otherwise need ~32 wall-clock minutes and blow through the 5-minute outer scan
+timeout. The guard throws `ScanScopeTooLargeException` which `GlobalExceptionHandler`
+maps to HTTP 400 with body `{"error": "scope_too_large", "message": "..."}`. The scope
+guard runs at both `POST /api/scan` and at `ScanPolicyScheduler` fire time — there is no
+way to schedule a `/16` policy that bypasses the cap at creation only.
+
+### Auto-retry — `ScanRetryService`
+
+Nmap-timeout failures (failure reason contains `"nmap timed out"`) auto-retry up to
+`MAX_RETRIES = 2`. The retry uses a `60 × 3^(n-1)` second backoff — 60 s for attempt 1,
+180 s for attempt 2. `ScanExecutionService` calls
+`ScanRetryService#scheduleRetryIfApplicable` inside its failure branch; the row stays
+`FAILED` with `retry_count` and `completed_at` set, and a `SCAN_RETRY_SCHEDULED` audit
+row is written.
+
+A separate `@Scheduled` poll (`pollDueRetries`, 30 s tick configurable via
+`castellum.scan-retry.poll-interval-millis`) scans `FAILED` rows whose backoff has
+elapsed, increments `retry_count`, clears `completed_at` / `failure_reason`, flips
+status back to `PENDING`, emits `SCAN_RETRY`, and re-dispatches through
+`ScanExecutionService`. Once `retry_count` hits `MAX_RETRIES` the row stays `FAILED`
+permanently.
+
+### Operator quick reference
+
+```bash
+# Create a daily 02:00 UTC scan policy for the demo lab subnet (ADMIN):
+curl -X POST http://localhost:8080/api/scan-policy \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"lab-daily-02h","cronExpression":"0 0 2 * * *","cidr":"10.0.1.0/24","scanType":"PING_SWEEP"}'
+
+# Disable temporarily:
+curl -X PUT http://localhost:8080/api/scan-policy/42/disable -H "Authorization: Bearer $TOKEN"
+
+# Hard-delete:
+curl -X DELETE http://localhost:8080/api/scan-policy/42 -H "Authorization: Bearer $TOKEN"
+```
+
+The Settings page exposes the same surface through `ScanPolicyPanel`.
+
+---
+
+## 7. Integration Credential Rotation
+
+### Schema (V15)
+
+Migration `V15__integration_config.sql` introduces the `integration_config` table:
+
+```sql
+CREATE TABLE integration_config (
+    id BIGSERIAL PRIMARY KEY,
+    integration_type TEXT NOT NULL UNIQUE,
+    config_json TEXT NOT NULL,
+    encrypted_credentials BYTEA NOT NULL,
+    last_push_at TIMESTAMP WITH TIME ZONE,
+    last_push_status TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+```
+
+One row per `integration_type` (`TAXII`, `MISP`, `STIX`). Non-secret config (URL,
+collection id, etc.) lives in `config_json` as JSON text. Secrets (TAXII password, MISP
+API key) live in `encrypted_credentials` as AES-256-GCM ciphertext: 12-byte IV prefix,
+ciphertext, 16-byte auth tag. Encryption is handled by `io.castellum.security.AesGcmCipher`.
+
+### Master-key configuration
+
+```bash
+# Generate a fresh AES-256 base64 key (32 raw bytes → 44 base64 chars):
+openssl rand -base64 32
+
+# Or via the in-JVM helper:
+# jshell> System.out.println(io.castellum.security.AesGcmCipher.generateBase64Key())
+
+# Export before starting Castellum:
+export CASTELLUM_INTEGRATION_KEY="<base64-key-here>"
+```
+
+`AesGcmCipher` reads the key from `castellum.integration.key` (env-mapped to
+`CASTELLUM_INTEGRATION_KEY`). Startup fails fast if the key is present but does not
+decode to exactly 32 bytes; an absent key is logged at WARN and tolerated, but the
+first call to `encrypt` / `decrypt` will throw — bring the key online before the
+first integration save or push.
+
+### Rotation procedure ("truncate + re-enter")
+
+V15 does not ship a key-rotation helper, so rotation is a controlled wipe-and-replace.
+The procedure is:
+
+1. **Notify operators.** While the old key is still active, capture the current TAXII
+   / MISP / STIX configuration values (URLs, collection ids, credentials) — these will
+   need to be re-entered by hand after the rotation. The `config_json` column is
+   plaintext and survives the rotation; only `encrypted_credentials` is wiped.
+
+2. **Stop Castellum.** A live process cannot tolerate a key swap mid-flight; the
+   next `decrypt` call after the swap would throw `IllegalStateException("AES-GCM
+   decryption / tag-verify failed")` because the GCM tag was computed under the old
+   key.
+
+3. **Truncate the table.** From psql or your DBA tool:
+
+   ```sql
+   TRUNCATE TABLE integration_config;
+   ```
+
+   No row in this table can be salvaged across a key rotation — the IV is per-row
+   but the master key is shared, so every row's ciphertext is unreadable after the
+   swap.
+
+4. **Replace the env var.** Update the shell / systemd unit / Docker Compose file
+   to export the new `CASTELLUM_INTEGRATION_KEY`. Confirm it decodes to 32 bytes
+   before starting:
+
+   ```bash
+   echo "$CASTELLUM_INTEGRATION_KEY" | base64 -d | wc -c   # must print 32
+   ```
+
+5. **Restart Castellum.** Verify startup with `curl /actuator/health` — a wrong-length
+   key surfaces as a startup-time `IllegalStateException` from `AesGcmCipher#verifyKey`.
+
+6. **Re-enter integration credentials.** As an ADMIN, repost each TAXII / MISP / STIX
+   configuration via `PUT /api/integrations/{type}` or via the Settings page
+   (`TaxiiConfigPanel`, `MispConfigPanel`, `StixExportPanel`). Each save emits an
+   `INTEGRATION_CONFIG_SAVE` audit row so the rotation is traceable.
+
+7. **Smoke-test push.** Trigger a `POST /api/integrations/{type}/push` for at least
+   one configured type; the controller decrypts `encrypted_credentials` before
+   invoking the upstream client, so a successful push confirms the new ciphertext
+   round-trips correctly.
+
+### Why no online rotation
+
+Online rotation would require re-encrypting every row under the new key inside a single
+transaction, which the cipher class does not currently support — there is no `rewrap`
+helper and no second key slot. The "truncate + re-enter" pattern keeps the operational
+footprint minimal at the cost of one round of manual re-entry per rotation. Operators
+who need frequent rotation should script the truncate + restart + re-PUT sequence rather
+than expand the in-application surface.
+
+---
+
 ## Cross-References
 
 | Document | Relevance |
@@ -403,5 +614,6 @@ export LOGGING_LEVEL_IO_CASTELLUM_SECURITY=DEBUG
 | [documentation/supply-chain.md](supply-chain.md) | Dockerfile structure, distroless image, Trivy gate, cosign signing, SBOM artifacts |
 | [documentation/runtime-flags.md](runtime-flags.md) | pcap4j JVM system properties, CAP_NET_RAW Docker flags, known platform issues |
 | [documentation/ot-probes.md](ot-probes.md) | OT probe configuration (timeout env vars, max-concurrent), read-only contract |
-| [documentation/compliance.md](compliance.md) | SC-8 TLS carve-out, AC-7 rate-limiting non-claim, Suricata SI-3/SI-4 conceptual wiring |
+| [documentation/compliance.md](compliance.md) | SC-8 TLS carve-out, AC-7 in-app rate-limiting evidence, SC-13/SC-28 at-rest crypto, Suricata SI-3/SI-4 conceptual wiring |
+| [documentation/stix-taxii-misp.md](stix-taxii-misp.md) | TAXII / MISP / STIX endpoints powered by the `integration_config` rotation procedure documented in §7 |
 | [documentation/threat-model.md](threat-model.md) | Security rationale for the operational choices documented here |
