@@ -1,6 +1,7 @@
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { DiscoveryControlPanel } from '../components/DiscoveryControlPanel';
 import { OtProbePanel } from '../components/OtProbePanel';
+import { ScanPolicyPanel } from '../components/ScanPolicyPanel';
 import { UserManagementPanel } from '../components/UserManagementPanel';
 import { useAuth } from '../hooks/useAuth';
 
@@ -24,6 +25,7 @@ export function SettingsPage() {
       <UserManagementPanel isAdmin={isAdmin} />
       <DiscoveryControlPanel isAdmin={isAdmin} />
       <OtProbePanel isAdmin={isAdmin} />
+      <ScanPolicyPanel isAdmin={isAdmin} />
     </div>
   );
 }

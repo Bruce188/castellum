@@ -7,7 +7,7 @@ import type {
   InterfaceInfo, NetworkService,
   OtProbeRequest, OtProbeResponse,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
-  Scan, ScanRequest, TopRiskDeviceDto,
+  Scan, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest, TopRiskDeviceDto,
   UserDto, UserRole,
 } from './types';
 import { clearAuth, getToken } from '../hooks/useAuth';
@@ -78,8 +78,35 @@ export const api = {
     request<CveDetailDto>(`/api/cve/${encodeURIComponent(cveId)}`),
   listServicesForDevice: (id: number) =>
     request<NetworkService[]>(`/api/services?deviceId=${id}`),
-  triggerScan: (req: ScanRequest) =>
-    request<{ id: number }>('/api/scan', { method: 'POST', body: JSON.stringify(req) }),
+  triggerScan: async (req: ScanRequest): Promise<{ id: number }> => {
+    const token = getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/scan`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (response.status === 400) {
+      const body = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+      if (body?.error === 'scope_too_large') {
+        throw new Error(`400 scope_too_large: ${body.message ?? 'scope too large'}`);
+      }
+      throw new Error(`400 ${body?.message ?? response.statusText}`);
+    }
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After') ?? '60';
+      throw new Error(`429 Rate limit exceeded — retry after ${retryAfter}s`);
+    }
+    if (!response.ok && response.status !== 202) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return (await response.json()) as { id: number };
+  },
   getScan: (id: number) =>
     request<Scan>(`/api/scans/${id}`),
   listScans: (size = 10) =>
@@ -215,6 +242,60 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ role }),
     }),
+
+  /** GET /api/scan-policy — ADMIN-only. Paginated. */
+  listScanPolicies: (page = 0, size = 50) =>
+    request<Page<ScanPolicyDto>>(`/api/scan-policy?page=${page}&size=${size}&sort=createdAt,desc`),
+
+  /** POST /api/scan-policy — ADMIN-only. Returns the created policy. */
+  createScanPolicy: async (payload: ScanPolicyCreateRequest): Promise<ScanPolicyDto> => {
+    const token = getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/scan-policy`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (response.status === 400) {
+      const body = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+      throw new Error(`400 ${body?.message ?? response.statusText}`);
+    }
+    if (response.status === 409) {
+      throw new Error('409 A policy with that name already exists');
+    }
+    if (!response.ok && response.status !== 201) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return (await response.json()) as ScanPolicyDto;
+  },
+
+  /** PUT /api/scan-policy/{id}/disable — ADMIN-only. */
+  disableScanPolicy: (id: number) =>
+    request<ScanPolicyDto>(`/api/scan-policy/${id}/disable`, { method: 'PUT' }),
+
+  /** PUT /api/scan-policy/{id}/enable — ADMIN-only. */
+  enableScanPolicy: (id: number) =>
+    request<ScanPolicyDto>(`/api/scan-policy/${id}/enable`, { method: 'PUT' }),
+
+  /** DELETE /api/scan-policy/{id} — ADMIN-only. */
+  deleteScanPolicy: async (id: number): Promise<void> => {
+    const token = getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/scan-policy/${id}`, { method: 'DELETE', headers });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (!response.ok && response.status !== 204) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+  },
 
   /** POST /api/users/{username}/disable — ADMIN-only. */
   disableUser: async (username: string): Promise<void> => {

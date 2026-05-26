@@ -165,6 +165,14 @@ export function RecentScansPanel({ latestSubmittedId }: Props) {
             <span className="text-gray-400 w-16 text-right">
               {relativeTime(scan.requestedAt)}
             </span>
+            {scan.retryCount !== undefined && scan.retryCount > 0 && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800"
+                title={`Auto-retry attempt ${scan.retryCount}/2`}
+              >
+                retry {scan.retryCount}/2
+              </span>
+            )}
             {scan.status === 'FAILED' && scan.failureReason && (
               <span
                 className="text-red-500 truncate max-w-[200px]"

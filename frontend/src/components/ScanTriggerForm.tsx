@@ -24,7 +24,15 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
       setActiveScanId(result.id);
       onScanSubmitted?.(result.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'submit failed');
+      const raw = err instanceof Error ? err.message : 'submit failed';
+      // Translate backend error envelopes to action-oriented user messages.
+      if (raw.includes('scope_too_large')) {
+        setError(raw.replace(/^400 scope_too_large:\s*/, ''));
+      } else if (raw.startsWith('429')) {
+        setError(raw.replace(/^429\s*/, ''));
+      } else {
+        setError(raw);
+      }
     }
   }
 

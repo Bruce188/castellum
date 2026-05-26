@@ -90,11 +90,31 @@ export interface Scan {
   requestedAt: string;
   completedAt: string | null;
   failureReason?: string | null;
+  retryCount?: number;
 }
 
 export interface ScanRequest {
   cidr: string;
   type: ScanType;
+}
+
+export interface ScanPolicyDto {
+  id: number;
+  name: string;
+  cronExpression: string;
+  cidr: string;
+  scanType: ScanType;
+  enabled: boolean;
+  createdAt: string;
+  lastTriggeredAt: string | null;
+}
+
+export interface ScanPolicyCreateRequest {
+  name: string;
+  cronExpression: string;
+  cidr: string;
+  scanType: ScanType;
+  enabled?: boolean;
 }
 
 export interface FeedsStatusDto {

@@ -52,6 +52,7 @@ public class ScanExecutionService {
     private final DeviceUpsertService deviceUpsertService;
     private final NetworkServiceRepository networkServiceRepository;
     private final AuditService auditService;
+    private final ScanRetryService scanRetryService;
 
     public ScanExecutionService(
             NmapRunner nmapRunner,
@@ -59,13 +60,15 @@ public class ScanExecutionService {
             NmapOutputParser nmapOutputParser,
             DeviceUpsertService deviceUpsertService,
             NetworkServiceRepository networkServiceRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            ScanRetryService scanRetryService) {
         this.nmapRunner = nmapRunner;
         this.scanRepository = scanRepository;
         this.nmapOutputParser = nmapOutputParser;
         this.deviceUpsertService = deviceUpsertService;
         this.networkServiceRepository = networkServiceRepository;
         this.auditService = auditService;
+        this.scanRetryService = scanRetryService;
     }
 
     /**
@@ -173,6 +176,16 @@ public class ScanExecutionService {
 
             auditService.recordEvent("system", "SCAN_FAILED", "scan",
                 String.valueOf(scanId), failureReason);
+
+            // F8: auto-retry hook — schedules a retry if the failure reason looks like
+            // an nmap timeout and the per-scan retry budget remains. Audit-only call;
+            // the ScanRetryService poller does the actual re-dispatch.
+            try {
+                scanRetryService.scheduleRetryIfApplicable(scan);
+            } catch (Exception retryEx) {
+                log.warn("executeAsync: retry scheduling failed for scan {}: {}",
+                    scanId, retryEx.getMessage());
+            }
         }
     }
 

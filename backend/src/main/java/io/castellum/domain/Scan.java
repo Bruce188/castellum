@@ -30,6 +30,9 @@ public class Scan {
     @Column(name = "failure_reason")
     private String failureReason;
 
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
+
     public Scan() {}
 
     public Scan(Long id, String cidr, String scanType, ScanStatus status, Instant requestedAt, Instant completedAt) {
@@ -71,4 +74,7 @@ public class Scan {
 
     public String getFailureReason() { return failureReason; }
     public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
+
+    public int getRetryCount() { return retryCount; }
+    public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
 }

@@ -6,6 +6,7 @@ import io.castellum.ot.OtProbeDecodeException;
 import io.castellum.ot.OtProbeNotImplementedException;
 import io.castellum.ot.OtProbeTimeoutException;
 import io.castellum.ot.OtProbeUnreachableException;
+import io.castellum.scan.ScanScopeTooLargeException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -78,6 +79,17 @@ public class GlobalExceptionHandler {
         log.warn("Graph too large: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
             .body(Map.of("error", "GRAPH_TOO_LARGE", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ScanScopeTooLargeException.class)
+    public ResponseEntity<Map<String, Object>> handleScanScopeTooLarge(ScanScopeTooLargeException ex) {
+        log.warn("Scan scope too large: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(Map.of(
+            "error", "scope_too_large",
+            "message", ex.getMessage(),
+            "prefix", ex.getPrefix(),
+            "maxAllowedPrefix", ex.getMaxAllowedPrefix()
+        ));
     }
 
     @ExceptionHandler(OtProbeUnreachableException.class)

@@ -36,6 +36,7 @@ class ScanExecutionServiceTest {
     @Mock DeviceUpsertService deviceUpsertService;
     @Mock NetworkServiceRepository networkServiceRepository;
     @Mock AuditService auditService;
+    @Mock ScanRetryService scanRetryService;
 
     ScanExecutionService service;
 
@@ -43,7 +44,8 @@ class ScanExecutionServiceTest {
     void setUp() {
         service = new ScanExecutionService(
             nmapRunner, scanRepository, nmapOutputParser,
-            deviceUpsertService, networkServiceRepository, auditService);
+            deviceUpsertService, networkServiceRepository, auditService,
+            scanRetryService);
     }
 
     // -----------------------------------------------------------------------

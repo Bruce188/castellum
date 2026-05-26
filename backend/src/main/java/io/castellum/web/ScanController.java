@@ -6,12 +6,15 @@ import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
 import io.castellum.scan.CidrValidator;
 import io.castellum.scan.ScanExecutionService;
+import io.castellum.scan.ScanSizeGuard;
+import io.castellum.scan.ScanSubmissionRateLimiter;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import org.springframework.data.domain.Page;
@@ -31,19 +34,39 @@ public class ScanController {
     private final ScanRepository scanRepository;
     private final AuditService auditService;
     private final ScanExecutionService scanExecutionService;
+    private final ScanSubmissionRateLimiter scanRateLimiter;
 
     public ScanController(ScanRepository scanRepository,
                           AuditService auditService,
-                          ScanExecutionService scanExecutionService) {
+                          ScanExecutionService scanExecutionService,
+                          ScanSubmissionRateLimiter scanRateLimiter) {
         this.scanRepository = scanRepository;
         this.auditService = auditService;
         this.scanExecutionService = scanExecutionService;
+        this.scanRateLimiter = scanRateLimiter;
     }
 
     @PostMapping("/api/scan")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Map<String, Long>> submit(@Valid @RequestBody ScanRequest request) {
+    public ResponseEntity<?> submit(@Valid @RequestBody ScanRequest request,
+                                    Authentication auth) {
+        // 1. Structural CIDR validity (IllegalArgumentException → 400 via GlobalExceptionHandler).
         CidrValidator.requireValid(request.cidr());
+
+        // 2. Scope guard — reject /16, /20, etc. (ScanScopeTooLargeException → 400).
+        ScanSizeGuard.requireBoundedScope(request.cidr());
+
+        // 3. Per-actor rate-limit (20 / hour). On block: 429 + Retry-After.
+        String actor = auth == null || auth.getName() == null ? "system" : auth.getName();
+        if (!scanRateLimiter.tryAcquire(actor)) {
+            long retryAfter = scanRateLimiter.retryAfterSeconds(actor);
+            auditService.recordEvent(actor, "SCAN_RATE_LIMIT", "scan", "-",
+                Map.of("retryAfter", retryAfter));
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(retryAfter))
+                .build();
+        }
+        scanRateLimiter.recordSubmission(actor);
 
         Scan scan = new Scan();
         scan.setCidr(request.cidr());
@@ -52,7 +75,7 @@ public class ScanController {
         scan.setRequestedAt(Instant.now());
 
         Scan saved = scanRepository.save(scan);
-        auditService.recordEvent("system", "SCAN_SUBMIT", "scan", String.valueOf(saved.getId()), saved);
+        auditService.recordEvent(actor, "SCAN_SUBMIT", "scan", String.valueOf(saved.getId()), saved);
 
         // Dispatch async execution AFTER the PENDING row is committed and audited.
         // Wrap in try/catch so TaskRejectedException (saturated queue) never surfaces to

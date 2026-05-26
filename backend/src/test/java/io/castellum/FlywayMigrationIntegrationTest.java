@@ -311,6 +311,39 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v14_scanPolicyTableAndRetryCountColumnExist() {
+        // Table presence
+        Number tableCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES " +
+            "WHERE UPPER(TABLE_NAME) = 'SCAN_POLICY'",
+            Number.class);
+        assertNotNull(tableCount);
+        assertTrue(tableCount.intValue() >= 1, "scan_policy table must exist after V14");
+
+        // scan.retry_count column
+        Number retryColCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'SCAN' AND UPPER(COLUMN_NAME) = 'RETRY_COUNT'",
+            Number.class);
+        assertNotNull(retryColCount);
+        assertTrue(retryColCount.intValue() >= 1, "scan.retry_count column must exist after V14");
+
+        // Round-trip via raw JDBC
+        jdbcTemplate.update(
+            "INSERT INTO scan_policy (name, cron_expression, cidr, scan_type, enabled) VALUES (?, ?, ?, ?, ?)",
+            "v14-test-policy", "0 0 * * * *", "10.0.0.0/24", "PING_SWEEP", true
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT name, cron_expression, cidr, scan_type, enabled FROM scan_policy WHERE name = 'v14-test-policy'"
+        );
+        assertEquals("v14-test-policy", row.get("name"));
+        assertEquals("0 0 * * * *", row.get("cron_expression"));
+        assertEquals("10.0.0.0/24", row.get("cidr"));
+        assertEquals("PING_SWEEP", row.get("scan_type"));
+        assertEquals(true, row.get("enabled"));
+    }
+
+    @Test
     void v13_addsAuditLogTimeActionIndex() {
         // Confirm the index exists via INFORMATION_SCHEMA.INDEXES
         Number indexCount = jdbcTemplate.queryForObject(
