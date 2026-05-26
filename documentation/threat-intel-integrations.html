@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Threat-Intelligence Integrations — Operator Runbook — pipelinekit</title>
+<meta name="description" content="TAXII 2.1 and MISP integration configuration, curl recipes, AES-256-GCM credential storage, and troubleshooting for Castellum operators.">
+<meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
+<style>
+/* === Reset + variables === */
+*, *::before, *::after { box-sizing: border-box; }
+:root {
+  --bg: #ffffff;
+  --bg-elev: #fafbfc;
+  --bg-code: #f4f5f7;
+  --bg-sel: #e3f2fd;
+  --fg: #1a1d23;
+  --fg-muted: #5a6172;
+  --fg-subtle: #8b94a3;
+  --border: #e1e5eb;
+  --border-strong: #c5cbd4;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #dbeafe;
+  --success: #059669;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --radius: 6px;
+  --radius-sm: 4px;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", "Consolas", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --transition: 150ms ease;
+  /* Syntax highlight colors (light) */
+  --syn-kw: #7c3aed;     /* keyword purple */
+  --syn-str: #059669;    /* string green */
+  --syn-num: #d97706;    /* number orange */
+  --syn-com: #6b7280;    /* comment gray */
+  --syn-fn: #2563eb;     /* function blue */
+  --syn-cls: #db2777;    /* class pink */
+  --syn-op: #1f2937;     /* operator near-fg */
+}
+html[data-theme="dark"], :root[data-theme="dark"] {
+  --bg: #0b0f1a;
+  --bg-elev: #131825;
+  --bg-code: #161c2c;
+  --bg-sel: #1e3a5f;
+  --fg: #e8ecf3;
+  --fg-muted: #9aa3b3;
+  --fg-subtle: #6b7589;
+  --border: #1f2638;
+  --border-strong: #2a3349;
+  --accent: #60a5fa;
+  --accent-hover: #93c5fd;
+  --accent-soft: #1e3a8a33;
+  --success: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --syn-kw: #c084fc;
+  --syn-str: #4ade80;
+  --syn-num: #fbbf24;
+  --syn-com: #94a3b8;
+  --syn-fn: #60a5fa;
+  --syn-cls: #f472b6;
+  --syn-op: #e8ecf3;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0f1a;
+    --bg-elev: #131825;
+    --bg-code: #161c2c;
+    --bg-sel: #1e3a5f;
+    --fg: #e8ecf3;
+    --fg-muted: #9aa3b3;
+    --fg-subtle: #6b7589;
+    --border: #1f2638;
+    --border-strong: #2a3349;
+    --accent: #60a5fa;
+    --accent-hover: #93c5fd;
+    --accent-soft: #1e3a8a33;
+    --success: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --syn-kw: #c084fc;
+    --syn-str: #4ade80;
+    --syn-num: #fbbf24;
+    --syn-com: #94a3b8;
+    --syn-fn: #60a5fa;
+    --syn-cls: #f472b6;
+    --syn-op: #e8ecf3;
+  }
+}
+html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+body {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.65;
+  background: var(--bg);
+  color: var(--fg);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--transition), color var(--transition);
+}
+::selection { background: var(--bg-sel); }
+
+/* === Top bar === */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: saturate(180%) blur(10px);
+}
+.topbar .brand {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--fg);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.topbar .brand .logo {
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: white;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+.topbar .crumbs {
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  flex: 1;
+}
+.topbar .crumbs a { color: var(--fg-muted); text-decoration: none; }
+.topbar .crumbs a:hover { color: var(--accent); }
+.search-box {
+  position: relative;
+  flex: 0 1 280px;
+}
+.search-box input {
+  width: 100%;
+  padding: 0.4rem 0.7rem 0.4rem 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  transition: border-color var(--transition);
+}
+.search-box input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.search-box .icon {
+  position: absolute;
+  left: 0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  pointer-events: none;
+}
+.theme-toggle {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  transition: all var(--transition);
+}
+.theme-toggle:hover { color: var(--fg); border-color: var(--border-strong); }
+
+/* === Layout === */
+.layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  max-width: 1280px;
+  margin: 0 auto;
+  gap: 2rem;
+  padding: 2rem 1.5rem;
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; padding: 1rem; gap: 1rem; }
+  .toc { display: none; }
+  .toc.open { display: block; position: fixed; top: 60px; left: 0; right: 0; bottom: 0; background: var(--bg); z-index: 99; padding: 1.5rem; overflow-y: auto; }
+  .toc-mobile-btn { display: inline-flex; }
+}
+.toc-mobile-btn {
+  display: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-muted);
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.85rem;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* === ToC sidebar === */
+.toc {
+  position: sticky;
+  top: 80px;
+  align-self: start;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  font-size: 0.85rem;
+  padding-right: 0.5rem;
+}
+.toc-heading {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  font-weight: 700;
+  margin: 0 0 0.7rem 0.5rem;
+}
+.toc ul { list-style: none; padding: 0; margin: 0; }
+.toc li { margin: 0; }
+.toc a {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  color: var(--fg-muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: all var(--transition);
+  line-height: 1.4;
+}
+.toc a:hover { color: var(--fg); background: var(--bg-elev); }
+.toc a.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+.toc .lvl-3 a { padding-left: 1.4rem; font-size: 0.8rem; }
+
+/* === Main content === */
+main { min-width: 0; }
+.page-header { margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+.page-header h1 { font-size: 2rem; font-weight: 700; line-height: 1.2; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+.page-header .description { color: var(--fg-muted); font-size: 1.05rem; line-height: 1.5; margin: 0; }
+.page-meta { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; font-size: 0.8rem; color: var(--fg-subtle); }
+.page-meta .meta-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+.page-meta code { background: var(--bg-code); padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); font-size: 0.8rem; }
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--fg);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  position: relative;
+}
+h2 { font-size: 1.6rem; margin: 2.5rem 0 1rem; padding-top: 0.5rem; }
+h3 { font-size: 1.25rem; margin: 2rem 0 0.8rem; }
+h4 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; color: var(--fg-muted); }
+h5, h6 { font-size: 0.95rem; margin: 1rem 0 0.4rem; color: var(--fg-muted); }
+h2 .anchor, h3 .anchor, h4 .anchor {
+  position: absolute;
+  left: -1.3rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-subtle);
+  opacity: 0;
+  text-decoration: none;
+  font-weight: 400;
+  transition: opacity var(--transition);
+  font-size: 0.9em;
+}
+h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 1; }
+h2 .anchor:hover, h3 .anchor:hover, h4 .anchor:hover { color: var(--accent); }
+p { margin: 0.9rem 0; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; transition: border-color var(--transition); }
+a:hover { border-bottom-color: var(--accent); }
+strong { font-weight: 600; color: var(--fg); }
+em { font-style: italic; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* === Code === */
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--bg-code);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+pre {
+  position: relative;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+  box-shadow: var(--shadow-sm);
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--fg);
+}
+pre .lang-label {
+  position: absolute;
+  top: 0.5rem;
+  right: 3rem;
+  font-size: 0.7rem;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--sans);
+  font-weight: 600;
+  user-select: none;
+}
+pre .copy-btn {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--transition);
+  font-family: var(--sans);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+pre:hover .copy-btn { opacity: 1; }
+pre .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+pre .copy-btn.copied { color: var(--success); border-color: var(--success); }
+
+/* Pygments syntax classes */
+.codehilite .k, .codehilite .kn, .codehilite .kd, .codehilite .kr, .codehilite .kt { color: var(--syn-kw); font-weight: 500; }
+.codehilite .s, .codehilite .s1, .codehilite .s2, .codehilite .sb { color: var(--syn-str); }
+.codehilite .mi, .codehilite .mf, .codehilite .mh, .codehilite .mo { color: var(--syn-num); }
+.codehilite .c, .codehilite .c1, .codehilite .cm, .codehilite .ch { color: var(--syn-com); font-style: italic; }
+.codehilite .nf, .codehilite .fm { color: var(--syn-fn); font-weight: 500; }
+.codehilite .nc, .codehilite .ne { color: var(--syn-cls); font-weight: 500; }
+.codehilite .o, .codehilite .ow { color: var(--syn-op); }
+.codehilite .nv, .codehilite .vc, .codehilite .vg, .codehilite .vi { color: var(--syn-fn); }
+.codehilite .nb { color: var(--syn-fn); }
+.codehilite .gp { color: var(--syn-com); user-select: none; }
+
+/* === Tables === */
+.table-wrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--border); border-radius: var(--radius); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+thead { background: var(--bg-elev); border-bottom: 1px solid var(--border); }
+th {
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+th.sortable::after {
+  content: "↕";
+  margin-left: 0.4rem;
+  color: var(--fg-subtle);
+  font-size: 0.75rem;
+}
+th.sortable.asc::after { content: "↑"; color: var(--accent); }
+th.sortable.desc::after { content: "↓"; color: var(--accent); }
+td { padding: 0.6rem 0.9rem; border-top: 1px solid var(--border); vertical-align: top; }
+tbody tr:hover { background: var(--bg-elev); }
+tbody tr.filtered-out { display: none; }
+
+/* === Lists === */
+ul, ol { padding-left: 1.5rem; margin: 0.8rem 0; }
+ul li, ol li { margin: 0.3rem 0; }
+ul ul, ol ol, ul ol, ol ul { margin: 0.2rem 0; }
+
+/* === Blockquotes === */
+blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elev);
+  padding: 0.7rem 1.1rem;
+  margin: 1rem 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--fg);
+}
+blockquote p:first-child { margin-top: 0; }
+blockquote p:last-child { margin-bottom: 0; }
+
+/* === Callouts (auto-detected from blockquote first line) === */
+.callout {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius);
+  margin: 1rem 0;
+  border-left: 3px solid;
+  background: var(--bg-elev);
+}
+.callout-icon { font-size: 1.1rem; line-height: 1.4; flex-shrink: 0; }
+.callout-body { flex: 1; min-width: 0; }
+.callout-body p:first-child { margin-top: 0; font-weight: 600; }
+.callout-body p:last-child { margin-bottom: 0; }
+.callout.info { border-left-color: var(--accent); }
+.callout.info .callout-icon { color: var(--accent); }
+.callout.warn { border-left-color: var(--warn); }
+.callout.warn .callout-icon { color: var(--warn); }
+.callout.danger { border-left-color: var(--danger); }
+.callout.danger .callout-icon { color: var(--danger); }
+.callout.success { border-left-color: var(--success); }
+.callout.success .callout-icon { color: var(--success); }
+
+/* === Details/Summary === */
+details {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  margin: 1rem 0;
+}
+details[open] { border-color: var(--border-strong); }
+summary {
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+  user-select: none;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+summary::before { content: "▶"; transition: transform var(--transition); font-size: 0.75rem; color: var(--fg-subtle); }
+details[open] summary::before { transform: rotate(90deg); }
+summary::-webkit-details-marker { display: none; }
+details > *:not(summary) { padding: 0 1rem 0.8rem; }
+
+/* === Highlights (search) === */
+.search-hit { background: rgba(255, 230, 0, 0.45); border-radius: 2px; padding: 0 2px; }
+html[data-theme="dark"] .search-hit, :root[data-theme="dark"] .search-hit { background: rgba(255, 200, 0, 0.35); }
+
+/* === Footer === */
+footer {
+  margin: 4rem auto 0;
+  padding: 2rem 1.5rem;
+  max-width: 1280px;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--fg-subtle);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* === No-result state for search === */
+.no-results {
+  display: none;
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--fg-muted);
+}
+.no-results.visible { display: block; }
+
+/* === Print === */
+@media print {
+  .topbar, .toc, .toc-mobile-btn, .copy-btn, .theme-toggle, .search-box, footer { display: none !important; }
+  .layout { display: block; padding: 0; max-width: none; }
+  body { font-size: 11pt; }
+  pre { page-break-inside: avoid; }
+}
+</style>
+<!-- richness-exempt: operational runbook — terminal-shell evidence and CLI recipes; not a tutorial / lifecycle / catalog page. The interactive snippets are intended for higher-level conceptual pages. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="index.html">
+    <span class="logo">P</span>
+    <span>pipelinekit docs</span>
+  </a>
+  <div class="crumbs">
+    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Threat-Intelligence Integrations — Operator Runbook</span>
+  </div>
+  <div class="search-box">
+    <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="search" id="page-search" placeholder="Filter page (/)" aria-label="Filter content on this page">
+  </div>
+  <button class="toc-mobile-btn" id="toc-toggle" aria-label="Toggle table of contents">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    Contents
+  </button>
+  <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+    <svg id="theme-icon-light" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    <svg id="theme-icon-dark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    <span id="theme-label">Auto</span>
+  </button>
+</header>
+
+<div class="layout">
+  <aside class="toc" id="toc">
+    <h2 class="toc-heading">On this page</h2>
+    <ul>
+      <li class="lvl-2"><a href="#1-encryption-castellum-integration-key">1. Encryption — CASTELLUM_INTEGRATION_KEY</a></li>
+      <li class="lvl-2"><a href="#2-put-api-integrations-type-json-shape">2. PUT /api/integrations/{type} — JSON shape</a></li>
+      <li class="lvl-3"><a href="#2-1-taxii">2.1 TAXII</a></li>
+      <li class="lvl-3"><a href="#2-2-misp">2.2 MISP</a></li>
+      <li class="lvl-3"><a href="#2-3-response-shape">2.3 Response shape</a></li>
+      <li class="lvl-2"><a href="#3-post-api-integrations-type-push-empty-config-behavior">3. POST /api/integrations/{type}/push — empty-config behavior</a></li>
+      <li class="lvl-2"><a href="#4-curl-recipes">4. curl recipes</a></li>
+      <li class="lvl-3"><a href="#4-1-login-to-obtain-token">4.1 Login to obtain $TOKEN</a></li>
+      <li class="lvl-3"><a href="#4-2-save-taxii-config">4.2 Save TAXII config</a></li>
+      <li class="lvl-3"><a href="#4-3-save-misp-config">4.3 Save MISP config</a></li>
+      <li class="lvl-3"><a href="#4-4-inspect-persisted-config-no-secrets-returned">4.4 Inspect persisted config (no secrets returned)</a></li>
+      <li class="lvl-3"><a href="#4-5-push-via-the-persisted-config-endpoint">4.5 Push via the persisted-config endpoint</a></li>
+      <li class="lvl-3"><a href="#4-6-push-via-the-stateless-threatintel-endpoint-no-config-row-needed">4.6 Push via the stateless ThreatIntel endpoint (no config row needed)</a></li>
+      <li class="lvl-3"><a href="#4-7-export-only-returns-the-stix-bundle-inline">4.7 Export-only (returns the STIX bundle inline)</a></li>
+      <li class="lvl-2"><a href="#5-troubleshooting">5. Troubleshooting</a></li>
+      <li class="lvl-2"><a href="#6-probe-evidence-captured-against-local-backend-8081">6. Probe evidence captured against local backend (:8081)</a></li>
+      <li class="lvl-2"><a href="#7-out-of-scope">7. Out of scope</a></li>
+    </ul>
+  </aside>
+
+  <main>
+    <header class="page-header">
+      <h1>Threat-Intelligence Integrations — Operator Runbook</h1>
+      <p class="description">TAXII 2.1 and MISP integration configuration, curl recipes, AES-256-GCM credential storage, and troubleshooting for Castellum operators.</p>
+      <div class="page-meta"></div>
+    </header>
+
+    <div id="page-content">
+<blockquote>
+<p>Cross-reference: see <a href="stix-taxii-misp.md"><code>stix-taxii-misp.md</code></a> for the STIX 2.1 bundle shape that flows through these endpoints.</p>
+</blockquote>
+<p>This runbook documents how to configure, push, and troubleshoot Castellum's TAXII 2.1 and MISP integrations. Two controllers expose the surface area:</p>
+<table>
+<thead>
+<tr>
+<th>Controller</th>
+<th>Path prefix</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ThreatIntelController</code></td>
+<td><code>/api/threat-intel/**</code></td>
+<td>Stateless one-shot push using server-side defaults (<code>POST /push/taxii</code>, <code>POST /push/misp</code>, <code>POST /export</code>).</td>
+</tr>
+<tr>
+<td><code>IntegrationConfigController</code></td>
+<td><code>/api/integrations/**</code></td>
+<td>CRUD over the per-type config row + AES-256-GCM encrypted credentials, plus a <code>POST /{type}/push</code> that decrypts the credential blob and delegates to the same push pipeline.</td>
+</tr>
+</tbody>
+</table>
+<p>All endpoints require <strong>ROLE_ADMIN</strong>. The frontend Settings page (TAXII / MISP panel) is just a UI over <code>IntegrationConfigController</code>.</p>
+<hr>
+<h2 id="1-encryption-castellum-integration-key">1. Encryption — <code>CASTELLUM_INTEGRATION_KEY</code></h2>
+<p>Persisted credentials are encrypted at rest with AES-256-GCM (<code>AesGcmCipher</code>).</p>
+<ul>
+<li>Source env var: <code>CASTELLUM_INTEGRATION_KEY</code></li>
+<li>Property name: <code>castellum.integration.key</code></li>
+<li>Value: base64-encoded 32-byte (256-bit) key</li>
+<li>Generate one with:
+  <code>bash
+  openssl rand -base64 32</code></li>
+<li>If unset, the application boots but every <code>PUT /api/integrations/{type}</code> (which encrypts) and every <code>POST /api/integrations/{type}/push</code> (which decrypts to verify the row is still readable) fails with:
+  <code>IllegalStateException: CASTELLUM_INTEGRATION_KEY is not configured — set a base64 AES-256 key</code></li>
+<li>Invalid base64 fails fast at boot with <code>CASTELLUM_INTEGRATION_KEY is not valid base64</code>.</li>
+<li>A key that decodes to anything other than 32 bytes fails at boot with <code>CASTELLUM_INTEGRATION_KEY must decode to &lt;expected&gt;</code> bytes.</li>
+</ul>
+<p><strong>Key rotation:</strong> there is no automatic re-encrypt-on-key-change path. Rotating the key invalidates existing rows; the <code>POST /{type}/push</code> decrypt-probe will throw, and the operator must re-PUT the config to re-encrypt under the new key.</p>
+<hr>
+<h2 id="2-put-api-integrations-type-json-shape">2. <code>PUT /api/integrations/{type}</code> — JSON shape</h2>
+<p>Request body schema (from <code>IntegrationConfigDto.SaveRequest</code>):</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;...&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;free-form JSON, persisted as-is in config_json&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;credentials&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string — encrypted and stored as encrypted_credentials (bytea)&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Both fields are optional:</p>
+<ul>
+<li><code>config: null</code> → persisted as <code>"{}"</code>.</li>
+<li><code>credentials: null</code> → persisted as <code>cipher.encrypt("")</code> (a non-empty ciphertext over an empty plaintext; <code>credentialsSet</code> returns <code>false</code> only if the byte array is null/empty).</li>
+</ul>
+<p><code>{type}</code> is normalized to upper-case and must be one of <code>TAXII</code> or <code>MISP</code>. Anything else returns <strong>400</strong> with body <code>unsupported integration type: &lt;input&gt; (expected TAXII or MISP)</code>.</p>
+<h3 id="2-1-taxii">2.1 TAXII</h3>
+<p>Recommended <code>config</code> keys (consumed by the push path):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Read by</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>collectionId</code></td>
+<td><code>IntegrationConfigController.push</code></td>
+<td>Forwarded to <code>ThreatIntelService.pushTaxii(collection)</code> as the target collection override. If absent or null, the server uses its compiled-in default.</td>
+</tr>
+</tbody>
+</table>
+<p><code>credentials</code> is whatever bearer / basic token the operator's TAXII server expects. <strong>Note:</strong> the value is stored encrypted, but <code>ThreatIntelService.pushTaxii</code> currently uses env-injected credentials at runtime — the persisted <code>credentials</code> field is decrypted only as a <em>readability probe</em> before the push. Treat the persisted value as the source of truth for "is the key still good?" not as the live transport credential.</p>
+<p>Example body:</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;collectionId&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1f33c1cc-8b66-4f10-9c4f-8c92e0e3a4e2&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;credentials&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Bearer eyJhbGciOiJIUzI1NiJ...&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="2-2-misp">2.2 MISP</h3>
+<p><code>config</code> is currently unread by the push path — <code>ThreatIntelService.pushMisp()</code> takes no parameters from the persisted row. Persist <code>{}</code> (or any operator-facing notes — they will round-trip through the response) and put the live MISP transport creds in env vars consumed by the MISP client.</p>
+<p>Example body:</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;note&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod MISP instance, contact ops&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;credentials&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;MISP API key — stored encrypted, used as a readability probe&gt;&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="2-3-response-shape">2.3 Response shape</h3>
+<p><code>IntegrationConfigDto.Response</code> (returned by <code>PUT</code> and <code>GET</code>):</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;integrationType&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;TAXII&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;...&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;as persisted&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;credentialsSet&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;lastPushAt&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;lastPushStatus&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;createdAt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-05-26T12:00:00Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;updatedAt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-05-26T12:00:00Z&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The encrypted bytes are <strong>never</strong> serialized — <code>credentialsSet</code> is the only signal exposed.</p>
+<hr>
+<h2 id="3-post-api-integrations-type-push-empty-config-behavior">3. <code>POST /api/integrations/{type}/push</code> — empty-config behavior</h2>
+<p>Behavior matrix when the config row does not exist:</p>
+<table>
+<thead>
+<tr>
+<th>Precondition</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No row for <code>{type}</code> saved</td>
+<td><strong>404</strong> with <code>NoSuchElementException</code> body <code>integration_config not found for type: &lt;NORMALIZED&gt;</code></td>
+</tr>
+<tr>
+<td>Row exists, but <code>CASTELLUM_INTEGRATION_KEY</code> missing or rotated</td>
+<td><strong>500</strong> path — <code>cipher.decrypt(...)</code> throws <code>IllegalStateException</code> before any upstream push is attempted. The <code>lastPushStatus</code> is <strong>not</strong> updated in this path (the throw is before the <code>try/finally</code>).</td>
+</tr>
+<tr>
+<td>Row exists, decrypts OK, upstream push fails</td>
+<td><strong>200</strong> with body <code>{ "status": "error", "bundleId": null, "pushedAt": "&lt;now&gt;", "lastPushStatus": "ERROR: &lt;truncated message ≤ 200 chars&gt;" }</code>. Row's <code>lastPushAt</code> / <code>lastPushStatus</code> are persisted; audit event <code>TAXII_PUSH</code> or <code>MISP_PUSH</code> recorded with <code>status: ERROR</code>.</td>
+</tr>
+<tr>
+<td>Row exists, decrypts OK, upstream push succeeds</td>
+<td><strong>200</strong> with body <code>{ "status": "ok", "bundleId": "&lt;uuid&gt;", "pushedAt": "&lt;now&gt;", "lastPushStatus": "SUCCESS: ..." }</code>. Audit event recorded with <code>status: SUCCESS</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Anonymous probe captured against the local backend:</p>
+<div class="codehilite"><pre><span></span><code>$ curl -s -o /tmp/r -w &quot;HTTP %{http_code}\n&quot; -X POST http://localhost:8081/api/integrations/TAXII/push
+HTTP 401
+$ cat /tmp/r
+{&quot;status&quot;:401,&quot;path&quot;:&quot;/api/integrations/TAXII/push&quot;,&quot;error&quot;:&quot;unauthorized&quot;}
+</code></pre></div>
+
+<p>So the auth gate is the first line — missing token short-circuits before any config-lookup or decrypt logic runs.</p>
+<hr>
+<h2 id="4-curl-recipes">4. curl recipes</h2>
+<p>All recipes assume <code>:8081</code> and an admin Bearer token already obtained via <code>POST /api/auth/login</code>. Set <code>$TOKEN</code> before running.</p>
+<h3 id="4-1-login-to-obtain-token">4.1 Login to obtain <code>$TOKEN</code></h3>
+<div class="codehilite"><pre><span></span><code><span class="nv">TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8081/api/auth/login<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;username&quot;:&quot;&lt;admin-username&gt;&quot;,&quot;password&quot;:&quot;&lt;admin-password&gt;&quot;}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;import json,sys;print(json.load(sys.stdin)[&quot;token&quot;])&#39;</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-c<span class="w"> </span><span class="m">24</span><span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span>
+</code></pre></div>
+
+<p>The admin user / password hash are seeded at boot from <code>castellum.admin.username</code> + <code>castellum.admin.password-hash</code> (BCrypt) — see <code>BootstrapAdminInitializer</code>. There is no compiled-in fallback admin.</p>
+<h3 id="4-2-save-taxii-config">4.2 Save TAXII config</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:8081/api/integrations/TAXII<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;config&quot;: { &quot;collectionId&quot;: &quot;&lt;your-taxii-collection-uuid&gt;&quot; },</span>
+<span class="s1">    &quot;credentials&quot;: &quot;Bearer &lt;your-taxii-token&gt;&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="4-3-save-misp-config">4.3 Save MISP config</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:8081/api/integrations/MISP<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;config&quot;: {},</span>
+<span class="s1">    &quot;credentials&quot;: &quot;&lt;your-misp-api-key&gt;&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="4-4-inspect-persisted-config-no-secrets-returned">4.4 Inspect persisted config (no secrets returned)</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/integrations/TAXII<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+</code></pre></div>
+
+<h3 id="4-5-push-via-the-persisted-config-endpoint">4.5 Push via the persisted-config endpoint</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/integrations/TAXII/push<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+</code></pre></div>
+
+<h3 id="4-6-push-via-the-stateless-threatintel-endpoint-no-config-row-needed">4.6 Push via the stateless ThreatIntel endpoint (no config row needed)</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;http://localhost:8081/api/threat-intel/push/taxii?collection=&lt;override-uuid&gt;&quot;</span>
+
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/threat-intel/push/misp
+</code></pre></div>
+
+<h3 id="4-7-export-only-returns-the-stix-bundle-inline">4.7 Export-only (returns the STIX bundle inline)</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/threat-intel/export<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-40
+</code></pre></div>
+
+<hr>
+<h2 id="5-troubleshooting">5. Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>What to check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>401 on every endpoint</strong></td>
+<td>Bearer token missing or expired.</td>
+<td>Re-run §4.1. Confirm <code>Authorization: Bearer &lt;token&gt;</code> header is present on the failing request.</td>
+</tr>
+<tr>
+<td><strong>403 on <code>/api/integrations/**</code></strong></td>
+<td>Caller has <code>ROLE_VIEWER</code>, not <code>ROLE_ADMIN</code>.</td>
+<td>Re-issue the token from an admin account. The frontend Settings page intentionally hides the panel for viewers.</td>
+</tr>
+<tr>
+<td><strong>404 <code>integration_config not found</code></strong></td>
+<td>No <code>PUT /api/integrations/{type}</code> has been done since boot (or DB reset).</td>
+<td>Save the config first (§4.2 / §4.3) before calling <code>/push</code>.</td>
+</tr>
+<tr>
+<td><strong>400 <code>unsupported integration type</code></strong></td>
+<td>Path variable is not <code>TAXII</code> or <code>MISP</code>. Case-insensitive — <code>taxii</code> works, <code>STIX</code> does not.</td>
+<td>Use upper-case <code>TAXII</code> / <code>MISP</code> for clarity.</td>
+</tr>
+<tr>
+<td><strong>500 with <code>CASTELLUM_INTEGRATION_KEY is not configured</code></strong></td>
+<td>Env var missing on the running JVM.</td>
+<td><code>printenv CASTELLUM_INTEGRATION_KEY</code> on the backend host. Set, restart, re-PUT the config so the row is re-encrypted under the live key.</td>
+</tr>
+<tr>
+<td><strong>500 with AES-GCM tag-mismatch / GeneralSecurityException</strong></td>
+<td>Key was rotated and the existing row was encrypted under the previous key.</td>
+<td>Re-PUT the config row to re-encrypt under the new key. There is no auto-migration path.</td>
+</tr>
+<tr>
+<td><strong>200 with <code>status: "error"</code> from <code>/{type}/push</code></strong></td>
+<td>Auth gate + decryption succeeded but the upstream TAXII/MISP server rejected or timed out.</td>
+<td>Inspect <code>lastPushStatus</code> on the row (<code>GET /api/integrations/{type}</code>). The error message is truncated to 200 chars — full stack trace lands in the backend log. Audit-log row also captures <code>status: ERROR</code> + truncated message.</td>
+</tr>
+<tr>
+<td><strong>Push hangs (no response)</strong></td>
+<td>Upstream TAXII/MISP server unreachable; the HTTP client doesn't have an aggressive timeout in some paths.</td>
+<td>Check network reachability + the upstream server's logs. Cancel the request from the client side; the backend transaction will roll forward with <code>lastPushStatus = "ERROR: ..."</code> once the underlying call eventually throws.</td>
+</tr>
+<tr>
+<td><strong><code>credentialsSet: false</code> after a PUT</strong></td>
+<td>Body had <code>credentials: null</code> (or omitted).</td>
+<td>Include a non-empty <code>credentials</code> string in the PUT body. An empty string is encrypted but still produces a non-empty ciphertext, so <code>credentialsSet</code> would still read <code>true</code> — <code>false</code> specifically means the bytea column is null/zero-length.</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="6-probe-evidence-captured-against-local-backend-8081">6. Probe evidence captured against local backend (<code>:8081</code>)</h2>
+<p>The following probes were executed during runbook authoring; the recorded responses confirm the auth gate is the first line of defense for every documented endpoint.</p>
+<div class="codehilite"><pre><span></span><code>$ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X GET  http://localhost:8081/api/integrations/TAXII
+401
+$ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X GET  http://localhost:8081/api/integrations/INVALID
+401
+$ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X PUT  http://localhost:8081/api/integrations/TAXII -H &quot;content-type: application/json&quot; -d &#39;{}&#39;
+401
+$ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X POST http://localhost:8081/api/integrations/TAXII/push
+401
+$ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X POST http://localhost:8081/api/threat-intel/push/taxii
+401
+</code></pre></div>
+
+<p>Body shape on the 401 path (canonical for all):</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">401</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/api/integrations/TAXII&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;unauthorized&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<p>ADMIN-gated branches (404 missing config, 400 bad type, 500 missing key, 200 push outcomes) are derived from <code>IntegrationConfigController</code> and <code>ThreatIntelController</code> source — operators reproducing this runbook against their own deployment should expect those exact response shapes once they hold a valid admin token.</p>
+<hr>
+<h2 id="7-out-of-scope">7. Out of scope</h2>
+<ul>
+<li>Standing up a real TAXII 2.1 server (e.g., <code>mitre/cti-taxii-server</code>) or a MISP instance for round-trip verification. The runbook assumes the operator has these endpoints already and only documents the Castellum side of the wire.</li>
+<li>Multi-tenant or multi-endpoint per-type configs. The current schema is one row per <code>integration_type</code> (<code>TAXII</code> / <code>MISP</code>) — a deployment with two TAXII servers needs a schema change.</li>
+<li>Re-encryption automation on key rotation.</li>
+</ul>
+    </div>
+
+    <div class="no-results" id="no-results">
+      <p>No matches on this page. Clear the filter to see all content.</p>
+    </div>
+  </main>
+</div>
+
+<footer>
+  <div>Generated by <a href="https://github.com/Bruce188/pipelinekit">pipelinekit</a> · <code>docs-writer/2</code> · <a href="credits.html">Credits</a></div>
+  <div>Self-contained HTML · no CDN · no remote assets</div>
+</footer>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============ Theme toggle (auto → light → dark cycle) ============
+  const themeToggle = document.getElementById('theme-toggle');
+  const themeLabel = document.getElementById('theme-label');
+  const iconLight = document.getElementById('theme-icon-light');
+  const iconDark = document.getElementById('theme-icon-dark');
+  const root = document.documentElement;
+  const STORE_KEY = 'pkit-docs-theme';
+
+  function applyTheme(mode) {
+    if (mode === 'auto') {
+      root.removeAttribute('data-theme');
+      themeLabel.textContent = 'Auto';
+      iconLight.style.display = 'none';
+      iconDark.style.display = '';
+    } else {
+      root.setAttribute('data-theme', mode);
+      themeLabel.textContent = mode === 'dark' ? 'Dark' : 'Light';
+      iconLight.style.display = mode === 'dark' ? 'none' : '';
+      iconDark.style.display = mode === 'dark' ? '' : 'none';
+    }
+  }
+  applyTheme(localStorage.getItem(STORE_KEY) || 'auto');
+  themeToggle.addEventListener('click', () => {
+    const cur = localStorage.getItem(STORE_KEY) || 'auto';
+    const next = cur === 'auto' ? 'light' : cur === 'light' ? 'dark' : 'auto';
+    localStorage.setItem(STORE_KEY, next);
+    applyTheme(next);
+  });
+
+  // ============ Anchor links on headings ============
+  document.querySelectorAll('h2[id], h3[id], h4[id]').forEach(h => {
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.className = 'anchor';
+    a.setAttribute('aria-label', 'Permalink to ' + h.textContent);
+    a.textContent = '#';
+    h.insertBefore(a, h.firstChild);
+  });
+
+  // ============ Copy-code buttons ============
+  document.querySelectorAll('pre').forEach(pre => {
+    const code = pre.querySelector('code');
+    if (!code) return;
+    // Try to detect language from class
+    const cls = code.className || pre.className || '';
+    const langMatch = cls.match(/language-(\w+)|codehilite/) || cls.match(/\b(\w+)\b/);
+    let lang = '';
+    const cm = cls.match(/language-(\w+)/);
+    if (cm) lang = cm[1];
+    if (lang && lang !== 'codehilite') {
+      const label = document.createElement('span');
+      label.className = 'lang-label';
+      label.textContent = lang;
+      pre.appendChild(label);
+    }
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Copy code');
+    btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy';
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.innerText);
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>Copied';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy';
+        }, 1800);
+      } catch (e) {
+        btn.textContent = 'Press Ctrl+C';
+      }
+    });
+    pre.appendChild(btn);
+  });
+
+  // ============ Sortable tables ============
+  document.querySelectorAll('table').forEach(table => {
+    const thead = table.querySelector('thead');
+    if (!thead) return;
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    // Wrap in scroll container
+    if (!table.parentElement.classList.contains('table-wrap')) {
+      const wrap = document.createElement('div');
+      wrap.className = 'table-wrap';
+      table.parentNode.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    }
+    thead.querySelectorAll('th').forEach((th, idx) => {
+      th.classList.add('sortable');
+      th.addEventListener('click', () => sortByColumn(table, idx, th));
+    });
+  });
+  function sortByColumn(table, colIdx, th) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const isAsc = !th.classList.contains('asc');
+    table.querySelectorAll('th').forEach(h => h.classList.remove('asc', 'desc'));
+    th.classList.toggle('asc', isAsc);
+    th.classList.toggle('desc', !isAsc);
+    rows.sort((a, b) => {
+      const av = (a.children[colIdx]?.innerText || '').trim();
+      const bv = (b.children[colIdx]?.innerText || '').trim();
+      const an = parseFloat(av);
+      const bn = parseFloat(bv);
+      let cmp;
+      if (!isNaN(an) && !isNaN(bn)) cmp = an - bn;
+      else cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+      return isAsc ? cmp : -cmp;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+  }
+
+  // ============ ScrollSpy for ToC ============
+  const tocLinks = document.querySelectorAll('.toc a');
+  const headings = document.querySelectorAll('main h2[id], main h3[id]');
+  if (tocLinks.length && headings.length && 'IntersectionObserver' in window) {
+    const linkByHash = {};
+    tocLinks.forEach(a => { linkByHash[a.getAttribute('href')] = a; });
+    const visible = new Set();
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        const h = '#' + e.target.id;
+        if (e.isIntersecting) visible.add(h);
+        else visible.delete(h);
+      });
+      tocLinks.forEach(a => a.classList.remove('active'));
+      // Pick the topmost-visible heading
+      const candidates = Array.from(headings).filter(h => visible.has('#' + h.id));
+      const first = candidates[0] || headings[0];
+      if (first && linkByHash['#' + first.id]) linkByHash['#' + first.id].classList.add('active');
+    }, { rootMargin: '-100px 0px -60% 0px', threshold: 0 });
+    headings.forEach(h => io.observe(h));
+  }
+
+  // ============ In-page search filter ============
+  const searchInput = document.getElementById('page-search');
+  const noResults = document.getElementById('no-results');
+  const pageContent = document.getElementById('page-content');
+  function clearHighlights() {
+    pageContent.querySelectorAll('.search-hit').forEach(el => {
+      const t = document.createTextNode(el.textContent);
+      el.parentNode.replaceChild(t, el);
+    });
+    pageContent.normalize();
+  }
+  function highlightInNode(node, regex) {
+    if (node.nodeType === 3) {
+      const txt = node.nodeValue;
+      const m = txt.match(regex);
+      if (!m) return false;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      txt.replace(regex, (match, _g, off) => {
+        if (off > last) frag.appendChild(document.createTextNode(txt.slice(last, off)));
+        const span = document.createElement('span');
+        span.className = 'search-hit';
+        span.textContent = match;
+        frag.appendChild(span);
+        last = off + match.length;
+      });
+      if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+      node.parentNode.replaceChild(frag, node);
+      return true;
+    }
+    if (node.nodeType !== 1) return false;
+    if (['SCRIPT','STYLE','PRE','CODE'].includes(node.tagName)) return false;
+    let any = false;
+    Array.from(node.childNodes).forEach(c => { if (highlightInNode(c, regex)) any = true; });
+    return any;
+  }
+  function filter(q) {
+    clearHighlights();
+    // Filter table rows
+    document.querySelectorAll('table tbody tr').forEach(tr => tr.classList.remove('filtered-out'));
+    if (!q) { noResults.classList.remove('visible'); return; }
+    const lc = q.toLowerCase();
+    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    let anyHit = false;
+    if (highlightInNode(pageContent, regex)) anyHit = true;
+    // Table filtering
+    document.querySelectorAll('table tbody tr').forEach(tr => {
+      const txt = tr.innerText.toLowerCase();
+      if (!txt.includes(lc)) tr.classList.add('filtered-out');
+      else anyHit = true;
+    });
+    noResults.classList.toggle('visible', !anyHit);
+  }
+  if (searchInput) {
+    let debounce;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => filter(e.target.value.trim()), 80);
+    });
+  }
+  // Keyboard: / focuses search
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== searchInput && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      searchInput.focus();
+    }
+    if (e.key === 'Escape' && document.activeElement === searchInput) {
+      searchInput.value = '';
+      filter('');
+      searchInput.blur();
+    }
+  });
+
+  // ============ Mobile ToC drawer ============
+  const tocToggle = document.getElementById('toc-toggle');
+  const toc = document.getElementById('toc');
+  if (tocToggle && toc) {
+    tocToggle.addEventListener('click', () => toc.classList.toggle('open'));
+    toc.addEventListener('click', (e) => {
+      if (e.target.tagName === 'A') toc.classList.remove('open');
+    });
+  }
+
+  // ============ Auto-detect callouts from blockquotes starting with [NOTE]/[INFO]/etc ============
+  document.querySelectorAll('blockquote').forEach(bq => {
+    const first = bq.querySelector('p:first-child');
+    if (!first) return;
+    const m = first.textContent.match(/^\[(NOTE|INFO|TIP|WARN|WARNING|DANGER|ALERT|SUCCESS|OK)\]\s*/i);
+    if (!m) return;
+    const kind = m[1].toUpperCase();
+    const klass = ['WARN','WARNING','ALERT'].includes(kind) ? 'warn'
+                 : ['DANGER'].includes(kind) ? 'danger'
+                 : ['SUCCESS','OK'].includes(kind) ? 'success' : 'info';
+    const icon = klass === 'warn' ? '⚠' : klass === 'danger' ? '✕' : klass === 'success' ? '✓' : 'ℹ';
+    first.textContent = first.textContent.slice(m[0].length);
+    const wrap = document.createElement('div');
+    wrap.className = 'callout ' + klass;
+    wrap.innerHTML = '<span class="callout-icon">' + icon + '</span><div class="callout-body"></div>';
+    const body = wrap.querySelector('.callout-body');
+    while (bq.firstChild) body.appendChild(bq.firstChild);
+    bq.parentNode.replaceChild(wrap, bq);
+  });
+
+})();
+</script>
+
+</body>
+</html>
