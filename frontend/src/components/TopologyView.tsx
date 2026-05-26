@@ -172,6 +172,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       ref={containerRef}
       data-testid="topology-canvas"
       className="w-full h-full"
+      title="Node color reflects composite risk tier (CVE severity × KEV × EPSS × criticality). Update operator-set criticality on the device detail panel."
     />
   );
 }
