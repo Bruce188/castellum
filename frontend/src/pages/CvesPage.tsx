@@ -155,12 +155,12 @@ export function CvesPage() {
         </thead>
         <tbody>
           {page?.content.map((cve) => (
-            <tr key={cve.cveId} className="border-b hover:bg-gray-50">
-              <td className="px-2 py-1 border font-mono text-xs">{cve.cveId}</td>
+            <tr key={cve.cveId} className="border-b hover:bg-gray-50 select-none">
+              <td className="px-2 py-1 border font-mono text-xs select-text">{cve.cveId}</td>
               <td className={`px-2 py-1 border tabular-nums ${severityClass(cve.cvssV31Score)}`}>
                 {cve.cvssV31Score ?? '—'}
               </td>
-              <td className="px-2 py-1 border text-gray-700 truncate max-w-xl">
+              <td className="px-2 py-1 border text-gray-700 truncate max-w-xl select-text">
                 {cve.description ?? <span className="text-gray-400">no description</span>}
               </td>
               <td className="px-2 py-1 border text-xs text-gray-600 tabular-nums">
