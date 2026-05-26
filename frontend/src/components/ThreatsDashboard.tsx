@@ -96,7 +96,12 @@ export function ThreatsDashboard() {
             <tr className="text-left border-b text-gray-600">
               <th className="py-1 pr-2">#</th>
               <th className="py-1 pr-2">Host</th>
-              <th className="py-1 pr-2">Criticality</th>
+              <th
+                className="py-1 pr-2"
+                title="Operator-set field (LOW / MEDIUM / HIGH / CRITICAL) used as one input to the composite risk score. Distinct from the topology node color, which reflects the live composite tier."
+              >
+                Criticality
+              </th>
               <th className="py-1 pr-2">KEV</th>
               <th className="py-1 pr-2 text-right">Composite</th>
             </tr>
