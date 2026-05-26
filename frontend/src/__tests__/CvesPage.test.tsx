@@ -218,4 +218,19 @@ describe('<CvesPage />', () => {
       expect(calls[calls.length - 1][3]).toBeUndefined();
     });
   });
+
+  it('CvesPage_renders_select_none_on_tr_and_select_text_on_id_and_description', async () => {
+    listFleetCves.mockResolvedValueOnce(defaultPage);
+
+    renderWith();
+
+    const idCell = await screen.findByText('CVE-2024-12345');
+    const row = idCell.closest('tr');
+    expect(row).not.toBeNull();
+    expect(row!.className).toContain('select-none');
+    expect(idCell.className).toContain('select-text');
+
+    const descCell = screen.getByText('Example vulnerability');
+    expect(descCell.className).toContain('select-text');
+  });
 });
