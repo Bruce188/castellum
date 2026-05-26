@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * Request for a passive discovery sweep. Annotations are relaxed here so that
  * the controller can apply defaults before validation occurs in the service.
- * See {@link io.castellum.web.PassiveScanController} for the normalization logic.
+ * See {@link io.castellum.web.PassiveDiscoveryController} for the normalization logic.
  */
 public record PassiveDiscoveryRequest(
     String iface,

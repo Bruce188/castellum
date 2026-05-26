@@ -27,6 +27,12 @@ public class Scan {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @Column(name = "failure_reason")
+    private String failureReason;
+
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
+
     public Scan() {}
 
     public Scan(Long id, String cidr, String scanType, ScanStatus status, Instant requestedAt, Instant completedAt) {
@@ -36,6 +42,16 @@ public class Scan {
         this.status = status;
         this.requestedAt = requestedAt;
         this.completedAt = completedAt;
+    }
+
+    public Scan(Long id, String cidr, String scanType, ScanStatus status, Instant requestedAt, Instant completedAt, String failureReason) {
+        this.id = id;
+        this.cidr = cidr;
+        this.scanType = scanType;
+        this.status = status;
+        this.requestedAt = requestedAt;
+        this.completedAt = completedAt;
+        this.failureReason = failureReason;
     }
 
     public Long getId() { return id; }
@@ -55,4 +71,10 @@ public class Scan {
 
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+
+    public String getFailureReason() { return failureReason; }
+    public void setFailureReason(String failureReason) { this.failureReason = failureReason; }
+
+    public int getRetryCount() { return retryCount; }
+    public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
 }

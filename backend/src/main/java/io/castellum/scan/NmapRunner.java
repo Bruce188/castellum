@@ -40,6 +40,13 @@ public class NmapRunner {
 
         List<String> argv = new ArrayList<>();
         argv.add("nmap");
+        // Aggressive timing template + per-host cap so a stuck host doesn't drag the whole scan.
+        // -T4 = aggressive (lower probe rtt timeout, faster retransmit); --host-timeout 30s = give up
+        // on any single host after 30s. Without these, /24 sweeps on sparse networks dominated by
+        // unresponsive IPs blow the overall budget.
+        argv.add("-T4");
+        argv.add("--host-timeout");
+        argv.add("30s");
         argv.addAll(type.argv());
         argv.add(validatedCidr);
 
@@ -54,7 +61,9 @@ public class NmapRunner {
             Future<byte[]> stderrFuture = drainer.submit(() -> readCapped(process.getErrorStream(), MAX_OUTPUT_BYTES));
             drainer.shutdown();
 
-            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+            // 5-minute outer cap. With --host-timeout 30s on the nmap side, a /24 of mostly
+            // dead hosts caps near ceil(256/parallel_probes) × 30s; -T4 keeps responsive hosts fast.
+            boolean finished = process.waitFor(300, TimeUnit.SECONDS);
             if (!finished) {
                 throw new IOException("nmap timed out");
             }

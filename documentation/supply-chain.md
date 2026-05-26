@@ -85,6 +85,7 @@ docker run \
   -p 8080:8080 \
   -e CASTELLUM_SECURITY_JWT_SECRET="$(openssl rand -base64 48)" \
   -e CASTELLUM_ADMIN_USERNAME=admin \
+  # REPLACE-THIS — generate with: htpasswd -bnBC 12 "" 'your-password' | tr -d ':\n'
   -e CASTELLUM_ADMIN_PASSWORD_HASH='$2a$12$...' \
   castellum:latest
 ```

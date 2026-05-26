@@ -5,21 +5,34 @@ import { useScanStatus } from '../hooks/useScanStatus';
 
 const SCAN_TYPES: ScanType[] = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT'];
 
-export function ScanTriggerForm() {
+interface Props {
+  onScanSubmitted?: (id: number) => void;
+}
+
+export function ScanTriggerForm({ onScanSubmitted }: Props) {
   const [cidr, setCidr] = useState('192.168.1.0/24');
   const [type, setType] = useState<ScanType>('PING_SWEEP');
-  const [submittedScanId, setSubmittedScanId] = useState<number | null>(null);
+  const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const scan = useScanStatus(submittedScanId);
+  const scan = useScanStatus(activeScanId);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     try {
       const result = await api.triggerScan({ cidr, type });
-      setSubmittedScanId(result.id);
+      setActiveScanId(result.id);
+      onScanSubmitted?.(result.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'submit failed');
+      const raw = err instanceof Error ? err.message : 'submit failed';
+      // Translate backend error envelopes to action-oriented user messages.
+      if (raw.includes('scope_too_large')) {
+        setError(raw.replace(/^400 scope_too_large:\s*/, ''));
+      } else if (raw.startsWith('429')) {
+        setError(raw.replace(/^429\s*/, ''));
+      } else {
+        setError(raw);
+      }
     }
   }
 
@@ -32,6 +45,7 @@ export function ScanTriggerForm() {
           onChange={e => setCidr(e.target.value)}
           className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm w-44"
           required
+          title="CIDR notation, e.g. 192.168.1.0/24 — the subnet the scanner will sweep."
         />
       </label>
       <label className="text-sm font-medium">Type
@@ -39,6 +53,7 @@ export function ScanTriggerForm() {
           value={type}
           onChange={e => setType(e.target.value as ScanType)}
           className="ml-2 px-2 py-1 border border-gray-300 rounded text-sm"
+          title="Scan type: PING_SWEEP (host discovery) | SERVICE_DETECT (port + banner) | OS_FINGERPRINT (OS guess)."
         >
           {SCAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>

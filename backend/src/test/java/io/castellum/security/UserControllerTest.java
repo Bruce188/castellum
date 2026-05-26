@@ -45,6 +45,9 @@ class UserControllerTest {
     @MockBean
     CastellumUserDetailsService castellumUserDetailsService;
 
+    @MockBean
+    org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
     @Test
     @WithMockUser(roles = "ADMIN")
     void adminCanDisableUser() throws Exception {

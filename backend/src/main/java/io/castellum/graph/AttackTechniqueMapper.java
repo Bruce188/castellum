@@ -1,18 +1,25 @@
 package io.castellum.graph;
 
+import io.castellum.domain.NetworkService;
+
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * Static, immutable mapping of {@link EdgeType} → {@link AttackTechnique}. Single technique per type
- * in v1. Refinement (e.g. SMB/RPC EXPLOITABLE_VULN → T1210 instead of T1190) is deferred — see
- * {@code progress.md} Deferred entry "EXPLOITABLE_VULN technique granularity".
+ * Static, immutable mapping of {@link EdgeType} → {@link AttackTechnique}. Default mapping per
+ * type (single technique). The {@link #forEdgeType(EdgeType, NetworkService)} overload refines
+ * EXPLOITABLE_VULN to T1210 (Exploitation of Remote Services) when the service name matches
+ * SMB / RPC / RDP / SSH; otherwise it falls back to the default T1190 mapping.
  *
  * <p>The mapping is a published contract; mutation throws {@link UnsupportedOperationException}.
  */
 public final class AttackTechniqueMapper {
 
     public static final Map<EdgeType, AttackTechnique> MAPPING;
+
+    private static final AttackTechnique T1210 =
+        new AttackTechnique("T1210", "Exploitation of Remote Services");
 
     static {
         Map<EdgeType, AttackTechnique> m = new HashMap<>();
@@ -30,5 +37,35 @@ public final class AttackTechniqueMapper {
         AttackTechnique t = MAPPING.get(type);
         if (t == null) throw new IllegalArgumentException("no technique mapping for " + type);
         return t;
+    }
+
+    /**
+     * Service-aware overload. Returns T1210 (Exploitation of Remote Services) for
+     * EXPLOITABLE_VULN edges when the service name matches SMB / RPC / RDP / SSH; otherwise
+     * delegates to {@link #forEdgeType(EdgeType)}.
+     */
+    public static AttackTechnique forEdgeType(EdgeType type, NetworkService service) {
+        if (type == EdgeType.EXPLOITABLE_VULN && service != null && service.getName() != null) {
+            String n = service.getName().toLowerCase(Locale.ROOT);
+            if (n.contains("smb") || n.contains("rpc") || n.contains("rdp") || n.contains("ssh")) {
+                return T1210;
+            }
+        }
+        return forEdgeType(type);
+    }
+
+    /**
+     * Resolve the human-readable technique name for a technique id captured at edge build time
+     * (see {@link AttackEdge#getTechniqueId()}). Recognises the registered ids for the default
+     * EdgeType mapping plus the T1210 service-aware override; for any unrecognised id, falls
+     * back to the name from the EdgeType-only default mapping.
+     */
+    public static String nameFor(String techniqueId, EdgeType fallbackType) {
+        if (techniqueId == null) return forEdgeType(fallbackType).name();
+        if (T1210.id().equals(techniqueId)) return T1210.name();
+        for (AttackTechnique t : MAPPING.values()) {
+            if (t.id().equals(techniqueId)) return t.name();
+        }
+        return forEdgeType(fallbackType).name();
     }
 }

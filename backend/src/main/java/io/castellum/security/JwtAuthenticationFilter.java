@@ -1,6 +1,8 @@
 package io.castellum.security;
 
 import io.castellum.audit.AuditService;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -25,6 +27,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
+    /** Request attribute key under which the parsed {@link Jws} is cached for the lifetime of the request. */
+    static final String JWT_CLAIMS_ATTR = "io.castellum.security.jwtClaims";
+
     private final JwtService jwtService;
     private final AuditService auditService;
     private final UserRepository userRepository;
@@ -47,6 +52,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this(jwtService, auditService, null);
     }
 
+    /**
+     * Skip JWT validation entirely for ERROR-dispatch requests. When Spring forwards to
+     * {@code /error} (missing required parameter → 400, no handler → 404, controller throw → 5xx),
+     * there is no {@code Authorization} header in the forwarded request context, causing the filter
+     * to emit a spurious 401 that masks the real status. The {@code /error} endpoint is already
+     * covered by {@code permitAll()} in {@code SecurityConfig}; this override stops the filter
+     * from running on the forward at all.
+     */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getDispatcherType() == jakarta.servlet.DispatcherType.ERROR
+                || "/error".equals(request.getRequestURI());
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
@@ -57,8 +76,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         String token = header.substring(7);
         try {
-            String username = jwtService.extractUsername(token);
-            List<String> roles = jwtService.extractRoles(token);
+            // Parse once and cache under request attribute to avoid repeated cryptographic work
+            Jws<Claims> jws = jwtService.extractClaims(token);
+            request.setAttribute(JWT_CLAIMS_ATTR, jws);
+
+            String username = jwtService.extractUsername(jws);
+            List<String> roles = jwtService.extractRoles(jws);
 
             if (userRepository != null) {
                 Optional<User> userOpt = userRepository.findByUsernameAndEnabledTrue(username);
@@ -71,7 +94,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     chain.doFilter(request, response);
                     return;
                 }
-                int tokenTv = jwtService.extractTokenVersion(token);
+                int tokenTv = jwtService.extractTokenVersion(jws);
                 if (tokenTv != userOpt.get().getTokenVersion()) {
                     SecurityContextHolder.clearContext();
                     if (auditService != null) {

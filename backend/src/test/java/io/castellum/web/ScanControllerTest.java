@@ -5,6 +5,8 @@ import io.castellum.config.SecurityConfig;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
+import io.castellum.scan.ScanExecutionService;
+import io.castellum.scan.ScanSubmissionRateLimiter;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
@@ -46,6 +48,12 @@ class ScanControllerTest {
     private AuditService auditService;
 
     @MockBean
+    private ScanExecutionService scanExecutionService;
+
+    @MockBean
+    private ScanSubmissionRateLimiter scanRateLimiter;
+
+    @MockBean
     private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
@@ -61,6 +69,7 @@ class ScanControllerTest {
         saved.setStatus(ScanStatus.PENDING);
 
         when(scanRepository.save(any(Scan.class))).thenReturn(saved);
+        when(scanRateLimiter.tryAcquire(anyString())).thenReturn(true);
 
         mockMvc.perform(post("/api/scan")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -68,11 +77,13 @@ class ScanControllerTest {
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.id").value(42));
 
-        verify(auditService).recordEvent(eq("system"), eq("SCAN_SUBMIT"), eq("scan"), anyString(), any());
+        verify(auditService).recordEvent(anyString(), eq("SCAN_SUBMIT"), eq("scan"), anyString(), any());
+        verify(scanExecutionService).executeAsync(saved.getId());
     }
 
     @Test
     void postScan_invalidCidr_returns400() throws Exception {
+        when(scanRateLimiter.tryAcquire(anyString())).thenReturn(true);
         mockMvc.perform(post("/api/scan")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"cidr\":\"not-a-cidr\",\"type\":\"PING_SWEEP\"}"))

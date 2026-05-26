@@ -9,13 +9,43 @@
 
 ## Overview
 
-This script covers the full AC #1 demo flow: scan a /24, passively discover devices, fingerprint an OT endpoint, score risk, compute the shortest exploit path, export a STIX bundle, and push it to MISP. Each beat has a visual cue (UI screen or curl command), a voice-over (~60-80 words), and on-screen overlay suggestions.
+This script covers the full AC #1 demo flow: log in, navigate the sidebar, browse the
+topology, drill into a device with inline edits, audit the actor trail, view threat
+intelligence, browse the fleet CVE table, compute an attack path, and configure threat-intel
+integrations to round out the picture. Each beat has a visual cue (UI screen or curl
+command), a voice-over (~60-80 words), and on-screen overlay suggestions.
+
+The flow follows the F5 sidebar nav — `/` (Topology) → `/audit` → `/threats` → `/cves` →
+`/attack-graph` → `/settings` — so the demo can run entirely in the browser at
+`http://localhost:5173`, with curl commands shown side-by-side only when it helps clarify
+the underlying API contract.
 
 ---
 
-## Beat 1 — Scan (0:00–0:28)
+## Beat 0 — Sign in (pre-roll)
 
-**Visual cue:** Browser at `http://localhost:3000`. Navigate to the Scan panel. Show a `curl` terminal side-by-side.
+**Visual cue:** Browser at `http://localhost:5173`. The login card sits centered on a gray
+background — username (default `admin`) + password + "Sign in" button. After submit the
+form auto-promotes a `mustChangePassword` user to the `ForcePasswordRotation` overlay
+(first-login flow only); a normal session lands on the topology landing.
+
+**Voice-over (optional pre-roll):**
+"Sign in. Bcrypt cost 12 on the backend, JWT in `localStorage` on the frontend. First-login
+users land on a forced-rotation overlay before the routed app mounts — no `BrowserRouter` is
+mounted in that state, so no other route can match."
+
+**On-screen overlays:** `POST /api/auth/login` | `BCrypt-12` | `first-login → ForcePasswordRotation`
+
+---
+
+## Beat 1 — Topology landing (0:00–0:28)
+
+**Visual cue:** The sidebar shows seven nav links — Topology, Scans, Threats, CVEs, Attack
+Graph, Audit, Settings. The Topology page is the landing route: a force-directed Cytoscape
+graph in the middle, a `ScanTriggerForm` row above it, and (when feeds are empty) an amber
+`EmptyCorpusBanner` at the top with a "Sync NVD + EPSS + KEV" button for ADMIN. Trigger a
+ping-sweep against `10.0.1.0/24` from the form — nodes start to populate as scan results
+land.
 
 ```bash
 curl -X POST http://localhost:8080/api/scan \
@@ -26,70 +56,123 @@ curl -X POST http://localhost:8080/api/scan \
 ```
 
 **Voice-over:**
-"Castellum kicks off an active scan with a single API call. We submit a PING_SWEEP against a /24 — Castellum hands off to nmap via a safe argument array, never a shell string, so there is no command injection surface. The 202 response gives us a scan ID. The controller requires ADMIN role — a VIEWER can read results but cannot initiate scans. Scan records and the initiating actor are immediately written to the append-only audit log."
+"Castellum's topology landing is the operator's home base. The amber banner at the top
+self-dismisses the moment all three threat-intel feeds are populated — its 10-second poll
+is scoped to this route, not the whole app shell. The in-page `ScanTriggerForm` calls the
+same `POST /api/scan` an `curl` would; ADMIN-only, scope-capped, rate-limited. Nodes are
+coloured by composite risk tier — low, medium, high, critical, or unknown when no CVE matches."
 
-**On-screen overlays:** `POST /api/scan` | `202 Accepted` | `ADMIN role required` | `Audit: SCAN_SUBMITTED`
+**On-screen overlays:** `POST /api/scan` | `202 Accepted` | `ADMIN role required` | `EmptyCorpusBanner scoped to /`
 
 ---
 
-## Beat 2 — Discover (0:28–0:56)
+## Beat 2 — Device detail + inline edits (0:28–0:56)
 
-**Visual cue:** Topology graph panel loads. Nodes populate as passive discovery results arrive. Show ARP-discovered devices appearing as unlabelled nodes, then labels resolving via mDNS.
+**Visual cue:** Click a node — the right-side `DeviceDetailPanel` slides in. It shows the
+risk tier and composite score, an inline-editable `hostname` field, an inline-editable
+`criticality` dropdown, and (for ADMIN) a `DecommissionButton` underneath. Edit hostname
+from `demo-12` to `plc-front`; change criticality from `HIGH` to `CRITICAL`. Both fire
+`PUT /api/devices/{id}` and refetch the device list so the graph stays consistent. Below
+the device block, the `CveEvidenceTable` shows the top CVEs, and the `WhyScorePanel`
+breaks the composite score into its CVSS × EPSS × KEV × Criticality components.
 
 ```bash
-curl -X POST http://localhost:8080/api/discovery/passive \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"interface": "eth0"}'
+curl -X PUT http://localhost:8080/api/devices/12 \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"ipAddress":"10.0.1.12","hostname":"plc-front","criticality":"CRITICAL", ...}'
 ```
 
 **Voice-over:**
-"Alongside the active scan, passive discovery listens on the network interface using raw packet capture. ARP replies map MAC addresses to IPs. mDNS announcements resolve hostnames. LLDP and CDP frames identify vendor and port information for managed switches. This requires CAP_NET_RAW — no elevated container privilege, just the single raw-socket capability. Discovered devices appear in the topology graph in near real-time."
+"Click any node to open the detail panel. Hostname and criticality are inline-editable for
+ADMIN — pencil icon, click, save. Decommission button just below — soft-deletes the device
+from the active graph. The CVE evidence table and 'why this score' panel are right there in
+the same drawer; no extra navigation."
 
-**On-screen overlays:** `CAP_NET_RAW (not --privileged)` | `ARP + mDNS + LLDP/CDP` | See [runtime-flags.md](runtime-flags.md)
+**On-screen overlays:** `PUT /api/devices/{id}` | `inline-edit (ADMIN)` | `WhyScorePanel: CVSS×EPSS×KEV×Criticality`
 
 ---
 
-## Beat 3 — Fingerprint (0:56–1:24)
+## Beat 3 — Audit trail (0:56–1:24)
 
-**Visual cue:** Click a node in the topology graph labelled `10.0.1.42`. In the detail panel, show the OT probe result: `vendor: Schneider Electric`, `product: Modicon M340`, `version: 2.40`. Show the curl command in terminal.
+**Visual cue:** Click `Audit` in the sidebar. The `AuditLogPanel` renders — filterable
+table of events with actor, resource, timestamp. Filter on `actor=admin` and
+`eventType=DEVICE_UPDATED`; the two PUTs from Beat 2 are right at the top. Click the CSV
+download button — `GET /api/audit/csv` returns a 413 with `filteredCount` + `limit` if the
+cap is exceeded, otherwise a streamed file.
 
 ```bash
-curl -X POST http://localhost:8080/api/ot-probe \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"host": "10.0.1.42", "port": 502, "protocol": "MODBUS_TCP"}'
-# → {"vendor":"Schneider Electric","product":"Modicon M340","version":"2.40",...}
+curl "http://localhost:8080/api/audit/csv?actor=admin" \
+  -H "Authorization: Bearer $TOKEN" -o audit.csv
 ```
 
 **Voice-over:**
-"One device resolves as a Modbus/TCP endpoint on port 502 — an industrial PLC. Castellum probes it with a Modbus Function Code 43 Device Identification request: strictly read-only, no write function codes are ever sent. The host is validated as a dotted-quad IPv4 address — no DNS resolution — blocking SSRF. The fingerprint is written to the device and service tables automatically. For supported protocols and safety guarantees, see ot-probes.md."
+"The audit log is append-only — backend-enforced via a read-only repository fragment, so
+even an admin with database credentials cannot delete a row through the JPA layer. Every
+mutating action — scan submitted, device updated, password changed, integration pushed —
+shows up here, with actor and timestamp. CSV export is gated at twenty-five thousand rows;
+filter first, then download."
 
-**On-screen overlays:** `MODBUS_TCP :502` | `FC 43 Read-Only` | `SSRF guard: IPv4 only` | See [ot-probes.md](ot-probes.md)
+**On-screen overlays:** `GET /api/audit` | `append-only (no DELETE)` | `CSV cap: filteredCount/limit`
 
 ---
 
-## Beat 4 — Risk (1:24–1:52)
+## Beat 4 — Threats dashboard (1:24–1:52)
 
-**Visual cue:** Risk score panel. Show the PLC device (`10.0.1.42`) with a CRITICAL badge and score of 9.8. Show a table of the top-5 at-risk devices. Terminal shows the risk query.
+**Visual cue:** Click `Threats`. `ThreatsDashboard` shows the top-N at-risk leaderboard.
+The PLC at `10.0.1.42` sits at the top with a 9.8 composite. Click into its row — the
+`CveEvidenceTable` expands and the `WhyScorePanel` shows the formula breakdown.
 
 ```bash
-curl "http://localhost:8080/api/risk/score?cve=CVE-2021-22681&device=7" \
+curl "http://localhost:8080/api/risk/top?n=10" \
   -H "Authorization: Bearer $TOKEN"
-# → {"cve":"CVE-2021-22681","deviceId":7,"score":9.8,"epss":0.71,
-#    "inKev":true,"criticality":"CRITICAL","formula":"9.5×1.71×1.5×2/2"}
+# → [ { "deviceId": 7, "ipAddress": "10.0.1.42", "score": 9.80, ... }, ... ]
 ```
 
 **Voice-over:**
-"Castellum scores every CVE-device pair using four signals: CVSS base score, EPSS exploitation probability, CISA KEV membership, and the operator-assigned asset criticality. CVE-2021-22681 — a Rockwell Automation remote code execution — scores 9.8 on this CRITICAL-tier PLC: CVSS 9.5, EPSS 71%, listed in CISA KEV, CRITICAL asset. The composite scorer is a pure deterministic function — same inputs, same output, pinned by golden-file tests."
+"The threats dashboard surfaces the top-N at-risk devices fleet-wide. Composite scores fold
+in CVSS base, EPSS exploitation probability, CISA KEV membership, and operator-assigned
+criticality. CVE-2021-22681 — a Rockwell Automation RCE — pushes this PLC to 9.8. CVSS 9.5,
+EPSS 71%, KEV-listed, asset criticality CRITICAL. Pure deterministic scoring, pinned by
+golden-file tests; same inputs always produce the same output."
 
-**On-screen overlays:** `CVSS × EPSS × KEV × Criticality` | `Score: 9.8 / 10` | `CISA KEV confirmed`
+**On-screen overlays:** `CVSS × EPSS × KEV × Criticality` | `Score: 9.80 / 10` | `CISA KEV confirmed`
 
 ---
 
-## Beat 5 — Graph (1:52–2:20)
+## Beat 5 — Fleet CVE table (1:52–2:08)
 
-**Visual cue:** Attack graph panel. Show a shortest-path query from a DMZ web server (`device 1`) to the PLC (`device 7`). The graph renders three hops with ATT&CK technique badges on edges.
+**Visual cue:** Click `CVEs`. The page shows a paginated table — CVE ID, CVSS v3.1, short
+description, last-modified date. The header includes a "severity floor" selector (`all`,
+`high ≥ 7.0`, `critical ≥ 9.0`) and a refresh button. Switch the floor to `critical`; the
+page resets to 0 and the table re-queries with `minScore=9.0`. Pagination buttons at the
+bottom show "Page N of M".
+
+```bash
+curl "http://localhost:8080/api/cve/fleet?page=0&size=25&minScore=9.0" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Voice-over:**
+"The CVEs page is the fleet-wide CVE listing — every CVE that matched at least one device
+in the catalog. The severity floor lets the operator narrow to the truly urgent ones; the
+table re-queries server-side rather than filtering in the browser, which keeps the page
+responsive on a fleet of tens of thousands. The endpoint is backed by a partial index on
+`cvss_v31_score` so the listing stays fast."
+
+**On-screen overlays:** `GET /api/cve/fleet` | `severity floor: all / ≥7.0 / ≥9.0` | `partial index on cvss_v31_score`
+
+---
+
+## Beat 6 — Attack graph (2:08–2:36)
+
+**Visual cue:** Click `Attack Graph`. The page is ADMIN-only — VIEWERs land on a notice
+explaining the restriction. As an ADMIN, two `DevicePicker` combo boxes appear, autocomplete
+by hostname or IP, capped at 50 entries per dropdown. Pick `dmz-web-1` as the source and
+`plc-front` (the PLC from Beat 2) as the target; click "Compute path". The right pane —
+the same `TopologyView` used on the landing route — overlays the shortest path with the
+`path-highlight` class (red ring on nodes, dashed red stroke on edges). The left pane
+renders a numbered breakdown — one step per hop with edge type, CVE id, and ATT&CK
+technique surfaced.
 
 ```bash
 curl "http://localhost:8080/api/graph/shortest-path?from=1&to=7" \
@@ -103,47 +186,44 @@ curl "http://localhost:8080/api/graph/shortest-path?from=1&to=7" \
 ```
 
 **Voice-over:**
-"The attack graph shows the easiest exploit chain from the internet-facing web server to the OT PLC. Two hops: lateral movement via Remote Services (T1021) through a mid-tier host, then Exploit Public-Facing Application (T1190) against the PLC using CVE-2021-22681. Cumulative risk 9.8. The graph is built on demand by JGraphT — no cached state to poison. Each query is audited: who asked, from where to where, at what time."
+"The attack graph computes the easiest exploit chain between two devices. JGraphT Dijkstra
+under the hood — edges are weighted by composite risk, so lower-cost paths are the ones an
+attacker would actually take. T1021 Remote Services for lateral movement, then T1190
+Exploit Public-Facing Application against the PLC using CVE-2021-22681. Cumulative risk
+9.8. The graph is built on demand — no cached state to poison — and the build is bounded by
+a max-device cap that returns a 503 if the operator tries to graph an unreasonably large
+fleet."
 
-**On-screen overlays:** `T1021 Lateral Movement` | `T1190 Initial Access` | `CVE-2021-22681` | `Cumulative risk: 9.8`
+**On-screen overlays:** `ADMIN only` | `T1021 + T1190` | `CVE-2021-22681` | `Cumulative risk: 9.8`
 
 ---
 
-## Beat 6 — Export (2:20–2:46)
+## Beat 7 — Settings: integrations + STIX export (2:36–3:00)
 
-**Visual cue:** Threat Intel panel. Click "Export STIX Bundle." Show the returned JSON structure collapsed in the browser, then expand to show a `vulnerability` and an `indicator` STIX object.
+**Visual cue:** Click `Settings`. The page hosts `UserManagementPanel` (ADMIN-only — list /
+create users, change roles, disable accounts), `ScanPolicyPanel` (create / enable / disable
+/ delete cron-driven scan policies, the V14 surface), `TaxiiConfigPanel` and
+`MispConfigPanel` (PUT credentials to `POST /api/integrations/{type}`, AES-256-GCM
+encrypted server-side via `AesGcmCipher`), and `StixExportPanel`. Click "Download STIX
+bundle" — the panel calls `POST /api/threat-intel/export`, a `Blob` comes back, the panel
+spawns an anchor with `download="castellum-stix-bundle.json"`, clicks it programmatically,
+then revokes the object URL. The status row underneath confirms the download.
 
 ```bash
 curl -X POST http://localhost:8080/api/threat-intel/export \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json"
-# → {"type":"bundle","id":"bundle--...","spec_version":"2.1",
-#    "objects":[{"type":"vulnerability","name":"CVE-2021-22681",...},
-#               {"type":"indicator","pattern":"..."},...]}
+  -H "Authorization: Bearer $TOKEN" -o castellum-stix-bundle.json
+# → {"type":"bundle","id":"bundle--...","spec_version":"2.1", "objects":[...]}
 ```
 
 **Voice-over:**
-"One POST produces a STIX 2.1 bundle containing vulnerability, indicator, and relationship objects for the entire at-risk inventory. This bundle is the machine-readable form of everything Castellum knows: what devices are present, which CVEs apply, and what risk scores were assigned. ADMIN role required. The export action is written to the threat_intel_push audit table with actor and timestamp. The bundle is ready to distribute."
+"Settings is the admin surface — user management, scan-policy schedules, threat-intel
+integrations, STIX export. Integration credentials are encrypted at rest with AES-256-GCM,
+key sourced from `CASTELLUM_INTEGRATION_KEY`. Cipher is 12-byte IV plus 128-bit GCM tag.
+One click on STIX export streams a STIX 2.1 bundle straight to disk — vulnerability,
+indicator, and relationship objects covering the entire at-risk inventory. The export is
+audited; actor and timestamp are in the audit log we saw at Beat 3."
 
-**On-screen overlays:** `STIX 2.1 bundle` | `ADMIN required` | `Audit: THREAT_INTEL_EXPORTED`
-
----
-
-## Beat 7 — MISP (2:46–3:00)
-
-**Visual cue:** MISP UI (external browser tab). Show a new event appearing with Castellum-sourced attributes. Back in Castellum: show the push command and the 200 response.
-
-```bash
-curl -X POST http://localhost:8080/api/threat-intel/push/misp \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json"
-# → {"status":"pushed","mispEventId":"12345","attributesCreated":47}
-```
-
-**Voice-over:**
-"One more call pushes the bundle directly to the MISP instance. Forty-seven attributes created: IP indicators, CVE references, risk tags. The MISP event is now shareable with partner organisations or an NCIRC-connected MISP federation. Castellum logs the push in the threat_intel_push audit table. From scan to shared intelligence: three minutes, zero manual data entry."
-
-**On-screen overlays:** `POST /api/threat-intel/push/misp` | `47 attributes → MISP` | `NCIRC-compatible sharing`
+**On-screen overlays:** `AES-256-GCM (12B IV + 128b tag)` | `POST /api/threat-intel/export` | `Audit: STIX_EXPORTED`
 
 ---
 
@@ -158,7 +238,7 @@ When recording:
 - Backend running: `cd backend && ./mvnw spring-boot:run`
 - Frontend running: `cd frontend && npm run dev`
 - PostgreSQL 16 running with seed data (at minimum: a /24 scan result, one OT device, one CVE match)
-- MISP test instance accessible at `MISP_BASE_URL`
+- TAXII / MISP test instances accessible if exercising Beat 7 push surfaces
 - OBS Studio installed, audio input configured for voice-over
 - Terminal with `TOKEN` variable set (obtain via `POST /api/auth/login`)
 

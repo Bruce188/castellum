@@ -58,7 +58,21 @@ Every push attempt (including failures) is recorded in the `threat_intel_push` t
 
 ## Configuration
 
-Set these environment variables:
+Two configuration surfaces are supported. Pick exactly one — they are
+mutually exclusive:
+
+1. **`integration_config` table (V15 migration)** — the recommended
+   path. Credentials are stored in Postgres encrypted at rest with
+   AES-256-GCM. Managed through the admin UI (`TaxiiConfigPanel`,
+   `MispConfigPanel`) or directly through `GET / POST /api/integrations/{taxii|misp|stix}`.
+   The encryption key comes from `CASTELLUM_INTEGRATION_KEY` (see
+   `runtime-flags.md § 7`); without that env var, the application
+   refuses to load any encrypted row at boot.
+2. **Environment variables (legacy)** — pre-V15 path, still honoured
+   for ops parity. Credentials live in plaintext in the process env.
+   Avoid for new deployments.
+
+### Environment-variable form (legacy)
 
 ```env
 # TAXII 2.1
@@ -73,6 +87,33 @@ MISP_API_KEY=<api-key>
 MISP_DISTRIBUTION=0       # 0=organisation only; 1=community; 2=connected; 3=all
 MISP_THREAT_LEVEL_ID=2    # 1=high; 2=medium; 3=low; 4=undefined
 ```
+
+### `/api/integrations` form (encrypted at rest)
+
+```bash
+# Configure TAXII
+curl -X POST http://localhost:8080/api/integrations/taxii \
+  -H "Authorization: Bearer <admin-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"https://taxii.example.com","collectionId":"...","username":"...","password":"..."}'
+
+# Configure MISP
+curl -X POST http://localhost:8080/api/integrations/misp \
+  -H "Authorization: Bearer <admin-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"https://misp.example.com","apiKey":"...","distribution":0,"threatLevelId":2}'
+
+# Read current (response masks the encrypted secret fields)
+curl -H "Authorization: Bearer <admin-jwt>" http://localhost:8080/api/integrations/taxii
+```
+
+The `AesGcmCipher` uses a 12-byte random IV per record and a 128-bit
+GCM authentication tag. Each row in `integration_config` stores the
+IV concatenated with the ciphertext blob (column type `BYTEA` on
+Postgres, `VARBINARY(4096)` on the H2 test profile). Decryption
+failures surface as a 500 with `{"error":"integration_decrypt_failed"}`
+so a wrong `CASTELLUM_INTEGRATION_KEY` after rotation fails loud
+rather than silently misbehaving.
 
 Corresponding `application.yml` keys:
 

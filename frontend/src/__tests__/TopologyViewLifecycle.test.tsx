@@ -8,15 +8,24 @@ vi.mock('cytoscape', () => {
   const destroy = vi.fn();
   const add = vi.fn();
   const remove = vi.fn();
-  const elements = vi.fn(() => ({ remove }));
+  const removeClass = vi.fn();
+  const addClass = vi.fn();
+  const forEach = vi.fn();
+  // Cytoscape Collection: cy.elements() returns a Collection that supports
+  // .remove(), .removeClass(), .addClass(), .forEach() etc. The path-highlight
+  // overlay added in feat/attack-graph-explorer reaches for removeClass/forEach.
+  const collection = { remove, removeClass, addClass, forEach };
+  const elements = vi.fn(() => collection);
+  const nodes = vi.fn(() => collection);
+  const edges = vi.fn(() => collection);
   const layoutRun = vi.fn();
   const layout = vi.fn(() => ({ run: layoutRun }));
   const on = vi.fn();
-  const factory = vi.fn(() => ({ destroy, add, elements, layout, on }));
+  const factory = vi.fn(() => ({ destroy, add, elements, nodes, edges, layout, on }));
   (factory as unknown as { use: ReturnType<typeof vi.fn> }).use = vi.fn();
   // Expose internals on the factory so tests can read them.
   (factory as unknown as { __mocks: Record<string, unknown> }).__mocks = {
-    destroy, add, remove, elements, layout, layoutRun, on,
+    destroy, add, remove, removeClass, addClass, forEach, elements, nodes, edges, layout, layoutRun, on,
   };
   return { default: factory };
 });
@@ -29,7 +38,12 @@ type MockBag = {
   destroy: ReturnType<typeof vi.fn>;
   add: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
+  removeClass: ReturnType<typeof vi.fn>;
+  addClass: ReturnType<typeof vi.fn>;
+  forEach: ReturnType<typeof vi.fn>;
   elements: ReturnType<typeof vi.fn>;
+  nodes: ReturnType<typeof vi.fn>;
+  edges: ReturnType<typeof vi.fn>;
   layout: ReturnType<typeof vi.fn>;
   layoutRun: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
@@ -48,7 +62,12 @@ describe('<TopologyView /> lifecycle', () => {
     mocks.destroy.mockClear();
     mocks.add.mockClear();
     mocks.remove.mockClear();
+    mocks.removeClass.mockClear();
+    mocks.addClass.mockClear();
+    mocks.forEach.mockClear();
     mocks.elements.mockClear();
+    mocks.nodes.mockClear();
+    mocks.edges.mockClear();
     mocks.layout.mockClear();
     mocks.layoutRun.mockClear();
     mocks.on.mockClear();

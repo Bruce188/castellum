@@ -50,7 +50,10 @@ public class SecurityConfig {
             .csrf(c -> c.disable())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(a -> a
-                .requestMatchers("/api/auth/login", "/actuator/health").permitAll()
+                .requestMatchers("/api/auth/login", "/actuator/health", "/error").permitAll()
+                // /api/auth/change-password requires an authenticated principal — the
+                // controller reads Authentication.getName() to identify the actor.
+                .requestMatchers("/api/auth/change-password").authenticated()
                 .anyRequest().authenticated())
             .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class)
             .exceptionHandling(e -> e

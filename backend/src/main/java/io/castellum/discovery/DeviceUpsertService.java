@@ -86,14 +86,32 @@ public class DeviceUpsertService {
             return List.of();
         }
 
+        // Partition into MAC-bearing vs IP-only. MAC is the strongest equality key —
+        // matching devices by MAC first prevents IP-renumber events from spawning duplicate rows.
+        Set<String> macSet = new HashSet<>();
         Set<String> ipSet = new HashSet<>();
         for (Discovery d : discoveries) {
-            ipSet.add(d.ipAddress());
+            if (d.macAddress() != null && !d.macAddress().isBlank()) {
+                macSet.add(d.macAddress());
+            } else {
+                ipSet.add(d.ipAddress());
+            }
+        }
+
+        Map<String, Device> existingByMac = new HashMap<>();
+        if (!macSet.isEmpty()) {
+            for (Device d : repo.findByMacAddressIn(macSet)) {
+                if (d.getMacAddress() != null) {
+                    existingByMac.put(d.getMacAddress(), d);
+                }
+            }
         }
 
         Map<String, Device> existingByIp = new HashMap<>();
-        for (Device d : repo.findByIpAddressIn(ipSet)) {
-            existingByIp.put(d.getIpAddress(), d);
+        if (!ipSet.isEmpty()) {
+            for (Device d : repo.findByIpAddressIn(ipSet)) {
+                existingByIp.put(d.getIpAddress(), d);
+            }
         }
 
         List<Device> updates = new ArrayList<>();
@@ -104,9 +122,19 @@ public class DeviceUpsertService {
         List<Slot> slots = new ArrayList<>(discoveries.size());
 
         for (Discovery d : discoveries) {
-            Device existing = existingByIp.get(d.ipAddress());
+            Device existing = null;
+            if (d.macAddress() != null && !d.macAddress().isBlank()) {
+                existing = existingByMac.get(d.macAddress());
+            }
+            if (existing == null) {
+                existing = existingByIp.get(d.ipAddress());
+            }
             if (existing != null) {
                 existing.setLastSeen(d.observedAt());
+                // MAC-keyed match: refresh IP if it changed (renumber event)
+                if (d.ipAddress() != null && !d.ipAddress().equals(existing.getIpAddress())) {
+                    existing.setIpAddress(d.ipAddress());
+                }
                 if (existing.getMacAddress() == null && d.macAddress() != null) {
                     existing.setMacAddress(d.macAddress());
                 }

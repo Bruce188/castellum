@@ -38,13 +38,15 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class PassiveDiscoveryServiceTest {
 
-    @Mock private ArpCacheReader arpReader;
+    @Mock private ArpReaderFactory arpFactory;
+    @Mock private ArpReader arpReader;
     @Mock private MdnsProbe mdnsProbe;
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpDecoder lldpDecoder;
     @Mock private CdpDecoder cdpDecoder;
     @Mock private DeviceUpsertService upsertService;
     @Mock private AuditService auditService;
+    @Mock private DiscoverySweepRecorder recorder;
 
     private PassiveDiscoveryService service;
     private Clock clock;
@@ -53,12 +55,15 @@ class PassiveDiscoveryServiceTest {
     void setUp() {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         service = new PassiveDiscoveryService(
-            arpReader, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
-            upsertService, auditService,
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            upsertService, auditService, recorder,
             false /* lldpEnabled */,
             false /* cdpEnabled */,
+            true /* pcapEnabled — existing PCAP cases assume enabled */,
             clock
         );
+        when(arpFactory.select()).thenReturn(arpReader);
+        when(recorder.start(anyString(), any(), anyString())).thenReturn(42L);
         // upsertAll returns one Device per Discovery, with sequential ids — preserves input order
         when(upsertService.upsertAll(anyList())).thenAnswer(inv -> {
             List<Discovery> in = inv.getArgument(0);
@@ -74,11 +79,11 @@ class PassiveDiscoveryServiceTest {
     }
 
     @Test
-    void sweep_arpOnly_callsUpsertPerNeighbor() {
+    void sweep_arpOnly_callsUpsertPerNeighbor() throws Exception {
         when(arpReader.read()).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.0.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0"),
-            new DiscoveredNeighbor("10.0.0.2", "aa:00:00:00:00:02", "0x1", "0x2", "eth0"),
-            new DiscoveredNeighbor("10.0.0.3", "aa:00:00:00:00:03", "0x1", "0x2", "eth0")
+            new DiscoveredNeighbor("10.0.0.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.0.2", "aa:00:00:00:00:02", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.0.3", "aa:00:00:00:00:03", "0x1", "0x2", "eth0", null)
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
@@ -108,17 +113,17 @@ class PassiveDiscoveryServiceTest {
     }
 
     @Test
-    void sweep_lldpDisabledByDefault_skippedSilently() {
-        // Default lldpEnabled=false; requesting LLDP_UNTESTED should not throw
-        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.LLDP_UNTESTED));
+    void sweep_lldpDisabledByDefault_skippedSilently() throws Exception {
+        // Default lldpEnabled=false; requesting LLDP should not throw
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.LLDP));
         PassiveDiscoveryResponse resp = service.sweep(req);
         assertThat(resp.discovered()).isEqualTo(0);
     }
 
     @Test
-    void sweep_emitsAuditEvent() {
+    void sweep_emitsAuditEvent() throws Exception {
         when(arpReader.read()).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.1.1", "bb:00:00:00:00:01", "0x1", "0x2", "eth0")
+            new DiscoveredNeighbor("10.0.1.1", "bb:00:00:00:00:01", "0x1", "0x2", "eth0", null)
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
@@ -134,26 +139,56 @@ class PassiveDiscoveryServiceTest {
     }
 
     @Test
-    void sweep_dedupesByIp() {
-        // Two neighbors with the same IP — should produce 1 discovery
+    void sweep_dedupesByMacWithIpFallback() throws Exception {
+        // Two ARP rows for the same MAC at two different IPs (renumber event):
+        //   MAC-primary dedupe collapses them to a single discovery.
+        // Plus one MAC-less mDNS-style row — falls back to IP-key, kept as a separate entry.
         when(arpReader.read()).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.2.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0"),
-            new DiscoveredNeighbor("10.0.2.1", "aa:00:00:00:00:02", "0x1", "0x2", "eth0")
+            new DiscoveredNeighbor("10.0.2.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.2.99", "aa:00:00:00:00:01", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.2.50", null, null, null, null, null) // IP-only fallback
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
         PassiveDiscoveryResponse resp = service.sweep(req);
-        assertThat(resp.discovered()).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(2);
     }
 
     @Test
-    void sweep_multiSource_aggregatesPerSourceCount() {
+    void sweep_pcapDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
+        // Build a service variant with pcapEnabled=false
+        PassiveDiscoveryService disabled = new PassiveDiscoveryService(
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            upsertService, auditService, recorder,
+            false, false, false, clock);
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.PCAP));
+        PassiveDiscoveryResponse resp = disabled.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(0);
+        org.mockito.Mockito.verifyNoInteractions(pcapSniffer);
+    }
+
+    @Test
+    void sweep_pcapEnabledByFlag_dispatchesAsBefore() throws Exception {
+        when(pcapSniffer.sniff(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.4.1", "cc:00:00:00:00:01", null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.PCAP));
+        service.sweep(req);
+
+        verify(pcapSniffer, times(1)).sniff(eq("eth0"), eq(5));
+    }
+
+    @Test
+    void sweep_multiSource_aggregatesPerSourceCount() throws Exception {
         when(arpReader.read()).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.3.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0"),
-            new DiscoveredNeighbor("10.0.3.2", "aa:00:00:00:00:02", "0x1", "0x2", "eth0")
+            new DiscoveredNeighbor("10.0.3.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.3.2", "aa:00:00:00:00:02", "0x1", "0x2", "eth0", null)
         ));
         when(mdnsProbe.probe(anyInt())).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.3.3", null, null, null, null)
+            new DiscoveredNeighbor("10.0.3.3", null, null, null, null, null)
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5,

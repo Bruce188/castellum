@@ -113,7 +113,7 @@ public class PcapSniffer {
 
         if (ip == null || ip.isBlank()) return;
 
-        queue.offer(new DiscoveredNeighbor(ip, mac, null, null, iface));
+        queue.offer(new DiscoveredNeighbor(ip, mac, null, null, iface, null));
         log.debug("PCAP ARP decoded: {} -> {}", ip, mac);
     }
 }

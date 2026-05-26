@@ -56,7 +56,7 @@ public class RbacAccessDeniedHandler implements AccessDeniedHandler {
     }
 
     static String extractRoles(String expr) {
-        Matcher single = Pattern.compile("hasRole\\('([^']+)'\\)").matcher(expr);
+        Matcher single = Pattern.compile("hasRole\\(['\"]([^'\"]+)['\"]\\)").matcher(expr);
         if (single.find()) {
             return single.group(1);
         }
@@ -65,7 +65,7 @@ public class RbacAccessDeniedHandler implements AccessDeniedHandler {
             String[] tokens = multi.group(1).split(",");
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < tokens.length; i++) {
-                String t = tokens[i].trim().replace("'", "");
+                String t = tokens[i].trim().replace("'", "").replace("\"", "");
                 if (i > 0) sb.append(",");
                 sb.append(t);
             }

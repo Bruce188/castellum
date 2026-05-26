@@ -193,6 +193,53 @@
 				</plugins>
 			</build>
 		</profile>
+		<!--
+			discovery-live: opt-in profile for the {@code LinuxHostSelfDiscoveryIT} live-host
+			integration test. Default {@code mvn test} skips it cleanly via
+			{@code @EnabledIfSystemProperty(named="discovery.live", matches="true")}.
+			Activate with {@code mvn test -P discovery-live}.
+		-->
+		<profile>
+			<id>discovery-live</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-surefire-plugin</artifactId>
+						<configuration>
+							<systemPropertyVariables>
+								<discovery.live>true</discovery.live>
+							</systemPropertyVariables>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+		<!--
+			managed-switch-lab: opt-in profile for {@code LldpProbeAcceptanceTest} and
+			{@code CdpProbeAcceptanceTest}. Default {@code mvn test} skips both classes cleanly via
+			{@code @EnabledIfSystemProperty(named="castellum.managed-switch-lab", matches="true")}.
+			Activate with {@code mvn test -Pmanaged-switch-lab} when a managed-switch fixture is
+			available (see {@code backend/src/test/resources/discovery/lldp-sample.bin} /
+			{@code cdp-sample.bin}). Without committed fixture files the tests abort silently via
+			{@code assumeTrue(fixtureFile.exists(), "managed-switch fixture missing")}.
+		-->
+		<profile>
+			<id>managed-switch-lab</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-surefire-plugin</artifactId>
+						<configuration>
+							<systemPropertyVariables>
+								<castellum.managed-switch-lab>true</castellum.managed-switch-lab>
+							</systemPropertyVariables>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
 	</profiles>
 
 </project>

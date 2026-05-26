@@ -66,27 +66,54 @@ public class JwtService {
                 .parseSignedClaims(token);
     }
 
-    public String extractUsername(String token) {
-        return parse(token).getPayload().getSubject();
+    /**
+     * Parses the token and returns the signed claims. Equivalent to {@link #parse(String)};
+     * provided as a named entry-point so callers can cache the result and pass it to the
+     * {@code Jws}-overloads below, avoiding repeated parsing overhead.
+     */
+    public Jws<Claims> extractClaims(String token) {
+        return parse(token);
     }
 
+    /** Extracts the username ({@code sub} claim) from a pre-parsed {@link Jws}. */
+    public String extractUsername(Jws<Claims> jws) {
+        return jws.getPayload().getSubject();
+    }
+
+    /** Extracts the username ({@code sub} claim) from a raw token string. */
+    public String extractUsername(String token) {
+        return extractUsername(extractClaims(token));
+    }
+
+    /** Extracts the roles claim from a pre-parsed {@link Jws}. */
     @SuppressWarnings("unchecked")
-    public List<String> extractRoles(String token) {
-        Object raw = parse(token).getPayload().get("roles");
+    public List<String> extractRoles(Jws<Claims> jws) {
+        Object raw = jws.getPayload().get("roles");
         if (raw instanceof List<?> list) {
             return list.stream().map(Object::toString).toList();
         }
         return Collections.emptyList();
     }
 
-    public int extractTokenVersion(String token) {
-        Object raw = parse(token).getPayload().get("tv");
+    /** Extracts the roles claim from a raw token string. */
+    public List<String> extractRoles(String token) {
+        return extractRoles(extractClaims(token));
+    }
+
+    /** Extracts the token version ({@code tv} claim) from a pre-parsed {@link Jws}. */
+    public int extractTokenVersion(Jws<Claims> jws) {
+        Object raw = jws.getPayload().get("tv");
         if (raw instanceof Number n) return n.intValue();
         return 0;
     }
 
+    /** Extracts the token version ({@code tv} claim) from a raw token string. */
+    public int extractTokenVersion(String token) {
+        return extractTokenVersion(extractClaims(token));
+    }
+
     public long ttlSeconds() { return ttlSeconds; }
 
-    /** Package-private: exposes key for test-only JWT construction. */
+    /** Package-private — intentional: slice tests in the same package forge JWTs with malformed signatures. Never call from production code; pkg-private is the access barrier. */
     SecretKey key() { return key; }
 }

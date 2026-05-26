@@ -18,14 +18,35 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Builds the attack graph from the device + service + CVE corpus.
+ *
+ * <p>Graph type is {@link DirectedWeightedPseudograph} — JGraphT permits parallel edges
+ * between the same vertex pair. The builder dedupes structurally via the {@code (srcId, tgtId, cveId)}
+ * tuple through {@link Graph#addEdge(Object, Object, Object)}'s return-value contract:
+ * a {@code false} return means the edge was rejected as a structural duplicate.
+ *
+ * <p>SAME_SUBNET edges have no {@code cveId} and naturally collapse to one per direction.
+ * EXPLOITABLE_VULN edges are bounded by {@link GraphProperties#getVulnsPerPairCap()}
+ * (default 5) — UI consumers (e.g. Cytoscape) MUST further dedupe presentation if they
+ * collapse multi-edges into a single visual.
+ *
+ * <p>Subnet bucketing widens to IPv6 in feature 5: IPv4 /24 and IPv6 /64 share the same
+ * {@code Map<String, List<Device>>} via the {@code v4:}/{@code v6:} prefix on the bucket key
+ * returned by {@link #extractSubnetKey(String)}.
+ */
 @Component
 public class GraphBuilder {
 
@@ -57,6 +78,9 @@ public class GraphBuilder {
             new DirectedWeightedPseudograph<>(AttackEdge.class);
 
         List<Device> devices = deviceRepository.findAll();
+        if (devices.size() > properties.getMaxDevices()) {
+            throw new GraphTooLargeException(devices.size(), properties.getMaxDevices());
+        }
         Map<Long, DeviceVertex> vertexById = new HashMap<>();
         for (Device d : devices) {
             DeviceVertex v = new DeviceVertex(d.getId(), d.getIpAddress());
@@ -64,10 +88,10 @@ public class GraphBuilder {
             vertexById.put(d.getId(), v);
         }
 
-        // SAME_SUBNET pass.
+        // SAME_SUBNET pass — IPv4 /24 and IPv6 /64 share the same bucket map.
         Map<String, List<Device>> bySubnet = new LinkedHashMap<>();
         for (Device d : devices) {
-            String prefix = extractIpv4Prefix24(d.getIpAddress());
+            String prefix = extractSubnetKey(d.getIpAddress());
             if (prefix == null) continue;
             bySubnet.computeIfAbsent(prefix, k -> new ArrayList<>()).add(d);
         }
@@ -84,32 +108,43 @@ public class GraphBuilder {
                     if (a.getId().equals(b.getId())) continue;
                     DeviceVertex va = vertexById.get(a.getId());
                     DeviceVertex vb = vertexById.get(b.getId());
-                    AttackEdge edge = new AttackEdge(EdgeType.SAME_SUBNET, 0.0, null);
+                    AttackEdge edge = new AttackEdge(EdgeType.SAME_SUBNET,
+                        EdgeWeights.sameSubnetRisk(), null, null);
                     if (graph.addEdge(va, vb, edge)) {
-                        graph.setEdgeWeight(edge, 1.0);
+                        graph.setEdgeWeight(edge, EdgeWeights.sameSubnetWeight());
                         sameSubnetPeers.computeIfAbsent(b.getId(), k -> new ArrayList<>()).add(a.getId());
                     }
                 }
             }
         }
 
-        // EXPLOITABLE_VULN pass.
-        BuildContext ctx = new BuildContext();
+        // EXPLOITABLE_VULN pass — helper-class consolidation: CpeMapper, CompositeScoreMemoizer,
+        // EdgeWeights, AttackTechniqueMapper.
+        CompositeScoreMemoizer memo = new CompositeScoreMemoizer();
         for (Device d : devices) {
             List<NetworkService> services = networkServiceRepository.findByDeviceId(d.getId());
-            // Collect all matched (cve, composite) pairs, then take top-N.
+            // Collect all matched (cve, score, service) triples, then take top-N by composite score.
             List<ScoredCve> scored = new ArrayList<>();
             for (NetworkService svc : services) {
                 if (svc.getName() == null || svc.getName().isBlank()) continue;
-                String cpe23 = buildCpe(svc);
+                String cpe23 = CpeMapper.toCpe23(svc);
+                if (cpe23 == null) continue;
                 List<Cve> cves = cveMatcher.findVulnerable(cpe23);
                 for (Cve cve : cves) {
-                    BigDecimal composite = ctx.compositeFor(cve, d);
-                    scored.add(new ScoredCve(cve, composite));
+                    final Device target = d;
+                    RiskScore score = memo.computeIfAbsent(cve.getCveId(), d.getId(),
+                        () -> CompositeScorer.score(new RiskInputs(
+                            CvssExtractor.normalized(cve),
+                            epssScoreRepository.findByCveId(cve.getCveId())
+                                .map(es -> es.getEpss().doubleValue())
+                                .orElse(0.0),
+                            kevEntryRepository.existsByCveId(cve.getCveId()),
+                            target.getCriticality())));
+                    scored.add(new ScoredCve(cve, score, svc));
                 }
             }
             if (scored.isEmpty()) continue;
-            scored.sort(Comparator.comparing((ScoredCve s) -> s.composite()).reversed());
+            scored.sort(Comparator.comparing((ScoredCve s) -> s.score().score()).reversed());
             int cap = Math.min(scored.size(), properties.getVulnsPerPairCap());
             List<ScoredCve> top = scored.subList(0, cap);
 
@@ -118,10 +153,13 @@ public class GraphBuilder {
             for (Long peerId : peers) {
                 DeviceVertex vs = vertexById.get(peerId);
                 for (ScoredCve sc : top) {
-                    double cs = sc.composite().doubleValue();
-                    AttackEdge edge = new AttackEdge(EdgeType.EXPLOITABLE_VULN, cs, sc.cve().getCveId());
+                    String techniqueId = AttackTechniqueMapper
+                        .forEdgeType(EdgeType.EXPLOITABLE_VULN, sc.service()).id();
+                    AttackEdge edge = new AttackEdge(EdgeType.EXPLOITABLE_VULN,
+                        EdgeWeights.exploitableVulnRisk(sc.score()),
+                        sc.cve().getCveId(), techniqueId);
                     if (graph.addEdge(vs, vd, edge)) {
-                        graph.setEdgeWeight(edge, 11.0 - cs);
+                        graph.setEdgeWeight(edge, EdgeWeights.exploitableVulnWeight(sc.score()));
                     }
                 }
             }
@@ -132,51 +170,32 @@ public class GraphBuilder {
         return new BuiltGraph(graph, Map.copyOf(vertexById));
     }
 
-    static String extractIpv4Prefix24(String ip) {
+    /**
+     * Bucket key for SAME_SUBNET grouping. Returns {@code "v4:a.b.c"} for an IPv4 /24 prefix or
+     * {@code "v6:h:h:h:h"} for an IPv6 /64 prefix (lowercase hextets). Returns {@code null} on
+     * parse failure or unexpected family — the caller must skip such devices.
+     */
+    static String extractSubnetKey(String ip) {
         if (ip == null) return null;
-        String[] parts = ip.split("\\.");
-        if (parts.length != 4) return null;
-        for (String p : parts) {
-            try {
-                int v = Integer.parseInt(p);
-                if (v < 0 || v > 255) return null;
-            } catch (NumberFormatException e) {
-                return null;
+        try {
+            InetAddress addr = InetAddress.getByName(ip);
+            if (addr instanceof Inet4Address v4) {
+                byte[] b = v4.getAddress();
+                return "v4:" + (b[0] & 0xff) + "." + (b[1] & 0xff) + "." + (b[2] & 0xff);
+            } else if (addr instanceof Inet6Address v6) {
+                byte[] b = v6.getAddress();
+                // /64 = first 8 bytes; emit as colon-separated hextets.
+                return String.format(Locale.ROOT, "v6:%x:%x:%x:%x",
+                    ((b[0] & 0xff) << 8) | (b[1] & 0xff),
+                    ((b[2] & 0xff) << 8) | (b[3] & 0xff),
+                    ((b[4] & 0xff) << 8) | (b[5] & 0xff),
+                    ((b[6] & 0xff) << 8) | (b[7] & 0xff));
             }
-        }
-        return parts[0] + "." + parts[1] + "." + parts[2];
-    }
-
-    private static String buildCpe(NetworkService svc) {
-        String sanitized = sanitize(svc.getName());
-        String version = svc.getVersion() != null ? svc.getVersion() : "*";
-        return "cpe:2.3:a:" + sanitized + ":" + sanitized + ":" + version + ":*:*:*:*:*:*:*";
-    }
-
-    private static String sanitize(String s) {
-        return s.toLowerCase().replaceAll("[^a-z0-9_-]", "");
-    }
-
-    /** Per-build memoization so the same (cveId, deviceId) is computed once. */
-    private final class BuildContext {
-        private final Map<MemoKey, BigDecimal> cache = new HashMap<>();
-
-        BigDecimal compositeFor(Cve cve, Device d) {
-            MemoKey key = new MemoKey(cve.getCveId(), d.getId());
-            BigDecimal cached = cache.get(key);
-            if (cached != null) return cached;
-            double cvssN = CvssExtractor.normalized(cve);
-            double epss = epssScoreRepository.findByCveId(cve.getCveId())
-                .map(e -> e.getEpss().doubleValue())
-                .orElse(0.0);
-            boolean kev = kevEntryRepository.existsByCveId(cve.getCveId());
-            RiskScore score = CompositeScorer.score(new RiskInputs(cvssN, epss, kev, d.getCriticality()));
-            cache.put(key, score.score());
-            return score.score();
+            return null;
+        } catch (UnknownHostException e) {
+            return null;
         }
     }
 
-    private record MemoKey(String cveId, long deviceId) {}
-
-    private record ScoredCve(Cve cve, BigDecimal composite) {}
+    private record ScoredCve(Cve cve, RiskScore score, NetworkService service) {}
 }

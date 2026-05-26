@@ -40,6 +40,21 @@ class RbacAccessDeniedHandlerTest {
         void method() {}
     }
 
+    @PreAuthorize("hasRole(\"ADMIN\")")
+    static class AdminDoubleQuoteController {
+        void method() {}
+    }
+
+    @PreAuthorize("hasAnyRole(\"ADMIN\",\"VIEWER\")")
+    static class MultiRoleDoubleQuoteController {
+        void method() {}
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN',\"VIEWER\")")
+    static class MultiRoleMixedQuoteController {
+        void method() {}
+    }
+
     @Test
     void extractsHasRoleSingle() throws Exception {
         invokeWithHandler(AdminOnlyController.class);
@@ -74,6 +89,33 @@ class RbacAccessDeniedHandlerTest {
         ArgumentCaptor<Map<String, Object>> cap = ArgumentCaptor.forClass(Map.class);
         verify(auditService).recordEvent(any(), eq("RBAC_DENY"), eq("rbac"), any(), cap.capture());
         assertThat(cap.getValue()).containsEntry("requiredRole", "<unmapped>");
+    }
+
+    @Test
+    void extractsHasRoleDoubleQuote() throws Exception {
+        invokeWithHandler(AdminDoubleQuoteController.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> cap = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).recordEvent(any(), eq("RBAC_DENY"), eq("rbac"), any(), cap.capture());
+        assertThat(cap.getValue()).containsEntry("requiredRole", "ADMIN");
+    }
+
+    @Test
+    void extractsHasAnyRoleDoubleQuote() throws Exception {
+        invokeWithHandler(MultiRoleDoubleQuoteController.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> cap = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).recordEvent(any(), eq("RBAC_DENY"), eq("rbac"), any(), cap.capture());
+        assertThat(cap.getValue()).containsEntry("requiredRole", "ADMIN,VIEWER");
+    }
+
+    @Test
+    void extractsHasAnyRoleMixedQuotes() throws Exception {
+        invokeWithHandler(MultiRoleMixedQuoteController.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> cap = ArgumentCaptor.forClass(Map.class);
+        verify(auditService).recordEvent(any(), eq("RBAC_DENY"), eq("rbac"), any(), cap.capture());
+        assertThat(cap.getValue()).containsEntry("requiredRole", "ADMIN,VIEWER");
     }
 
     private void invokeWithHandler(Class<?> controllerClass) throws Exception {

@@ -79,4 +79,23 @@ class NvdSyncRunnerTest {
             eq(Instant.parse("2026-04-01T00:00:00Z")),
             eq(Instant.parse("2026-04-15T00:00:00Z")));
     }
+
+    @Test
+    void invalidSinceArg_throwsIllegalArgumentException() {
+        var args = new DefaultApplicationArguments("--nvd-sync", "--since=not-a-date");
+
+        var ex = assertThrows(
+            IllegalArgumentException.class,
+            () -> runner.run(args)
+        );
+
+        assertTrue(
+            ex.getMessage().contains("not-a-date"),
+            "message must echo offending value, was: " + ex.getMessage()
+        );
+        assertTrue(
+            ex.getCause() instanceof java.time.format.DateTimeParseException,
+            "cause must be DateTimeParseException, was: " + ex.getCause()
+        );
+    }
 }

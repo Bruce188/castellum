@@ -1,0 +1,189 @@
+package io.castellum.scan;
+
+import io.castellum.audit.AuditLog;
+import io.castellum.audit.AuditLogRepository;
+import io.castellum.domain.Device;
+import io.castellum.domain.DeviceRepository;
+import io.castellum.domain.NetworkService;
+import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.domain.Scan;
+import io.castellum.domain.ScanRepository;
+import io.castellum.domain.ScanStatus;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.Executor;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * End-to-end integration test for the controller-to-async scan wiring.
+ *
+ * <p>The {@code scanTaskExecutor} is overridden with a {@link SyncTaskExecutor} so the
+ * {@code @Async} body runs inline on the request thread — making assertions deterministic
+ * without flaky latch/sleep patterns.
+ *
+ * <p>An alternative approach (kept as a comment for future reviewers) is to use a
+ * {@code CountDownLatch} + {@code await()} with a real {@link org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor};
+ * the sync override is simpler and avoids flake.
+ *
+ * <p>{@link NmapRunner} is mocked so no actual nmap binary is required.
+ */
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = "spring.main.allow-bean-definition-overriding=true"
+)
+@AutoConfigureMockMvc
+@WithMockUser(roles = "ADMIN")
+// Dirty the context so the allow-bean-definition-overriding=true context is not reused
+// by other tests that share the default context (avoids H2 schema-not-found pollution).
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+class ScanExecutionIntegrationTest {
+
+    /**
+     * Override {@code scanTaskExecutor} with a synchronous executor so
+     * {@code @Async("scanTaskExecutor")} runs inline on the request thread.
+     */
+    @TestConfiguration
+    static class SyncExecutorConfig {
+        @Bean
+        @Primary
+        @Qualifier("scanTaskExecutor")
+        Executor scanTaskExecutor() {
+            return new SyncTaskExecutor();
+        }
+    }
+
+    @Autowired MockMvc mockMvc;
+    @Autowired ScanRepository scanRepository;
+    @Autowired DeviceRepository deviceRepository;
+    @Autowired NetworkServiceRepository networkServiceRepository;
+    @Autowired AuditLogRepository auditLogRepository;
+    @Autowired ObjectMapper objectMapper;
+
+    // Mock NmapRunner so no real nmap binary is invoked.
+    @MockBean NmapRunner nmapRunner;
+
+    @AfterEach
+    void cleanup() {
+        networkServiceRepository.deleteAll();
+        deviceRepository.deleteAll();
+        // AuditLogRepository is append-only — no deleteAll exposed.
+        // Tests use list-size snapshots instead.
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 1: success path — COMPLETE + devices + services + audit rows
+    // -----------------------------------------------------------------------
+
+    @Test
+    void postScan_completesAsync_persistsDevicesAndServices() throws Exception {
+        // One host, two services in the mock stdout.
+        String mockStdout = """
+                Nmap scan report for 10.10.10.5
+                Host is up (0.0010s latency).
+                PORT   STATE SERVICE VERSION
+                22/tcp open  ssh     OpenSSH 8.4p1
+                80/tcp open  http    nginx 1.20.1
+                """;
+        when(nmapRunner.run(anyString(), any(ScanType.class)))
+            .thenReturn(new NmapResult(0, mockStdout, ""));
+
+        // Capture audit rows before the request.
+        List<AuditLog> auditBefore = auditLogRepository.findAll();
+
+        // POST /api/scan
+        MvcResult mvcResult = mockMvc.perform(post("/api/scan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"cidr\":\"10.10.10.0/24\",\"type\":\"SERVICE_DETECT\"}"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.id").isNumber())
+            .andReturn();
+
+        // Extract scan id from response
+        String responseBody = mvcResult.getResponse().getContentAsString();
+        Long scanId = objectMapper.readTree(responseBody).get("id").asLong();
+
+        // Because SyncTaskExecutor runs the @Async body inline, the scan is COMPLETE now.
+        Scan scan = scanRepository.findById(scanId).orElseThrow();
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus(),
+            "scan must be COMPLETE after sync async execution");
+        assertNotNull(scan.getCompletedAt(), "completedAt must be set");
+        assertNull(scan.getFailureReason(), "failureReason must be null on success path");
+
+        // At least one Device row must exist.
+        List<Device> devices = deviceRepository.findAll();
+        assertFalse(devices.isEmpty(), "at least one Device must be persisted");
+        boolean hasExpectedIp = devices.stream().anyMatch(d -> "10.10.10.5".equals(d.getIpAddress()));
+        assertTrue(hasExpectedIp, "Device with IP 10.10.10.5 must exist");
+
+        // At least one NetworkService row must exist.
+        List<NetworkService> services = networkServiceRepository.findAll();
+        assertFalse(services.isEmpty(), "at least one NetworkService must be persisted");
+
+        // Audit events: SCAN_SUBMIT + SCAN_EXECUTE + SCAN_COMPLETE = 3 new rows.
+        List<AuditLog> auditAfter = auditLogRepository.findAll();
+        long newAuditRows = auditAfter.size() - auditBefore.size();
+        assertTrue(newAuditRows >= 3,
+            "at least SCAN_SUBMIT + SCAN_EXECUTE + SCAN_COMPLETE audit rows must exist; got " + newAuditRows);
+    }
+
+    // -----------------------------------------------------------------------
+    // Test 2: failure path — FAILED + failureReason + SCAN_FAILED audit
+    // -----------------------------------------------------------------------
+
+    @Test
+    void postScan_nmapRunnerThrows_scanEndsWithFailedAndAudit() throws Exception {
+        when(nmapRunner.run(anyString(), any(ScanType.class)))
+            .thenThrow(new IOException("boom"));
+
+        List<AuditLog> auditBefore = auditLogRepository.findAll();
+
+        MvcResult mvcResult = mockMvc.perform(post("/api/scan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"cidr\":\"10.10.20.0/24\",\"type\":\"PING_SWEEP\"}"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.id").isNumber())
+            .andReturn();
+
+        Long scanId = objectMapper.readTree(
+            mvcResult.getResponse().getContentAsString()).get("id").asLong();
+
+        // Scan must end in FAILED with failureReason containing "boom".
+        Scan scan = scanRepository.findById(scanId).orElseThrow();
+        assertEquals(ScanStatus.FAILED, scan.getStatus(),
+            "scan must be FAILED when NmapRunner throws");
+        assertNotNull(scan.getFailureReason(), "failureReason must be populated");
+        assertTrue(scan.getFailureReason().contains("boom"),
+            "failureReason must contain the exception message 'boom'");
+        assertNotNull(scan.getCompletedAt(), "completedAt must be set on FAILED path");
+
+        // SCAN_FAILED audit row must exist.
+        List<AuditLog> auditAfter = auditLogRepository.findAll();
+        long newAuditRows = auditAfter.size() - auditBefore.size();
+        assertTrue(newAuditRows >= 2,
+            "at least SCAN_SUBMIT + SCAN_FAILED audit rows must exist; got " + newAuditRows);
+    }
+}

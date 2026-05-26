@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 
 @Component
@@ -28,8 +29,26 @@ public class NvdSyncRunner implements ApplicationRunner {
         }
         List<String> sinceVals = args.getOptionValues("since");
         List<String> untilVals = args.getOptionValues("until");
-        Instant since = (sinceVals == null || sinceVals.isEmpty()) ? null : Instant.parse(sinceVals.get(0));
-        Instant until = (untilVals == null || untilVals.isEmpty()) ? Instant.now() : Instant.parse(untilVals.get(0));
+        Instant since;
+        if (sinceVals == null || sinceVals.isEmpty()) {
+            since = null;
+        } else {
+            try {
+                since = Instant.parse(sinceVals.get(0));
+            } catch (DateTimeParseException dtpe) {
+                throw new IllegalArgumentException("Invalid --since value: " + sinceVals.get(0), dtpe);
+            }
+        }
+        Instant until;
+        if (untilVals == null || untilVals.isEmpty()) {
+            until = Instant.now();
+        } else {
+            try {
+                until = Instant.parse(untilVals.get(0));
+            } catch (DateTimeParseException dtpe) {
+                throw new IllegalArgumentException("Invalid --until value: " + untilVals.get(0), dtpe);
+            }
+        }
 
         try {
             NvdSyncService.SyncSummary summary;

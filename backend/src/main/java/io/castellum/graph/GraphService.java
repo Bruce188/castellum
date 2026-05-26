@@ -10,9 +10,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
@@ -24,6 +22,7 @@ public class GraphService {
     private final GraphBuilder graphBuilder;
     private final ShortestPathFinder shortestPathFinder;
     private final DeviceRepository deviceRepository;
+    @SuppressWarnings("unused")
     private final AuditService auditService;
 
     public GraphService(GraphBuilder graphBuilder,
@@ -65,23 +64,26 @@ public class GraphService {
             BigDecimal cumulative = ZERO;
             for (AttackEdge edge : path.get().getEdgeList()) {
                 DeviceVertex dest = built.graph().getEdgeTarget(edge);
-                AttackTechnique tech = AttackTechniqueMapper.forEdgeType(edge.getType());
+                // Prefer the per-edge technique id captured by GraphBuilder (service-aware,
+                // e.g. T1210 for SMB/RPC/RDP/SSH on EXPLOITABLE_VULN). Fall back to the
+                // EdgeType-only mapping only if the edge has no captured id (defensive).
+                String techId = edge.getTechniqueId();
+                String techName;
+                if (techId != null) {
+                    techName = AttackTechniqueMapper.nameFor(techId, edge.getType());
+                } else {
+                    AttackTechnique tech = AttackTechniqueMapper.forEdgeType(edge.getType());
+                    techId = tech.id();
+                    techName = tech.name();
+                }
                 BigDecimal edgeRisk = round2(edge.getRiskContribution());
                 cumulative = round2(cumulative.doubleValue() + edge.getRiskContribution());
                 hops.add(new HopDto(dest.deviceId(), dest.ipAddress(), edge.getType(),
-                    tech.id(), tech.name(), edgeRisk, cumulative, edge.getCveId()));
+                    techId, techName, edgeRisk, cumulative, edge.getCveId()));
             }
             response = new ShortestPathResponse(fromId, toId, hops, path.get().getEdgeList().size(),
                 cumulative, true);
         }
-
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("from", fromId);
-        payload.put("to", toId);
-        payload.put("totalHops", response.totalHops());
-        payload.put("cumulativeRisk", response.cumulativeRisk());
-        auditService.recordEvent("graph", "GRAPH_QUERY", "graph",
-            fromId + "-" + toId, payload);
 
         return response;
     }

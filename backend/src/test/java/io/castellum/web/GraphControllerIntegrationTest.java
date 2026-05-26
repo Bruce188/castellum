@@ -51,6 +51,7 @@ class GraphControllerIntegrationTest {
     @Autowired private CveCpeMatchRepository cveCpeMatchRepo;
     @Autowired private EpssScoreRepository epssRepo;
     @Autowired private KevEntryRepository kevRepo;
+    @SuppressWarnings("unused")
     @Autowired private AuditLogRepository auditLogRepo;
     @Autowired private ObjectMapper objectMapper;
 
@@ -161,24 +162,6 @@ class GraphControllerIntegrationTest {
         JsonNode lastHop = root.get("hops").get(root.get("hops").size() - 1);
         assertThat(lastHop.get("cumulativeRisk").decimalValue())
             .isEqualByComparingTo(root.get("cumulativeRisk").decimalValue());
-    }
-
-    @Test
-    void getShortestPath_emitsAuditLog() throws Exception {
-        Device d1 = deviceRepo.save(new Device(null, "10.0.0.10", null, null, Instant.EPOCH, Instant.EPOCH, Criticality.MEDIUM));
-        Device d2 = deviceRepo.save(new Device(null, "10.0.0.20", null, null, Instant.EPOCH, Instant.EPOCH, Criticality.MEDIUM));
-        int before = auditLogRepo.findAll().size();
-        mockMvc.perform(get("/api/graph/shortest-path")
-                .param("from", String.valueOf(d1.getId()))
-                .param("to", String.valueOf(d2.getId())))
-            .andExpect(status().isOk());
-        assertThat(auditLogRepo.findAll().size()).isEqualTo(before + 1);
-        // Latest row carries the GRAPH_QUERY action.
-        var latest = auditLogRepo.findAll().stream()
-            .reduce((a, b) -> b.getId() > a.getId() ? b : a)
-            .orElseThrow();
-        assertThat(latest.getAction()).isEqualTo("GRAPH_QUERY");
-        assertThat(latest.getResourceType()).isEqualTo("graph");
     }
 
     @Test

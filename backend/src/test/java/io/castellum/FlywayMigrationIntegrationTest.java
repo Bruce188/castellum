@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * the schema it finds — exactly matching the production boot sequence.
  */
 @SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @TestPropertySource(properties = {
     "spring.flyway.enabled=true",
     "spring.flyway.locations=classpath:db/migration/h2",
@@ -218,6 +220,75 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void flywayMigratesV11_discoverySweepTable_appliesIdempotentlyAgainstH2Mirror() {
+        // V11 migration must have applied during context start — assert the table is present.
+        Number columnCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE UPPER(TABLE_NAME) = 'DISCOVERY_SWEEP'",
+            Number.class);
+        assertNotNull(columnCount, "INFORMATION_SCHEMA.COLUMNS query must return a result");
+        assertTrue(columnCount.intValue() >= 10,
+            "discovery_sweep table must have at least 10 columns after V11 (id, started_at, finished_at, source, iface, neighbor_count, device_count, triggered_by, audit_log_id, status)");
+        // Index check — V11 declares idx_discovery_sweep_started.
+        Number indexCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES WHERE UPPER(TABLE_NAME) = 'DISCOVERY_SWEEP' AND UPPER(INDEX_NAME) LIKE '%STARTED%'",
+            Number.class);
+        assertNotNull(indexCount, "INFORMATION_SCHEMA.INDEXES query must return a result");
+        assertTrue(indexCount.intValue() >= 1, "idx_discovery_sweep_started must exist after V11 migration");
+    }
+
+    @Test
+    void flywayMigratesV11_discoverySweepRoundTrip_persistsAndReadsBack() {
+        // Insert via raw JDBC to guard against entity/migration drift independently.
+        Instant start = Instant.now();
+        jdbcTemplate.update(
+            "INSERT INTO discovery_sweep (started_at, source, triggered_by, status) VALUES (?, ?, ?, ?)",
+            start, "ARP", "MANUAL", "OK"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT source, triggered_by, status, neighbor_count, device_count FROM discovery_sweep ORDER BY started_at DESC LIMIT 1"
+        );
+        assertEquals("ARP", row.get("source"), "source must round-trip");
+        assertEquals("MANUAL", row.get("triggered_by"), "triggered_by must round-trip");
+        assertEquals("OK", row.get("status"), "status must round-trip");
+        assertEquals(0, ((Number) row.get("neighbor_count")).intValue(), "neighbor_count default 0");
+        assertEquals(0, ((Number) row.get("device_count")).intValue(), "device_count default 0");
+    }
+
+    @Test
+    void v12_addsFailureReasonColumn() {
+        // Confirm the column exists via INFORMATION_SCHEMA (migration-level check).
+        Number colCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'SCAN' AND UPPER(COLUMN_NAME) = 'FAILURE_REASON'",
+            Number.class);
+        assertNotNull(colCount, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(colCount.intValue() > 0,
+            "failure_reason column must exist in scan table after V12 migration");
+
+        // Round-trip: NULL is accepted (success-path rows never populate the column).
+        Scan scanWithoutReason = new Scan();
+        scanWithoutReason.setCidr("10.99.0.0/24");
+        scanWithoutReason.setScanType("PING_SWEEP");
+        scanWithoutReason.setStatus(ScanStatus.PENDING);
+        scanWithoutReason.setRequestedAt(Instant.now());
+        Scan savedNull = scanRepository.save(scanWithoutReason);
+        assertNull(savedNull.getFailureReason(),
+            "failure_reason must be null when not set");
+
+        // Round-trip: a long string is accepted (TEXT has no length cap).
+        String longReason = "IOException: " + "x".repeat(490);
+        Scan scanWithReason = new Scan();
+        scanWithReason.setCidr("10.99.1.0/24");
+        scanWithReason.setScanType("PING_SWEEP");
+        scanWithReason.setStatus(ScanStatus.FAILED);
+        scanWithReason.setRequestedAt(Instant.now());
+        scanWithReason.setFailureReason(longReason);
+        Scan savedReason = scanRepository.save(scanWithReason);
+        assertEquals(longReason, savedReason.getFailureReason(),
+            "failure_reason must round-trip a long string via TEXT column");
+    }
+
+    @Test
     void usersV10TokenVersionRoundTrips() {
         // Persist a User and assert tokenVersion defaults to 0
         User u = new User("rt-user", "$2a$12$x", Role.VIEWER, true, Instant.now());
@@ -239,5 +310,86 @@ class FlywayMigrationIntegrationTest {
             Number.class);
         assertNotNull(columnCount, "INFORMATION_SCHEMA.COLUMNS query must return a result");
         assertTrue(columnCount.intValue() > 0, "token_version column must exist in users table per V10 migration");
+    }
+
+    @Test
+    void v14_scanPolicyTableAndRetryCountColumnExist() {
+        // Table presence
+        Number tableCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES " +
+            "WHERE UPPER(TABLE_NAME) = 'SCAN_POLICY'",
+            Number.class);
+        assertNotNull(tableCount);
+        assertTrue(tableCount.intValue() >= 1, "scan_policy table must exist after V14");
+
+        // scan.retry_count column
+        Number retryColCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'SCAN' AND UPPER(COLUMN_NAME) = 'RETRY_COUNT'",
+            Number.class);
+        assertNotNull(retryColCount);
+        assertTrue(retryColCount.intValue() >= 1, "scan.retry_count column must exist after V14");
+
+        // Round-trip via raw JDBC
+        jdbcTemplate.update(
+            "INSERT INTO scan_policy (name, cron_expression, cidr, scan_type, enabled) VALUES (?, ?, ?, ?, ?)",
+            "v14-test-policy", "0 0 * * * *", "10.0.0.0/24", "PING_SWEEP", true
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT name, cron_expression, cidr, scan_type, enabled FROM scan_policy WHERE name = 'v14-test-policy'"
+        );
+        assertEquals("v14-test-policy", row.get("name"));
+        assertEquals("0 0 * * * *", row.get("cron_expression"));
+        assertEquals("10.0.0.0/24", row.get("cidr"));
+        assertEquals("PING_SWEEP", row.get("scan_type"));
+        assertEquals(true, row.get("enabled"));
+    }
+
+    @Test
+    void v15_integrationConfigTableExists_andRowsRoundTrip() {
+        // Table presence
+        Number tableCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES " +
+            "WHERE UPPER(TABLE_NAME) = 'INTEGRATION_CONFIG'",
+            Number.class);
+        assertNotNull(tableCount);
+        assertTrue(tableCount.intValue() >= 1, "integration_config table must exist after V15");
+
+        // Required column shape — encrypted_credentials is the secret-bearing column.
+        Number encryptedColCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'INTEGRATION_CONFIG' " +
+            "AND UPPER(COLUMN_NAME) = 'ENCRYPTED_CREDENTIALS'",
+            Number.class);
+        assertNotNull(encryptedColCount);
+        assertTrue(encryptedColCount.intValue() >= 1,
+            "encrypted_credentials column must exist after V15");
+
+        // Round-trip via raw JDBC (the column accepts a small byte payload).
+        byte[] payload = new byte[]{0x01, 0x02, 0x03, 0x04, 0x05};
+        jdbcTemplate.update(
+            "INSERT INTO integration_config (integration_type, config_json, encrypted_credentials) " +
+            "VALUES (?, ?, ?)",
+            "TAXII", "{\"url\":\"https://taxii.example\"}", payload
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT integration_type, config_json FROM integration_config " +
+            "WHERE integration_type = 'TAXII'"
+        );
+        assertEquals("TAXII", row.get("integration_type"));
+        assertEquals("{\"url\":\"https://taxii.example\"}", row.get("config_json"));
+    }
+
+    @Test
+    void v13_addsAuditLogTimeActionIndex() {
+        // Confirm the index exists via INFORMATION_SCHEMA.INDEXES
+        Number indexCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.INDEXES " +
+            "WHERE UPPER(INDEX_NAME) = 'IDX_AUDIT_LOG_TIME_ACTION' " +
+            "AND UPPER(TABLE_NAME) = 'AUDIT_LOG'",
+            Number.class);
+        assertNotNull(indexCount, "INFORMATION_SCHEMA.INDEXES query must return a result");
+        assertTrue(indexCount.intValue() >= 1,
+            "idx_audit_log_time_action index must exist on audit_log after V13 migration");
     }
 }

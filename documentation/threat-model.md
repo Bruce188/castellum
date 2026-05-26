@@ -44,7 +44,8 @@ Full mitigations are listed in the [Top-5 mitigations](#top-5-mitigations) secti
 | Attack graph | Reachability data (who can reach whom via what CVE) | None | None | In-process (JGraphT); query results via REST |
 | OT/ICS probes | Vendor/product/version fingerprint per OT host | None | Operator identity | Castellum → OT network segment (TCP read-only) |
 | Threat-intel export | STIX 2.1 bundles, TAXII push records, MISP event IDs | `TAXII_USERNAME`/`TAXII_PASSWORD`, `MISP_API_KEY` | TAXII/MISP partner identity | Castellum → TAXII/MISP (egress HTTPS) |
-| Auth/RBAC | User table, role assignments, active sessions | `CASTELLUM_SECURITY_JWT_SECRET`, `CASTELLUM_ADMIN_PASSWORD_HASH` | Admin and Viewer principals | External → API (login endpoint) |
+| Auth/RBAC | User table, role assignments, active sessions, token_version per user | `CASTELLUM_SECURITY_JWT_SECRET`, `CASTELLUM_ADMIN_PASSWORD_HASH`, `LoginRateLimiter` budget state | Admin and Viewer principals | External → API (login + change-password + user-management endpoints) |
+| Integration config | TAXII / MISP / STIX URLs and `last_push_*` columns | `CASTELLUM_INTEGRATION_KEY`, AES-256-GCM encrypted `integration_config.encrypted_credentials` | ADMIN principals only | External → API (`/api/integrations`); Castellum → TAXII/MISP (egress HTTPS) |
 | Audit log | All mutating-operation records, actor/action/resource | None | All authenticated actors | In-process → Postgres `audit_log` table |
 | REST API surface | All API request/response data | None | All authenticated actors | External HTTP → service layer |
 | Frontend | Session token (localStorage), UI state | Session JWT | Browser-side user identity | Browser → API (HTTP/HTTPS) |
@@ -54,22 +55,22 @@ Full mitigations are listed in the [Top-5 mitigations](#top-5-mitigations) secti
 ## Trust-Boundary Diagram
 
 ```
-                          ┌─────────────────────────────────────────────────────┐
-  External network        │                  Castellum JVM                       │
-  (operator browser)      │                                                       │
-        │                 │  ┌──────────┐  ┌──────────┐  ┌─────────────────┐    │
-        │  HTTP/HTTPS ─── │──▶  REST API │──▶  Service │──▶   PostgreSQL 16  │   │
-        │                 │  │ layer     │  │  layer   │  │  (inventory,    │   │
-        │                 │  │(controllers)│  │(scan,risk│  │   audit_log,   │   │
-        │                 │  │          │  │ graph,   │  │   cve, epss,   │   │
-        │                 │  └──────────┘  │ auth…)   │  │   device…)     │   │
-        │                 │                └──────────┘  └─────────────────┘    │
-        │                 │                                                       │
-        │                 │  ┌──────────────────────────────────────────────┐    │
-        │                 │  │  NIC (CAP_NET_RAW — passive discovery only)   │    │
-        │                 │  │  PcapSniffer / ArpCacheReader / MdnsProbe    │    │
-        │                 │  └──────────────────────────────────────────────┘    │
-        │                 └─────────────────────────────────────────────────────┘
+                          ┌───────────────────────────────────────────────────────────────┐
+  External network        │                   Castellum JVM                               │
+  (operator browser)      │                                                               │
+        │                 │  ┌───────────────┐  ┌────────────┐  ┌─────────────────┐    │
+        │  HTTP/HTTPS ─── │──▶ REST API layer │──▶  Service   │──▶  PostgreSQL 16  │    │
+        │                 │  │ (controllers)  │  │  layer     │  │  (inventory,    │    │
+        │                 │  │               │  │ (scan,risk │  │   audit_log,    │    │
+        │                 │  │               │  │  graph,    │  │   cve, epss,    │    │
+        │                 │  └───────────────┘  │  auth…)    │  │   device…)     │    │
+        │                 │                     └────────────┘  └─────────────────┘    │
+        │                 │                                                               │
+        │                 │  ┌──────────────────────────────────────────────────────┐   │
+        │                 │  │  NIC (CAP_NET_RAW — passive discovery only)           │   │
+        │                 │  │  PcapSniffer / ArpCacheReader / MdnsProbe            │   │
+        │                 │  └──────────────────────────────────────────────────────┘   │
+        │                 └───────────────────────────────────────────────────────────────┘
         │
         │  Egress HTTPS (TLS at reverse proxy)
         ├──────────────────────────────── NVD (nvd.nist.gov)
@@ -91,13 +92,14 @@ Full mitigations are listed in the [Top-5 mitigations](#top-5-mitigations) secti
 
 Trust boundaries in order of sensitivity:
 
-1. **External → API** — primary attack surface; JWT authentication required.
-2. **NIC → JVM** — CAP_NET_RAW grants raw packet capture; must be strictly scoped.
-3. **JVM → OT network** — read-only TCP; function-code whitelist enforced.
-4. **Castellum → NVD/EPSS/CISA** — egress; data integrity concern (feed tampering).
-5. **Castellum → TAXII/MISP** — egress; credential and data confidentiality.
-6. **JVM → Postgres** — internal; append-only for audit log.
-7. **JVM → nmap subprocess** — OS exec boundary; argv injection prevention critical.
+1. **External → API** — primary attack surface; JWT authentication required; `LoginRateLimiter` + `PasswordChangeRateLimiter` cap brute-force attempts.
+2. **External → `/api/integrations/*`** — ADMIN-gated credential write surface; payload ciphertext encrypted with `CASTELLUM_INTEGRATION_KEY` before persistence.
+3. **NIC → JVM** — CAP_NET_RAW grants raw packet capture; must be strictly scoped.
+4. **JVM → OT network** — read-only TCP; function-code whitelist enforced.
+5. **Castellum → NVD/EPSS/CISA** — egress; data integrity concern (feed tampering).
+6. **Castellum → TAXII/MISP** — egress; credential confidentiality protected at rest by AES-256-GCM and in transit by HTTPS.
+7. **JVM → Postgres** — internal; append-only for audit log via `AuditLogReadFragment` + minimal `Repository` base.
+8. **JVM → nmap subprocess** — OS exec boundary; argv injection prevention critical.
 
 ---
 
@@ -246,35 +248,74 @@ OT probe requests are submitted via `POST /api/ot-probe` which requires `ADMIN` 
 Probe responses include vendor, product, and firmware version strings for OT devices. This data is sensitive in an OT context — it reveals exactly what hardware is deployed and what version it is running, enabling targeted exploit selection. Probe results are accessible to `VIEWER`+ users. In high-security OT deployments, probe data should potentially be restricted to ADMIN access only.
 
 **D — Denial of Service**
-A tight TCP connect timeout (`OT_PROBE_CONNECT_TIMEOUT_MS` default 3000 ms) and total timeout (`OT_PROBE_TOTAL_TIMEOUT_MS` default 10000 ms) bound the duration of each probe. The `max-concurrent` cap (default 8) prevents probe storms. An ADMIN who submits many simultaneous probe requests could saturate the OT network segment. Operators in safety-critical environments should consider further tightening `max-concurrent` to 1–2.
+A tight TCP connect timeout (`OT_PROBE_CONNECT_TIMEOUT_MS` default 3000 ms), total timeout (`OT_PROBE_TOTAL_TIMEOUT_MS` default 10000 ms), and per-read timeout (`OT_PROBE_READ_TIMEOUT_MS` default 5000 ms) bound the duration of each probe. The `max-concurrent` cap (default 8) prevents probe storms. An ADMIN who submits many simultaneous probe requests could saturate the OT network segment. Operators in safety-critical environments should consider further tightening `max-concurrent` to 1–2.
 
 **E — Elevation of Privilege**
 N/A — the probe module sends read-only TCP packets and writes fingerprint results to the inventory. There is no privilege escalation vector within this module.
 
 ---
 
-### Module 7 — Threat-Intel Export
+### Module 7 — Threat-Intel Export (STIX / TAXII / MISP)
 
-Package: `threatintel/` — `BundleAssembler`, `stix/`, `taxii/`, `misp/`
-Trust boundary: Castellum → TAXII/MISP partners (egress HTTPS + authentication)
+Package: `threatintel/` — `BundleAssembler`, `stix/`, `taxii/`, `misp/`, `IntegrationConfig*`,
+`IntegrationConfigController`; `security/AesGcmCipher`
+Trust boundary: Castellum → TAXII/MISP partners (egress HTTPS + authentication);
+ADMIN-managed credential store at `POST/PUT /api/integrations/{type}`
 
 **S — Spoofing**
-TAXII pushes use HTTP Basic authentication (`TAXII_USERNAME` / `TAXII_PASSWORD`). MISP pushes use an API key header (`MISP_API_KEY`). These credentials are set as environment variables. If the TAXII or MISP endpoint is a malicious impersonator (e.g. via DNS hijacking), Castellum would push the inventory bundle to the attacker. Mitigation: HTTPS with valid certificate chain verification; do not set `TAXII_BASE_URL` or `MISP_BASE_URL` to plain HTTP in production.
+TAXII pushes use HTTP Basic authentication; MISP pushes use an API key header. In v1 these
+credentials came from environment variables alone. From F10 onwards an ADMIN can also
+manage them through `PUT /api/integrations/{type}` (where `{type}` is `TAXII`, `MISP`, or
+`STIX`), with the payload's `credentials` string encrypted server-side via `AesGcmCipher`
+before being written to `integration_config.encrypted_credentials`. The endpoint itself is
+ADMIN-gated by `@PreAuthorize("hasRole('ADMIN')")`. If the TAXII or MISP destination is a
+malicious impersonator (e.g. via DNS hijacking), Castellum would push the inventory bundle
+to the attacker. Mitigation: HTTPS with valid certificate chain verification; do not set
+`TAXII_BASE_URL` or `MISP_BASE_URL` to plain HTTP in production.
 
 **T — Tampering**
-The STIX 2.1 bundle is assembled from the local inventory by `BundleAssembler`. An attacker who can modify device records before export could inject false indicators into the STIX bundle. The bundle is pushed to TAXII/MISP without a digital signature — the receiving platform cannot distinguish a Castellum-generated bundle from a bundle that was tampered with in transit (although HTTPS provides transport integrity). A future enhancement could sign STIX bundles with a private key.
+The STIX 2.1 bundle is assembled from the local inventory by `BundleAssembler`. An
+attacker who can modify device records before export could inject false indicators into
+the STIX bundle. The bundle is pushed to TAXII/MISP without a digital signature — the
+receiving platform cannot distinguish a Castellum-generated bundle from a bundle that was
+tampered with in transit (although HTTPS provides transport integrity). A future
+enhancement could sign STIX bundles with a private key.
+
+For the integration_config row itself, tampering with the ciphertext at the database
+layer would fail GCM tag verification on the next `push` (the controller decrypts
+`encrypted_credentials` before invoking the upstream client; a verify failure throws
+`IllegalStateException("AES-GCM decryption / tag-verify failed")` rather than silently
+proceeding with garbage). This also catches drift between the on-disk ciphertext and the
+current value of `CASTELLUM_INTEGRATION_KEY` after a key rotation.
 
 **R — Repudiation**
-Every export action (`export`, `push/taxii`, `push/misp`) requires `ADMIN` role and is recorded in the `threat_intel_push` audit table (see [documentation/stix-taxii-misp.md](stix-taxii-misp.md)). An operator cannot deny having pushed a bundle.
+Every export action (`export`, `push/taxii`, `push/misp`, `push/stix`) requires `ADMIN`
+role. Successful and failed pushes both write `TAXII_PUSH` / `MISP_PUSH` / `STIX_PUSH`
+audit rows via `AuditService.recordEvent` with the resulting status and (on failure) a
+truncated error message. `IntegrationConfigController` also writes
+`INTEGRATION_CONFIG_SAVE` on every PUT. The `last_push_at` and `last_push_status` columns
+on `integration_config` carry the most recent outcome so an operator can see push history
+inline without scanning the audit table. See [documentation/stix-taxii-misp.md](stix-taxii-misp.md).
 
 **I — Information Disclosure**
-The STIX bundle contains the full device inventory with vulnerability data. Pushing to an external MISP or TAXII server transfers this data outside the Castellum deployment boundary. Operators must treat the TAXII/MISP destination as a trusted partner. Misconfigured `MISP_BASE_URL` pointing to an unintended server would exfiltrate the inventory.
+The STIX bundle contains the full device inventory with vulnerability data. Pushing to
+an external MISP or TAXII server transfers this data outside the Castellum deployment
+boundary. Operators must treat the TAXII/MISP destination as a trusted partner.
+Misconfigured `MISP_BASE_URL` (or `config_json` field that overrides the URL) pointing to
+an unintended server would exfiltrate the inventory. `IntegrationConfigDto.Response`
+returns the saved config without the encrypted-credentials bytes — the ciphertext never
+leaves the server through the API surface.
 
 **D — Denial of Service**
-TAXII and MISP pushes are synchronous HTTP calls. A slow or unresponsive upstream would block the push thread. The `RestTemplate` / `WebClient` used for pushes should have a read timeout configured. Without a timeout, a stalled TAXII server could tie up the export endpoint indefinitely.
+TAXII and MISP pushes are synchronous HTTP calls. A slow or unresponsive upstream would
+block the push thread. The `RestTemplate` / `WebClient` used for pushes should have a
+read timeout configured. Without a timeout, a stalled TAXII server could tie up the
+export endpoint indefinitely.
 
 **E — Elevation of Privilege**
-Export endpoints require `ADMIN` role. A VIEWER cannot trigger an export. Privilege escalation would require JWT forgery (Module 8).
+Export endpoints require `ADMIN` role. A VIEWER cannot trigger an export, a configuration
+save, or even read the per-type `integration_config` row. Privilege escalation would
+require JWT forgery (Module 8).
 
 ---
 
@@ -284,22 +325,22 @@ Package: `security/` — `JwtService`, `JwtAuthenticationFilter`, `BootstrapAdmi
 Trust boundary: external requests → API; highest-impact module for spoofing and elevation
 
 **S — Spoofing**
-JWT tokens are signed with HMAC-SHA256 using `CASTELLUM_SECURITY_JWT_SECRET`. An attacker who obtains the secret can forge tokens for any user and role. The secret must be ≥ 32 bytes (enforced at startup — the application rejects the default placeholder unless the `test` Spring profile is active). The 1-hour TTL limits the window of a stolen token. Bootstrap admin credentials must not be committed to source control; see [documentation/auth.md](auth.md) §Bootstrap-admin.
+JWT tokens are signed with HMAC-SHA256 using `CASTELLUM_SECURITY_JWT_SECRET`. An attacker who obtains the secret can forge tokens for any user and role. The secret must be ≥ 32 bytes (enforced at startup — the application rejects the default placeholder unless the `test` Spring profile is active). The 1-hour TTL limits the window of a stolen token. JWT claims include a `token_version` integer that is checked against `user.token_version` in `JwtAuthenticationFilter` on every request — incrementing `user.token_version` (which `UserService` does on disable and on password change) invalidates every outstanding token for that user without waiting for the natural TTL. Bootstrap admin credentials must not be committed to source control; see [documentation/auth.md](auth.md) §Bootstrap-admin.
 
 **T — Tampering**
-The `JwtService` verifies the HMAC signature on every request. A tampered token (e.g. role claims changed from `VIEWER` to `ADMIN`) will fail signature verification and be rejected with 401. The algorithm header (`alg`) is fixed to HS256 in the service; `alg: none` JWT attacks are not possible because the verifier enforces algorithm identity.
+The `JwtService` verifies the HMAC signature on every request. A tampered token (e.g. role claims changed from `VIEWER` to `ADMIN`) will fail signature verification and be rejected with 401. The algorithm header (`alg`) is fixed to HS256 in the service; `alg: none` JWT attacks are not possible because the verifier enforces algorithm identity. `JwtAuthenticationFilter#shouldNotFilter` returns true for `ERROR`-dispatched requests and `/error`, so a forwarded error response cannot accidentally drop a parallel 401 over the real 4xx / 5xx status — that gap previously masked NoHandlerFound and similar dispatches.
 
 **R — Repudiation**
-Login events and token issuances are not individually audited in v1. An operator who claims a login occurred at a specific time cannot produce a login-event audit record — only subsequent API calls produce audit entries. Enhancement: log `LOGIN_SUCCESS` and `LOGIN_FAILURE` events to the audit log.
+Login successes, login failures (whether by bad credentials or by rate-limit lockout), password changes, role mutations, and account disables are all audited via `AuditService.recordEvent` (`LOGIN_SUCCESS`, `LOGIN_FAILURE`, `PASSWORD_CHANGE`, `USER_ROLE_CHANGE`, `USER_DISABLED`). `JwtAuthenticationFilter` additionally writes `AUTH_TOKEN_REJECT` rows with the rejection reason (`user_disabled_or_missing`, `token_version_mismatch`, JWT exception class name) so revoked tokens are visible in the audit log even though the request never reaches a controller.
 
 **I — Information Disclosure**
-The `CASTELLUM_ADMIN_PASSWORD_HASH` is a BCrypt-12 hash; disclosure of the hash does not directly reveal the plaintext password (BCrypt-12 requires ~8s per guess on modern hardware). The `CASTELLUM_SECURITY_JWT_SECRET` is more sensitive — anyone who obtains it can forge tokens. Both are stored in environment variables, not in application.properties files or source code. Secrets must not appear in container image layers.
+The `CASTELLUM_ADMIN_PASSWORD_HASH` is a BCrypt-12 hash; disclosure of the hash does not directly reveal the plaintext password (BCrypt-12 requires ~8s per guess on modern hardware). The `CASTELLUM_SECURITY_JWT_SECRET` is more sensitive — anyone who obtains it can forge tokens. The `CASTELLUM_INTEGRATION_KEY` (AES-256 base64) protects integration credentials at rest (see Module 7). All three are stored in environment variables, not in application.properties files or source code, and must not appear in container image layers.
 
 **D — Denial of Service**
-The `/api/auth/login` endpoint is not rate-limited in v1 (AC-7 non-claim; see [documentation/compliance.md](compliance.md)). An attacker can brute-force the admin password without lockout. Mitigation: reverse-proxy rate limiting (e.g. nginx `limit_req_zone`). BCrypt-12's 8 s/guess cost limits brute-force speed even without lockout.
+`LoginRateLimiter` enforces a sliding-window cap on `/api/auth/login` failures: 10 per 60 seconds per source IP by default (tunable via `castellum.security.rate-limit.login-window-seconds` / `castellum.security.rate-limit.login-max-attempts`). On overflow the endpoint returns 429 with a `Retry-After` header. `PasswordChangeRateLimiter` mirrors this for `/api/auth/change-password` with a tighter budget (3 attempts / 60 seconds by default, also tunable), keyed by the authenticated username rather than source IP because the threat is brute-forcing the supplied `oldPassword`. BCrypt-12's ~8 s/guess cost provides the underlying computational floor. The maps are pruned by a `@Scheduled` sweep every 60 seconds so the outer-map memory footprint stays bounded. Reverse-proxy rate limiting is still recommended for defence in depth — the in-application counter resets across process restarts.
 
 **E — Elevation of Privilege**
-Role assignment is performed by `BootstrapAdminInitializer` at startup (ADMIN) and would be performed by a future user-management endpoint (not yet implemented). In v1, only ADMIN and VIEWER roles exist. An attacker who can submit a `POST /api/auth/login` with valid admin credentials obtains an ADMIN token; no further escalation vector exists within the application.
+Role assignment is performed by `BootstrapAdminInitializer` at startup (ADMIN) and by `UserService` for any subsequent user lifecycle event. The `UserManagementController` exposes paginated user listing, user creation, role changes, and account disable / re-enable — all `@PreAuthorize("hasRole('ADMIN')")`. Disabling a user atomically bumps `token_version`, so any token issued under the old version is rejected by the next request through `JwtAuthenticationFilter`. In v1, only `ADMIN` and `VIEWER` roles exist. An attacker who can submit a `POST /api/auth/login` with valid admin credentials obtains an ADMIN token; no further escalation vector exists within the application.
 
 ---
 
