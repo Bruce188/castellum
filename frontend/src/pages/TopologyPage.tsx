@@ -25,6 +25,14 @@ export function TopologyPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scanCount, setScanCount] = useState<number | null>(null);
 
+  // Single source of truth for the device-and-risk fanout. Used by both the
+  // mount-effect below and the `onDeviceMutated` callback passed into
+  // <DeviceDetailPanel> so inline-edit / decommission can refresh the graph.
+  //
+  // Historical note: there used to be two near-duplicate effects here (one
+  // wired through refetchDevices, one inlined) — they doubled the request
+  // count on mount and contributed to the "Failed to fetch" pill during the
+  // initial-sync window. Collapsed to a single mount effect.
   const refetchDevices = useCallback(async () => {
     if (!auth.token) return;
     try {
@@ -46,27 +54,8 @@ export function TopologyPage() {
 
   useEffect(() => {
     if (!auth.token) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const page = await api.listDevices();
-        if (cancelled) return;
-        setDevices(page.content);
-        const results = await Promise.allSettled(
-          page.content.map(d => api.deviceRisk(d.id))
-        );
-        if (cancelled) return;
-        const map = new Map<number, DeviceRiskDto>();
-        results.forEach((r, i) => {
-          if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
-        });
-        setRisksById(map);
-      } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'load failed');
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [auth.token]);
+    void refetchDevices();
+  }, [auth.token, refetchDevices]);
 
   // Track scan count so the onboarding card can self-dismiss.
   useEffect(() => {

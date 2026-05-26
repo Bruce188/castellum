@@ -109,4 +109,39 @@ describe('<EmptyCorpusBanner />', () => {
 
     expect(container.firstChild).toBeNull();
   });
+
+  it('(g) interval is cleared once feeds populate — no further fetches after isEmpty=false transition', async () => {
+    // Two empty ticks (initial + first interval), then populated. After the
+    // populated tick the interval must be cleared inside the tick body — any
+    // further advanceTimersByTime() should NOT bump the call count.
+    mockApi.feedsStatus
+      .mockResolvedValueOnce(EMPTY_STATUS)
+      .mockResolvedValueOnce(EMPTY_STATUS)
+      .mockResolvedValueOnce(FULL_STATUS);
+
+    render(<EmptyCorpusBanner isAdmin={true} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(mockApi.feedsStatus).toHaveBeenCalledTimes(1);
+
+    // tick 1 — still empty
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(mockApi.feedsStatus).toHaveBeenCalledTimes(2);
+
+    // tick 2 — populated; clearInterval fires inside the tick
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(mockApi.feedsStatus).toHaveBeenCalledTimes(3);
+
+    // Advance another 30s — no further ticks because the interval is dead.
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+    });
+    expect(mockApi.feedsStatus).toHaveBeenCalledTimes(3);
+  });
 });

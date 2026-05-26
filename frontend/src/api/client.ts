@@ -17,7 +17,17 @@ import { clearAuth, getToken } from '../hooks/useAuth';
 
 const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080') as string;
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** HTTP statuses that warrant a single bounded retry. 5xx-transient only. */
+const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
+/** Delay before the single retry attempt. ~750ms keeps the worst-case latency under 1.5s. */
+const RETRY_BACKOFF_MS = 750;
+
+/**
+ * Single fetch attempt. Throws {@link Error} with the canonical
+ * {@code `${status} ${statusText}`} message on non-OK responses (after the 401
+ * side-effect). Network failures bubble up as the underlying {@link TypeError}.
+ */
+async function requestOnce<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -33,6 +43,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return (await response.json()) as T;
+}
+
+/**
+ * Bounded-retry wrapper around {@link requestOnce}. Retries exactly once on:
+ * <ul>
+ *   <li>{@link TypeError} (browser surfaces network failures as TypeError).</li>
+ *   <li>HTTP 502 / 503 / 504 — transient upstream / gateway / timeout responses.</li>
+ * </ul>
+ * Does NOT retry on 4xx (including 401 — the auth-clear side-effect has already
+ * fired by the time the throw reaches us, and re-issuing the call would just
+ * tear down auth a second time). Preserves the existing JWT-attach and
+ * 401-clears-auth contract because both run inside {@link requestOnce}.
+ */
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  try {
+    return await requestOnce<T>(path, init);
+  } catch (err) {
+    if (!isRetryable(err)) throw err;
+    await new Promise(resolve => setTimeout(resolve, RETRY_BACKOFF_MS));
+    return await requestOnce<T>(path, init);
+  }
+}
+
+/** True iff {@code err} is a {@link TypeError} (network) or an HTTP 502/503/504 Error. */
+function isRetryable(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  if (err instanceof Error) {
+    // The status code lives at the start of the canonical error message
+    // ({@code "503 Service Unavailable"}) — parse the leading integer and check
+    // it against the allow-list. Cheaper than introducing an ApiError subclass.
+    const match = /^(\d{3})\s/.exec(err.message);
+    if (match) return RETRYABLE_STATUSES.has(Number(match[1]));
+  }
+  return false;
 }
 
 export interface DeviceUpdatePayload {

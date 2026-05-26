@@ -51,12 +51,15 @@ describe('api.probeOt()', () => {
     ).rejects.toThrow('403');
   });
 
-  it('throws on 502 (unreachable)', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
-      new Response('Bad Gateway', { status: 502 })
-    );
+  it('throws on 502 (unreachable) — after the bounded single retry surfaces', async () => {
+    // The shared request() helper retries once on 502/503/504. Both attempts
+    // must fail for the user-visible error to surface — mock two responses.
+    const mockFetch = vi.spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }))
+      .mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }));
     await expect(
       api.probeOt({ host: '127.0.0.1', port: 502, protocol: 'MODBUS_TCP' })
     ).rejects.toThrow('502');
-  });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  }, 10_000);
 });
