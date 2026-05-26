@@ -57,6 +57,22 @@ export interface TopRiskDeviceDto {
   kevCount: number;
 }
 
+/** Read-only summary returned by GET /api/cve/fleet listing. Excludes rawJson. */
+export interface CveSummaryDto {
+  cveId: string;
+  published: string | null;
+  lastModified: string;
+  vulnStatus: string | null;
+  description: string | null;
+  cvssV31Score: string | null;
+  cvssV31Vector: string | null;
+  cvssV30Score: string | null;
+  cvssV30Vector: string | null;
+  cvssV2Score: string | null;
+  cvssV2Vector: string | null;
+  fetchedAt: string | null;
+}
+
 /** Read-only DTO returned by GET /api/cve/{cveId}. Includes the upstream NVD rawJson. */
 export interface CveDetailDto {
   cveId: string;

@@ -2,7 +2,7 @@ import type {
   AuditEntry, AuditFilters,
   ChangePasswordRequest,
   CreateUserRequest,
-  Criticality, CveDetailDto,
+  Criticality, CveDetailDto, CveSummaryDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   IntegrationConfigDto, IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
@@ -123,6 +123,11 @@ export const api = {
     request<TopRiskDeviceDto[]>(`/api/risk/top?n=${n}`),
   cveDetail: (cveId: string) =>
     request<CveDetailDto>(`/api/cve/${encodeURIComponent(cveId)}`),
+  listFleetCves: (page: number = 0, size: number = 20, minScore?: number) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (minScore !== undefined) params.set('minScore', String(minScore));
+    return request<Page<CveSummaryDto>>(`/api/cve/fleet?${params.toString()}`);
+  },
   listServicesForDevice: (id: number) =>
     request<NetworkService[]>(`/api/services?deviceId=${id}`),
   triggerScan: async (req: ScanRequest): Promise<{ id: number }> => {

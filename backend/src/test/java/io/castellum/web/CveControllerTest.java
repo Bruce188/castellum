@@ -16,10 +16,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -131,6 +135,68 @@ class CveControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].cveId").exists())
             .andExpect(jsonPath("$[0].rawJson").doesNotExist());
+    }
+
+    @Test
+    void fleet_default_returnsPageOrderedByScore() throws Exception {
+        Cve critical = buildCve("CVE-2024-0001");
+        critical.setCvssV31Score(new BigDecimal("9.8"));
+        Cve high = buildCve("CVE-2024-0002");
+        high.setCvssV31Score(new BigDecimal("7.5"));
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(critical, high)));
+
+        mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-2024-0001"))
+            .andExpect(jsonPath("$.content[1].cveId").value("CVE-2024-0002"))
+            .andExpect(jsonPath("$.content[0].rawJson").doesNotExist());
+
+        verify(cveRepository).findByCvssV31ScoreIsNotNull(any(Pageable.class));
+    }
+
+    @Test
+    void fleet_minScore_filtersBelowFloor() throws Exception {
+        Cve high = buildCve("CVE-2024-0010");
+        high.setCvssV31Score(new BigDecimal("7.5"));
+        when(cveRepository.findByCvssV31ScoreGreaterThanEqual(eq(new BigDecimal("7.0")), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(high)));
+
+        mockMvc.perform(get("/api/cve/fleet")
+                .param("minScore", "7.0")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-2024-0010"));
+
+        verify(cveRepository).findByCvssV31ScoreGreaterThanEqual(eq(new BigDecimal("7.0")), any(Pageable.class));
+    }
+
+    @Test
+    void fleet_size_clampedTo100() throws Exception {
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/cve/fleet").param("size", "500"))
+            .andExpect(status().isOk());
+
+        org.mockito.ArgumentCaptor<Pageable> captor = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        verify(cveRepository).findByCvssV31ScoreIsNotNull(captor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(100, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void fleet_anon_returns401() throws Exception {
+        mockMvc.perform(get("/api/cve/fleet").with(anonymous()))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void fleet_viewer_canRead() throws Exception {
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of()));
+        mockMvc.perform(get("/api/cve/fleet"))
+            .andExpect(status().isOk());
     }
 
     @Test

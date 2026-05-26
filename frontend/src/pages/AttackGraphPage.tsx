@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { DevicePicker } from '../components/DevicePicker';
 import { TopologyView, type HighlightPath, makeEdgeKey } from '../components/TopologyView';
 import { api } from '../api/client';
@@ -185,7 +185,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
               {response.cumulativeRisk ? `, cumulative risk ${response.cumulativeRisk}` : ''})
             </h3>
             <ol className="text-sm divide-y divide-gray-100 border border-gray-200 rounded">
-              {response.hops.reduce<{ rows: JSX.Element[]; prevId: number; prevLabel: string }>(
+              {response.hops.reduce<{ rows: ReactElement[]; prevId: number; prevLabel: string }>(
                 (acc, hop, idx) => {
                   const row = renderHopRow(hop, idx, acc.prevId, acc.prevLabel);
                   return {
