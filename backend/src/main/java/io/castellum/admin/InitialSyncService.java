@@ -50,6 +50,16 @@ public class InitialSyncService {
         this.kevIngestionService = kevIngestionService;
     }
 
+    /** Returns {@code true} if a sync job is currently executing. */
+    public boolean isInFlight() {
+        return inFlight.get();
+    }
+
+    /** Returns the {@link Instant} at which the current (or most recent) sync was started, or {@code null} if never triggered. */
+    public Instant getStartedAt() {
+        return startedAt;
+    }
+
     /**
      * Triggers the initial sync if none is currently running.
      *

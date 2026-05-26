@@ -4,10 +4,12 @@ import io.castellum.admin.InitialSyncService;
 import io.castellum.audit.AuditService;
 import io.castellum.web.dto.InitialSyncRequest;
 import io.castellum.web.dto.InitialSyncResponse;
+import io.castellum.web.dto.SyncStatusResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,6 +27,19 @@ public class AdminController {
     public AdminController(InitialSyncService initialSyncService, AuditService auditService) {
         this.initialSyncService = initialSyncService;
         this.auditService = auditService;
+    }
+
+    /**
+     * Returns the current sync in-flight status.
+     *
+     * <p>ADMIN-only, read-only. No audit row is emitted — reads are silent.
+     */
+    @GetMapping("/sync/status")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<SyncStatusResponse> syncStatus() {
+        return ResponseEntity.ok(new SyncStatusResponse(
+                initialSyncService.isInFlight(),
+                initialSyncService.getStartedAt()));
     }
 
     /**

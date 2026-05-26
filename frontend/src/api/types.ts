@@ -158,6 +158,11 @@ export interface InitialSyncResponse {
   startedAt: string;
 }
 
+export interface SyncStatusResponse {
+  running: boolean;
+  startedAt: string | null;
+}
+
 export interface AuditEntry {
   id: number;
   occurredAt: string;        // ISO8601

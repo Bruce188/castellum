@@ -25,6 +25,7 @@ import java.time.Instant;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -103,5 +104,43 @@ class AdminControllerTest {
             eq("initial-sync"),
             eq("global"),
             any());
+    }
+
+    // --- GET /api/admin/sync/status ---
+
+    @Test
+    void admin_getSyncStatus_returnsRunningFalseBaseline() throws Exception {
+        when(initialSyncService.isInFlight()).thenReturn(false);
+        when(initialSyncService.getStartedAt()).thenReturn(null);
+
+        mvc.perform(get("/api/admin/sync/status"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.running").value(false))
+            .andExpect(jsonPath("$.startedAt").doesNotExist());
+    }
+
+    @Test
+    void admin_getSyncStatus_returnsRunningTrueWhenInFlight() throws Exception {
+        Instant ts = Instant.parse("2026-05-26T00:00:00Z");
+        when(initialSyncService.isInFlight()).thenReturn(true);
+        when(initialSyncService.getStartedAt()).thenReturn(ts);
+
+        mvc.perform(get("/api/admin/sync/status"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.running").value(true))
+            .andExpect(jsonPath("$.startedAt").value("2026-05-26T00:00:00Z"));
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewer_getSyncStatus_returns403() throws Exception {
+        mvc.perform(get("/api/admin/sync/status"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anonymous_getSyncStatus_returns401() throws Exception {
+        mvc.perform(get("/api/admin/sync/status").with(anonymous()))
+            .andExpect(status().isUnauthorized());
     }
 }

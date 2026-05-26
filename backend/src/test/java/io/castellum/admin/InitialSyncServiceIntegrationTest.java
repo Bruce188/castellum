@@ -90,4 +90,43 @@ class InitialSyncServiceIntegrationTest {
         // downstream services invoked exactly once (not twice)
         verify(nvdSyncService, times(1)).bulkPull(any(), any());
     }
+
+    @Test
+    void twoParallelPosts_secondReturnsAlreadyRunning_getReportsRunningTrueDuringAndFalseAfter() throws Exception {
+        CountDownLatch hold = new CountDownLatch(1);
+        CountDownLatch running = new CountDownLatch(1);
+
+        doAnswer(inv -> {
+            running.countDown();
+            hold.await(5, TimeUnit.SECONDS);
+            return null;
+        }).when(nvdSyncService).bulkPull(any(), any());
+
+        try {
+            // First POST — starts the job
+            InitialSyncResponse first = initialSyncService.trigger(InitialSyncRequest.defaults(), "admin");
+            assertTrue(running.await(5, TimeUnit.SECONDS), "Background job must have started");
+
+            // Second POST — should be gated out
+            InitialSyncResponse second = initialSyncService.trigger(InitialSyncRequest.defaults(), "admin");
+            assertEquals("started", first.status());
+            assertEquals("already-running", second.status());
+
+            // GET-during: isInFlight must be true while the latch is held
+            assertTrue(initialSyncService.isInFlight(), "isInFlight() must return true while job is executing");
+            assertNotNull(initialSyncService.getStartedAt(), "getStartedAt() must not be null while in-flight");
+        } finally {
+            // Release latch so the background thread can finish
+            hold.countDown();
+        }
+
+        // Wait for the background task to finish and clear inFlight
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (initialSyncService.isInFlight() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+
+        // GET-after: isInFlight must now be false
+        assertFalse(initialSyncService.isInFlight(), "isInFlight() must return false after job completes");
+    }
 }

@@ -25,12 +25,27 @@ const isEmpty = (s: FeedsStatusDto | null): boolean =>
  * Admin users see a "Sync NVD + EPSS + KEV" button that POSTs to
  * {@code POST /api/admin/initial-sync} and switches to a disabled "Syncing…" state.
  * Viewer users see the informational text only — no button.
+ *
+ * Sync in-flight persistence: the button's disabled state survives page navigation
+ * via {@code localStorage['castellum.sync.inFlight']}. On mount the component reads
+ * localStorage as a fast-path initial state, then confirms with
+ * {@code GET /api/admin/sync/status}. While {@code syncInFlight===true} a separate
+ * 5-second poll fires against the status endpoint to detect completion.
  */
 export function EmptyCorpusBanner({ isAdmin }: Props) {
   const [status, setStatus] = useState<FeedsStatusDto | null>(null);
-  const [syncInFlight, setSyncInFlight] = useState(false);
+  /**
+   * Initialise from localStorage for instant disabled state on mount.
+   * The mount-confirm useEffect reconciles with the server within the first
+   * microtask — stale localStorage is corrected before the user can interact.
+   */
+  const [syncInFlight, setSyncInFlight] = useState<boolean>(
+    () => typeof window !== 'undefined' &&
+          localStorage.getItem('castellum.sync.inFlight') === 'true'
+  );
   const [error, setError] = useState<string | null>(null);
 
+  // 10-second feeds-status poll — drives banner unmount when all feeds populate
   useEffect(() => {
     let id: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -67,6 +82,38 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
     };
   }, []);
 
+  // Mount confirm — reconcile localStorage fast-path with server truth
+  useEffect(() => {
+    let cancelled = false;
+    api.syncStatus().then((r) => {
+      if (cancelled) return;
+      if (r.running) {
+        localStorage.setItem('castellum.sync.inFlight', 'true');
+        setSyncInFlight(true);
+      } else {
+        localStorage.removeItem('castellum.sync.inFlight');
+        setSyncInFlight(false);
+      }
+    }).catch(() => { /* swallow — fast-path remains authoritative until next tick */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // 5-second poll while in-flight — detects completion and clears localStorage
+  useEffect(() => {
+    if (!syncInFlight) return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      api.syncStatus().then((r) => {
+        if (cancelled) return;
+        if (!r.running) {
+          localStorage.removeItem('castellum.sync.inFlight');
+          setSyncInFlight(false);
+        }
+      }).catch(() => { /* keep polling */ });
+    }, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [syncInFlight]);
+
   // Once all three counts are non-zero the banner is not needed
   if (status !== null && !isEmpty(status)) {
     return null;
@@ -77,6 +124,7 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
     setError(null);
     try {
       await api.triggerInitialSync();
+      localStorage.setItem('castellum.sync.inFlight', 'true');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'sync trigger failed');
       setSyncInFlight(false);

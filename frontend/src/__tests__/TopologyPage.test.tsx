@@ -30,12 +30,15 @@ vi.mock('../hooks/useAuth', () => ({
 }));
 
 // Mock the api module so we can count the fanout.
+// feedsStatus and syncStatus are called by <EmptyCorpusBanner /> which mounts inside TopologyPage.
 vi.mock('../api/client', () => ({
   api: {
     listDevices: vi.fn(),
     deviceRisk: vi.fn(),
     listScans: vi.fn(),
     listServicesForDevice: vi.fn(),
+    feedsStatus: vi.fn(),
+    syncStatus: vi.fn(),
   },
 }));
 
@@ -47,6 +50,8 @@ const mockApi = api as unknown as {
   deviceRisk: ReturnType<typeof vi.fn>;
   listScans: ReturnType<typeof vi.fn>;
   listServicesForDevice: ReturnType<typeof vi.fn>;
+  feedsStatus: ReturnType<typeof vi.fn>;
+  syncStatus: ReturnType<typeof vi.fn>;
 };
 
 const DEVICES: Device[] = [
@@ -79,6 +84,13 @@ describe('<TopologyPage /> mount fanout', () => {
     mockApi.deviceRisk.mockResolvedValue(RISK);
     mockApi.listScans.mockResolvedValue(SCANS_PAGE);
     mockApi.listServicesForDevice.mockResolvedValue([]);
+    // EmptyCorpusBanner (mounted inside TopologyPage) calls feedsStatus and syncStatus
+    mockApi.feedsStatus.mockResolvedValue({
+      epss: { scoreDate: '2025-01-01', rowCount: 1000 },
+      kev: { lastIngestedAt: '2025-01-01T00:00:00Z', entryCount: 100 },
+      nvd: { lastModified: '2025-01-01T00:00:00Z', rowCount: 200000 },
+    });
+    mockApi.syncStatus.mockResolvedValue({ running: false, startedAt: null });
   });
 
   afterEach(() => {
