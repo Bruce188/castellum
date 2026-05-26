@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { AuditEntry, AuditFilters } from '../api/types';
 
@@ -25,31 +25,34 @@ export default function AuditLogPanel({ isAdmin }: Props) {
   const [pendingFilters, setPendingFilters] = useState<AuditFilters>({ size: 50, page: 0 });
   const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
 
-  const fetchEntries = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.listAudit(filters);
-      setEntries(result.content);
-      setTotalElements(result.totalElements);
-      setTotalPages(result.totalPages);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load audit entries');
-    } finally {
-      setLoading(false);
-    }
-  }, [filters]);
-
   useEffect(() => {
-    fetchEntries();
-  }, [fetchEntries]);
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await api.listAudit(filters);
+        if (cancelled) return;
+        setEntries(result.content);
+        setTotalElements(result.totalElements);
+        setTotalPages(result.totalPages);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load audit entries');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [filters]);
 
   function handleApply() {
     setFilters({ ...pendingFilters, page: 0, size: 50 });
   }
 
   function handleRefresh() {
-    fetchEntries();
+    setFilters(f => ({ ...f }));
   }
 
   async function handleDownloadCsv() {

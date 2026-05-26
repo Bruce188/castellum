@@ -126,22 +126,33 @@ export function RecentScansPanel({ latestSubmittedId }: Props) {
   // Optimistic insert when parent passes a freshly-submitted scan id
   useEffect(() => {
     if (latestSubmittedId == null) return;
-    setScans(prev => {
-      const already = prev.some(s => s.id === latestSubmittedId);
-      if (already) return prev;
-      const optimistic: Scan = {
-        id: latestSubmittedId,
-        cidr: '…',
-        scanType: 'PING_SWEEP',
-        status: 'PENDING',
-        requestedAt: new Date().toISOString(),
-        completedAt: null,
-      };
-      return [optimistic, ...prev].slice(0, 10);
-    });
-    // immediately fetch to replace optimistic row
-    void fetchScans();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const run = async () => {
+      if (cancelled) return;
+      setScans(prev => {
+        const already = prev.some(s => s.id === latestSubmittedId);
+        if (already) return prev;
+        const optimistic: Scan = {
+          id: latestSubmittedId,
+          cidr: '…',
+          scanType: 'PING_SWEEP',
+          status: 'PENDING',
+          requestedAt: new Date().toISOString(),
+          completedAt: null,
+        };
+        return [optimistic, ...prev].slice(0, 10);
+      });
+      // immediately fetch to replace optimistic row
+      try {
+        const page = await api.listScans(10);
+        if (cancelled) return;
+        setScans(page.content);
+      } catch {
+        // silently ignore — don't crash the panel on network errors
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
   }, [latestSubmittedId]);
 
   if (scans.length === 0) return null;

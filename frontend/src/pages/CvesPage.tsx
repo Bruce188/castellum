@@ -43,8 +43,27 @@ export function CvesPage() {
   }, [pageNumber, severity]);
 
   useEffect(() => {
-    fetchPage();
-  }, [fetchPage]);
+    let cancelled = false;
+    const run = async () => {
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const minScore = severity === 'all' ? undefined : SEVERITY_THRESHOLDS[severity];
+        const result = await api.listFleetCves(pageNumber, PAGE_SIZE, minScore);
+        if (cancelled) return;
+        setPage(result);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load CVEs');
+        setPage(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
+  }, [pageNumber, severity]);
 
   const onSeverityChange = (next: SeverityFilter) => {
     setSeverity(next);

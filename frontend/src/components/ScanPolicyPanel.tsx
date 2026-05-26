@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { ScanPolicyDto, ScanType } from '../api/types';
 
@@ -26,7 +26,7 @@ export function ScanPolicyPanel({ isAdmin }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [formMsg, setFormMsg] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -37,12 +37,27 @@ export function ScanPolicyPanel({ isAdmin }: Props) {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const page = await api.listScanPolicies();
+        if (cancelled) return;
+        setPolicies(page.content);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'failed to load policies');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void run();
+    return () => { cancelled = true; };
   }, [isAdmin]);
 
   if (!isAdmin) {

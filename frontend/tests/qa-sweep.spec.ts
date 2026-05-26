@@ -58,7 +58,7 @@ test.describe('Castellum QA sweep', () => {
   test('6. admin submits a scan and gets an id back', async ({ page }) => {
     await signIn(page, ADMIN);
     page.on('console', m => { if (m.type() === 'error') console.log('console error:', m.text()); });
-    const responses: Array<{ url: string; status: number; body?: any }> = [];
+    const responses: Array<{ url: string; status: number; body?: Record<string, unknown> }> = [];
     page.on('response', async r => {
       if (r.url().includes('/api/scan')) {
         try { responses.push({ url: r.url(), status: r.status(), body: await r.json() }); }
