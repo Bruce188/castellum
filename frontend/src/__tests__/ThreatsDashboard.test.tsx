@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ThreatsDashboard } from '../components/ThreatsDashboard';
 import { api } from '../api/client';
+
+const navigateMock = vi.fn();
+
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => navigateMock,
+}));
 
 vi.mock('../api/client', () => ({
   api: {
@@ -23,6 +29,7 @@ describe('<ThreatsDashboard />', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    navigateMock.mockReset();
   });
 
   it('shows loading state then top-10 table on success', async () => {
@@ -112,6 +119,41 @@ describe('<ThreatsDashboard />', () => {
 
     render(<ThreatsDashboard />);
     await waitFor(() => screen.getByText(/No devices ranked/i));
+  });
+
+  it('navigates to /cves?deviceId=<id> when a row is clicked', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 42, hostname: 'host-42', ipAddress: '10.0.0.42', criticality: 'HIGH', score: '9.10', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    render(<ThreatsDashboard />);
+    const row = await screen.findByTestId('threats-row-42');
+    fireEvent.click(row);
+    expect(navigateMock).toHaveBeenCalledWith('/cves?deviceId=42');
+  });
+
+  it('navigates on Enter and Space keydown', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 7, hostname: 'host-7', ipAddress: '10.0.0.7', criticality: 'HIGH', score: '7.10', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    render(<ThreatsDashboard />);
+    const row = await screen.findByTestId('threats-row-7');
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(navigateMock).toHaveBeenCalledWith('/cves?deviceId=7');
+    navigateMock.mockClear();
+    fireEvent.keyDown(row, { key: ' ' });
+    expect(navigateMock).toHaveBeenCalledWith('/cves?deviceId=7');
   });
 
   it('shows error message when topRisk fails', async () => {

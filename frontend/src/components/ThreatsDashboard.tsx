@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { FeedsStatusDto, TopRiskDeviceDto } from '../api/types';
 import { freshnessTier, FRESHNESS_BADGE_CLASSES, FRESHNESS_DOT_CLASSES } from '../lib/freshness';
@@ -22,6 +23,11 @@ const INITIAL: State = { loading: true, error: null, top: [], feeds: null };
  */
 export function ThreatsDashboard() {
   const [state, setState] = useState<State>(INITIAL);
+  const navigate = useNavigate();
+
+  const openDevice = (deviceId: number) => {
+    navigate(`/cves?deviceId=${deviceId}`);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +103,20 @@ export function ThreatsDashboard() {
           </thead>
           <tbody>
             {state.top.map((d, i) => (
-              <tr key={d.deviceId} className="border-b">
+              <tr
+                key={d.deviceId}
+                role="button"
+                tabIndex={0}
+                data-testid={`threats-row-${d.deviceId}`}
+                onClick={() => openDevice(d.deviceId)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openDevice(d.deviceId);
+                  }
+                }}
+                className="border-b cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
+              >
                 <td className="py-1 pr-2 text-gray-500">{i + 1}</td>
                 <td className="py-1 pr-2">
                   <div className="font-mono">{d.hostname ?? d.ipAddress}</div>
