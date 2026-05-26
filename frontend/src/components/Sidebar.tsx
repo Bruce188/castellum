@@ -3,16 +3,18 @@ import { NavLink } from 'react-router-dom';
 /**
  * Castellum primary navigation rail.
  *
- * Renders 6 top-level routes — Topology, Scans, Threats, CVEs, Audit, Settings —
- * as {@link NavLink} entries so the router applies active-state styling automatically.
- * Fixed-width column with a dark slate background; designed to sit to the left of
- * the main content pane inside an `App` shell that uses `flex h-screen`.
+ * Renders 7 top-level routes — Topology, Scans, Threats, CVEs, Attack Graph,
+ * Audit, Settings — as {@link NavLink} entries so the router applies
+ * active-state styling automatically. Fixed-width column with a dark slate
+ * background; designed to sit to the left of the main content pane inside an
+ * `App` shell that uses `flex h-screen`.
  */
 const NAV_ITEMS: Array<{ to: string; label: string; end?: boolean }> = [
   { to: '/', label: 'Topology', end: true },
   { to: '/scans', label: 'Scans' },
   { to: '/threats', label: 'Threats' },
   { to: '/cves', label: 'CVEs' },
+  { to: '/attack-graph', label: 'Attack Graph' },
   { to: '/audit', label: 'Audit' },
   { to: '/settings', label: 'Settings' },
 ];

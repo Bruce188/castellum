@@ -7,7 +7,9 @@ import type {
   InterfaceInfo, NetworkService,
   OtProbeRequest, OtProbeResponse,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
-  Scan, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest, TopRiskDeviceDto,
+  Scan, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest,
+  ShortestPathResponse,
+  TopRiskDeviceDto,
   UserDto, UserRole,
 } from './types';
 import { clearAuth, getToken } from '../hooks/useAuth';
@@ -296,6 +298,18 @@ export const api = {
       throw new Error(`${response.status} ${response.statusText}`);
     }
   },
+
+  /**
+   * GET /api/graph/shortest-path?from=N&to=N — VIEWER or ADMIN.
+   *
+   * <p>Backend computes the lowest-cost attack path via JGraphT over the
+   * Castellum attack graph. Returns {@code pathFound: false} with an empty
+   * {@code hops} array when the two devices are not reachable.
+   */
+  shortestPath: (params: { from: number; to: number }) =>
+    request<ShortestPathResponse>(
+      `/api/graph/shortest-path?from=${params.from}&to=${params.to}`
+    ),
 
   /** POST /api/users/{username}/disable — ADMIN-only. */
   disableUser: async (username: string): Promise<void> => {

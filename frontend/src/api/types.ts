@@ -245,3 +245,36 @@ export interface ChangePasswordRequest {
   oldPassword: string;
   newPassword: string;
 }
+
+// ----- Attack graph -----
+
+/** Discriminator mirroring backend {@code io.castellum.graph.EdgeType}. */
+export type EdgeType = 'SAME_SUBNET' | 'EXPLOITABLE_VULN' | 'WEAK_CRED_PATH';
+
+/**
+ * One hop on a shortest-path response. Each hop represents arrival at
+ * {@link #deviceId} via {@link #edgeType}. The source of the edge is the
+ * previous hop's {@code deviceId} (or the path's {@code from} when this is hop 0).
+ *
+ * <p>BigDecimal-typed fields are serialized as strings; callers convert via {@code Number(x)}.
+ */
+export interface HopDto {
+  deviceId: number;
+  ipAddress: string;
+  edgeType: EdgeType;
+  attackTechniqueId: string | null;
+  attackTechniqueName: string | null;
+  edgeRisk: string | null;
+  cumulativeRisk: string | null;
+  cveId: string | null;
+}
+
+/** Response shape for {@code GET /api/graph/shortest-path}. */
+export interface ShortestPathResponse {
+  from: number;
+  to: number;
+  hops: HopDto[];
+  totalHops: number;
+  cumulativeRisk: string | null;
+  pathFound: boolean;
+}

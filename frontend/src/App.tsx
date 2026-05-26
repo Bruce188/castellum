@@ -7,6 +7,7 @@ import { TopologyPage } from './pages/TopologyPage';
 import { ScansPage } from './pages/ScansPage';
 import { ThreatsPage } from './pages/ThreatsPage';
 import { CvesPage } from './pages/CvesPage';
+import { AttackGraphPage } from './pages/AttackGraphPage';
 import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { clearAuth, useAuth } from './hooks/useAuth';
@@ -43,6 +44,7 @@ export function AppShell() {
             <Route path="/scans" element={<ScansPage />} />
             <Route path="/threats" element={<ThreatsPage />} />
             <Route path="/cves" element={<CvesPage />} />
+            <Route path="/attack-graph" element={<AttackGraphPage isAdmin={isAdmin} />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>

@@ -22,14 +22,36 @@ interface CoseBilkentLayoutOptions extends cytoscape.BaseLayoutOptions {
   randomize?: boolean;
 }
 
+/**
+ * Optional path highlight overlay. {@link #nodeIds} is the ordered list of
+ * device ids on the path (including endpoints); {@link #edgeKeys} contains
+ * undirected edge identifiers in {@code min(a,b)-max(a,b)} form so we don't
+ * have to care which direction Cytoscape stored the edge in.
+ *
+ * <p>When supplied, the view ADDS the corresponding nodes and one synthetic
+ * edge per pair to the graph (so the path is visible even between devices
+ * that share no /24) and applies the {@code path-highlight} class to them.
+ */
+export interface HighlightPath {
+  nodeIds: number[];
+  edgeKeys?: string[];
+}
+
 interface Props {
   devices: Device[];
   risksById: Map<number, DeviceRiskDto>;
   onNodeClick: (deviceId: number) => void;
   onBackgroundClick: () => void;
+  /** When set, marks the listed nodes/edges with {@code path-highlight}. */
+  highlightPath?: HighlightPath | null;
 }
 
-export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick }: Props) {
+/** Canonical undirected edge key — used by both view and caller so they match. */
+export function makeEdgeKey(a: number, b: number): string {
+  return a <= b ? `${a}-${b}` : `${b}-${a}`;
+}
+
+export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   /**
@@ -65,6 +87,9 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         { selector: 'node.risk-crit',    style: { 'background-color': tierColor.crit } },
         { selector: 'node.risk-unknown', style: { 'background-color': tierColor.unknown } },
         { selector: 'edge', style: { 'line-color': '#9ca3af', 'curve-style': 'straight' as const, opacity: 0.5, width: 1 } },
+        // Attack-path overlay — bright red ring on nodes, dashed red stroke on edges.
+        { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': '#dc2626' } },
+        { selector: 'edge.path-highlight', style: { 'line-color': '#dc2626', 'line-style': 'dashed' as const, opacity: 1, width: 3 } },
       ],
     });
 
@@ -105,8 +130,26 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
 
     const edges = buildSubnetEdges(devices);
 
+    // When a path is provided, add ad-hoc edges for path pairs that aren't
+    // already covered by the subnet-edge layer (the attack graph may traverse
+    // EXPLOITABLE_VULN edges between devices on different /24s).
+    const extraEdges: Array<{ data: { id: string; source: string; target: string; kind: 'path' } }> = [];
+    if (highlightPath && highlightPath.nodeIds.length >= 2) {
+      const seen = new Set<string>(edges.map(e => e.data.id));
+      for (let i = 0; i < highlightPath.nodeIds.length - 1; i++) {
+        const a = highlightPath.nodeIds[i];
+        const b = highlightPath.nodeIds[i + 1];
+        const key = makeEdgeKey(a, b);
+        const fwd = `e-${Math.min(a, b)}-${Math.max(a, b)}`;
+        const id = `pe-${key}`;
+        if (seen.has(fwd) || seen.has(id)) continue;
+        seen.add(id);
+        extraEdges.push({ data: { id, source: String(a), target: String(b), kind: 'path' } });
+      }
+    }
+
     cy.elements().remove();
-    cy.add([...nodes, ...edges]);
+    cy.add([...nodes, ...edges, ...extraEdges]);
     const layoutOptions: CoseBilkentLayoutOptions = {
       name: 'cose-bilkent',
       idealEdgeLength: 100,
@@ -115,7 +158,33 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       randomize: false,
     };
     cy.layout(layoutOptions).run();
-  }, [devices, risksById]);
+  }, [devices, risksById, highlightPath]);
+
+  // Apply path-highlight classes — kept in its own effect so re-highlighting
+  // does not re-run the layout. Reads the latest highlightPath each render.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.elements('.path-highlight').removeClass('path-highlight');
+    if (!highlightPath || highlightPath.nodeIds.length === 0) return;
+    const nodeIdSet = new Set(highlightPath.nodeIds.map(String));
+    cy.nodes().forEach(n => {
+      if (nodeIdSet.has(n.id())) n.addClass('path-highlight');
+    });
+    // Build the set of expected canonical edge keys from the path pairs (and
+    // also accept caller-supplied edgeKeys if present).
+    const expected = new Set<string>(highlightPath.edgeKeys ?? []);
+    for (let i = 0; i < highlightPath.nodeIds.length - 1; i++) {
+      expected.add(makeEdgeKey(highlightPath.nodeIds[i], highlightPath.nodeIds[i + 1]));
+    }
+    cy.edges().forEach(e => {
+      const a = Number(e.data('source'));
+      const b = Number(e.data('target'));
+      if (Number.isFinite(a) && Number.isFinite(b) && expected.has(makeEdgeKey(a, b))) {
+        e.addClass('path-highlight');
+      }
+    });
+  }, [highlightPath, devices]);
 
   return (
     <div
