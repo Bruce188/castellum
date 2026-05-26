@@ -63,4 +63,15 @@ describe('<HostnameInlineEdit />', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('save-failed'));
   });
+
+  it('ADMIN display mode renders the pencil-icon edit affordance', () => {
+    render(<HostnameInlineEdit value="webhost-01" isAdmin={true} onSave={vi.fn()} />);
+    const btn = screen.getByRole('button', { name: /edit hostname/i });
+    expect(btn.querySelector('[data-testid="edit-affordance"]')).toBeInTheDocument();
+  });
+
+  it('VIEWER display mode does not render the edit affordance', () => {
+    render(<HostnameInlineEdit value="webhost-01" isAdmin={false} onSave={vi.fn()} />);
+    expect(screen.queryByTestId('edit-affordance')).not.toBeInTheDocument();
+  });
 });
