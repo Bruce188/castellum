@@ -24,4 +24,8 @@ public interface CveRepository extends JpaRepository<Cve, Long> {
     Page<Cve> findByIdInAndCvssV31ScoreIsNotNull(Set<Long> ids, Pageable pageable);
 
     Page<Cve> findByIdInAndCvssV31ScoreGreaterThanEqual(Set<Long> ids, BigDecimal minScore, Pageable pageable);
+
+    // v3-F1 — kevOnly fleet branch. Spring Data JPA generates the IN-clause and
+    // CvssV31Score IS NOT NULL predicate; no @Query annotation needed.
+    Page<Cve> findByCveIdInAndCvssV31ScoreIsNotNull(Set<String> cveIds, Pageable pageable);
 }

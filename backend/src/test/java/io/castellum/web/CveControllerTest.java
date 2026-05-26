@@ -3,10 +3,17 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.cve.Cve;
+import io.castellum.cve.CveEnrichmentService;
+import io.castellum.cve.CveEnrichmentService.Enrichment;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.domain.Device;
+import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.risk.Criticality;
+import io.castellum.risk.KevEntry;
+import io.castellum.risk.KevEntryRepository;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
@@ -27,13 +34,17 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import org.hamcrest.Matchers;
 
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -62,11 +73,28 @@ class CveControllerTest {
     NetworkServiceRepository networkServiceRepository;
 
     @MockBean
+    CveEnrichmentService enrichment;
+
+    @MockBean
+    KevEntryRepository kevEntryRepository;
+
+    @MockBean
+    DeviceRepository deviceRepository;
+
+    @MockBean
     CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
     @MockBean
     UserRepository userRepository;
+
+    /** Default enrichment stub: empty payload (kev=false, epss=null, composite=null per entry). */
+    private void stubEnrichmentEmpty() {
+        when(enrichment.enrich(anyCollection(), any(Criticality.class)))
+            .thenReturn(Map.of());
+        when(enrichment.enrichOne(any(Cve.class), any(Criticality.class)))
+            .thenReturn(new Enrichment(Boolean.FALSE, null, null));
+    }
 
     private Cve buildCve(String cveId) {
         Cve cve = new Cve();
@@ -81,6 +109,7 @@ class CveControllerTest {
     void getByCveId_existingRecord_returns200WithBody() throws Exception {
         Cve cve = buildCve("CVE-2020-15778");
         when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/CVE-2020-15778")
                 .accept(MediaType.APPLICATION_JSON))
@@ -102,6 +131,7 @@ class CveControllerTest {
         String cpe = "cpe:2.3:a:openbsd:openssh:8.2:*:*:*:*:*:*:*";
         Cve cve = buildCve("CVE-2020-15778");
         when(cveMatcher.findVulnerable(cpe)).thenReturn(List.of(cve));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve")
                 .param("cpe", cpe)
@@ -123,6 +153,7 @@ class CveControllerTest {
     void viewer_canRead_returns200() throws Exception {
         Cve cve = buildCve("CVE-2020-15778");
         when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/CVE-2020-15778")
                 .accept(MediaType.APPLICATION_JSON))
@@ -135,6 +166,7 @@ class CveControllerTest {
         Cve cve = buildCve("CVE-2020-15778");
         cve.setRawJson("{\"sentinel\":true}");
         when(cveMatcher.findVulnerable(any())).thenReturn(List.of(cve));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve")
                 .param("cpe", "cpe:2.3:a:test:test:1.0")
@@ -152,6 +184,7 @@ class CveControllerTest {
         high.setCvssV31Score(new BigDecimal("7.5"));
         when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(critical, high)));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
@@ -168,6 +201,7 @@ class CveControllerTest {
         high.setCvssV31Score(new BigDecimal("7.5"));
         when(cveRepository.findByCvssV31ScoreGreaterThanEqual(eq(new BigDecimal("7.0")), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(high)));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/fleet")
                 .param("minScore", "7.0")
@@ -182,6 +216,7 @@ class CveControllerTest {
     void fleet_size_clampedTo100() throws Exception {
         when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of()));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/fleet").param("size", "500"))
             .andExpect(status().isOk());
@@ -202,6 +237,7 @@ class CveControllerTest {
     void fleet_viewer_canRead() throws Exception {
         when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of()));
+        stubEnrichmentEmpty();
         mockMvc.perform(get("/api/cve/fleet"))
             .andExpect(status().isOk());
     }
@@ -212,6 +248,7 @@ class CveControllerTest {
         Cve cve = buildCve("CVE-2020-15778");
         cve.setRawJson("{\"sentinel\":true}");
         when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/CVE-2020-15778")
                 .accept(MediaType.APPLICATION_JSON))
@@ -250,6 +287,7 @@ class CveControllerTest {
 
         when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cve2, cve1)));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/fleet").param("deviceId", "42")
                 .accept(MediaType.APPLICATION_JSON))
@@ -267,6 +305,7 @@ class CveControllerTest {
         cve.setCvssV31Score(new BigDecimal("8.1"));
         when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cve)));
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
@@ -279,11 +318,173 @@ class CveControllerTest {
     @Test
     void fleet_deviceIdUnknown_returns200WithEmptyPage() throws Exception {
         when(networkServiceRepository.findByDeviceId(99999L)).thenReturn(List.of());
+        stubEnrichmentEmpty();
 
         mockMvc.perform(get("/api/cve/fleet").param("deviceId", "99999")
                 .accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content.length()").value(0))
             .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // v3-F1 — kev/epss/composite surfacing, kevOnly filter, sort dispatch
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Test 1 — every fleet row carries the three enrichment fields when populated.
+     * Asserts response payload exposes {@code kev}, {@code epssScore},
+     * {@code compositeScore} JSON paths populated from the mocked
+     * {@link CveEnrichmentService} batch result.
+     */
+    @Test
+    void fleetResponseContainsKevEpssCompositeFields() throws Exception {
+        Cve cve = buildCve("CVE-2024-0001");
+        cve.setCvssV31Score(new BigDecimal("8.0"));
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(cve)));
+        when(enrichment.enrich(anyCollection(), eq(Criticality.MEDIUM)))
+            .thenReturn(Map.of("CVE-2024-0001",
+                new Enrichment(Boolean.TRUE, new BigDecimal("0.5"), new BigDecimal("8.50"))));
+
+        mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].kev").value(true))
+            .andExpect(jsonPath("$.content[0].epssScore").value(0.5))
+            .andExpect(jsonPath("$.content[0].compositeScore").value(8.50));
+    }
+
+    /**
+     * Test 2 — {@code ?kevOnly=true} narrows the result set to KEV-listed CVEs.
+     * Verifies the controller pulls the KEV cveId set once and dispatches the
+     * {@code findByCveIdInAndCvssV31ScoreIsNotNull} derived query.
+     */
+    @Test
+    void fleetKevOnlyFilterNarrowsResultSet() throws Exception {
+        KevEntry kevA = new KevEntry();
+        kevA.setCveId("CVE-A");
+        KevEntry kevB = new KevEntry();
+        kevB.setCveId("CVE-B");
+        when(kevEntryRepository.findAll()).thenReturn(List.of(kevA, kevB));
+
+        Cve cveA = buildCve("CVE-A");
+        cveA.setCvssV31Score(new BigDecimal("9.0"));
+        Cve cveB = buildCve("CVE-B");
+        cveB.setCvssV31Score(new BigDecimal("8.0"));
+        when(cveRepository.findByCveIdInAndCvssV31ScoreIsNotNull(eq(Set.of("CVE-A", "CVE-B")), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(cveA, cveB)));
+
+        Map<String, Enrichment> enrichMap = new HashMap<>();
+        enrichMap.put("CVE-A", new Enrichment(Boolean.TRUE, new BigDecimal("0.40"), new BigDecimal("9.00")));
+        enrichMap.put("CVE-B", new Enrichment(Boolean.TRUE, new BigDecimal("0.30"), new BigDecimal("8.00")));
+        when(enrichment.enrich(anyCollection(), any(Criticality.class))).thenReturn(enrichMap);
+
+        mockMvc.perform(get("/api/cve/fleet").param("kevOnly", "true")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content", hasSize(2)))
+            .andExpect(jsonPath("$.content[0].kev").value(true))
+            .andExpect(jsonPath("$.content[1].kev").value(true));
+
+        verify(cveRepository).findByCveIdInAndCvssV31ScoreIsNotNull(eq(Set.of("CVE-A", "CVE-B")), any(Pageable.class));
+    }
+
+    /**
+     * Test 3 — {@code ?sort=composite} orders rows by composite score DESC,
+     * exercising the enrichment-window path (fetch wider candidate set, enrich,
+     * sort in-memory, slice).
+     */
+    @Test
+    void fleetSortByCompositeReturnsHighestCompositeFirst() throws Exception {
+        Cve cveA = buildCve("CVE-A");
+        cveA.setCvssV31Score(new BigDecimal("5.0"));
+        Cve cveB = buildCve("CVE-B");
+        cveB.setCvssV31Score(new BigDecimal("6.0"));
+        Cve cveC = buildCve("CVE-C");
+        cveC.setCvssV31Score(new BigDecimal("7.0"));
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(cveA, cveB, cveC)));
+
+        Map<String, Enrichment> enrichMap = new HashMap<>();
+        enrichMap.put("CVE-A", new Enrichment(Boolean.FALSE, null, new BigDecimal("3.10")));
+        enrichMap.put("CVE-B", new Enrichment(Boolean.FALSE, null, new BigDecimal("9.20")));
+        enrichMap.put("CVE-C", new Enrichment(Boolean.FALSE, null, new BigDecimal("7.40")));
+        when(enrichment.enrich(anyCollection(), any(Criticality.class))).thenReturn(enrichMap);
+
+        mockMvc.perform(get("/api/cve/fleet").param("sort", "composite")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-B"))
+            .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
+            .andExpect(jsonPath("$.content[2].cveId").value("CVE-A"));
+    }
+
+    /**
+     * Test 4 — {@code ?sort=kev} places KEV-true rows before KEV-false rows.
+     * Tiebreak on {@code cveId} ASC ensures determinism per
+     * {@code comparatorFor}'s {@code thenComparing(Cve::getCveId)} clause.
+     */
+    @Test
+    void fleetSortByKevPlacesKevTrueRowsFirst() throws Exception {
+        Cve cveA = buildCve("CVE-A");
+        cveA.setCvssV31Score(new BigDecimal("5.0"));
+        Cve cveB = buildCve("CVE-B");
+        cveB.setCvssV31Score(new BigDecimal("6.0"));
+        Cve cveC = buildCve("CVE-C");
+        cveC.setCvssV31Score(new BigDecimal("7.0"));
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(cveA, cveB, cveC)));
+
+        Map<String, Enrichment> enrichMap = new HashMap<>();
+        enrichMap.put("CVE-A", new Enrichment(Boolean.TRUE, null, new BigDecimal("3.00")));
+        enrichMap.put("CVE-B", new Enrichment(Boolean.FALSE, null, new BigDecimal("6.00")));
+        enrichMap.put("CVE-C", new Enrichment(Boolean.TRUE, null, new BigDecimal("7.00")));
+        when(enrichment.enrich(anyCollection(), any(Criticality.class))).thenReturn(enrichMap);
+
+        mockMvc.perform(get("/api/cve/fleet").param("sort", "kev")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            // First two are kev=true (CVE-A, CVE-C — sorted by cveId ASC tiebreak)
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-A"))
+            .andExpect(jsonPath("$.content[0].kev").value(true))
+            .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
+            .andExpect(jsonPath("$.content[1].kev").value(true))
+            // Third is the kev=false row
+            .andExpect(jsonPath("$.content[2].cveId").value("CVE-B"))
+            .andExpect(jsonPath("$.content[2].kev").value(false));
+    }
+
+    /**
+     * Test 5 — backward-compat guard (analysis-v38 Decision 5). With NO
+     * {@code sort} param, the default branch must preserve the existing DB-side
+     * {@code cvssV31Score DESC, cveId ASC} ordering — composite-DESC is opt-in,
+     * not a wire-default change.
+     */
+    @Test
+    void fleetDefaultSortPreservesCvssV31DescBehaviour() throws Exception {
+        Cve cveA = buildCve("CVE-A");
+        cveA.setCvssV31Score(new BigDecimal("9.0"));
+        Cve cveB = buildCve("CVE-B");
+        cveB.setCvssV31Score(new BigDecimal("5.0"));
+        Cve cveC = buildCve("CVE-C");
+        cveC.setCvssV31Score(new BigDecimal("7.0"));
+        // Repo returns rows in CVSS DESC, cveId ASC order (the JPA contract for this finder
+        // when invoked with the default sort spec).
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(cveA, cveC, cveB)));
+
+        Map<String, Enrichment> enrichMap = new HashMap<>();
+        // Deliberately scramble composite values to prove the default branch does NOT re-sort.
+        enrichMap.put("CVE-A", new Enrichment(Boolean.FALSE, null, new BigDecimal("1.00")));
+        enrichMap.put("CVE-B", new Enrichment(Boolean.FALSE, null, new BigDecimal("9.99")));
+        enrichMap.put("CVE-C", new Enrichment(Boolean.FALSE, null, new BigDecimal("5.00")));
+        when(enrichment.enrich(anyCollection(), any(Criticality.class))).thenReturn(enrichMap);
+
+        mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            // Order preserved from repo (CVSS DESC: 9.0, 7.0, 5.0) — NOT re-sorted by composite.
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-A"))
+            .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
+            .andExpect(jsonPath("$.content[2].cveId").value("CVE-B"));
     }
 }
