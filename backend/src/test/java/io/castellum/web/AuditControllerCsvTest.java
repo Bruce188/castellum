@@ -19,6 +19,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,6 +27,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -71,14 +73,18 @@ class AuditControllerCsvTest {
         when(repository.findAll(any(Specification.class), any(Sort.class)))
             .thenReturn(List.of(row1, row2, rowComma));
 
-        var result = mvc.perform(get("/api/audit/csv").accept("text/csv"))
-            .andExpect(status().isOk())
+        MvcResult started = mvc.perform(get("/api/audit/csv").accept("text/csv"))
+            .andExpect(request().asyncStarted())
             .andReturn();
 
-        String contentType = result.getResponse().getContentType();
+        String contentType = started.getResponse().getContentType();
         assertThat(contentType).startsWith("text/csv");
-        String disposition = result.getResponse().getHeader("Content-Disposition");
+        String disposition = started.getResponse().getHeader("Content-Disposition");
         assertThat(disposition).isEqualTo("attachment; filename=\"audit-log.csv\"");
+
+        MvcResult result = mvc.perform(asyncDispatch(started))
+            .andExpect(status().isOk())
+            .andReturn();
 
         String body = result.getResponse().getContentAsString();
         assertThat(body).startsWith("id,occurredAt,actor,action,resourceType,resourceId,payload\n");
@@ -105,7 +111,11 @@ class AuditControllerCsvTest {
         when(repository.findAll(any(Specification.class), any(Sort.class)))
             .thenReturn(List.of());
 
-        var result = mvc.perform(get("/api/audit/csv").accept("text/csv"))
+        MvcResult started = mvc.perform(get("/api/audit/csv").accept("text/csv"))
+            .andExpect(request().asyncStarted())
+            .andReturn();
+
+        MvcResult result = mvc.perform(asyncDispatch(started))
             .andExpect(status().isOk())
             .andReturn();
 
