@@ -1,0 +1,46 @@
+# TAXII 2.1 server for castellum smoke-testing.
+#
+# About medallion:
+#   medallion is the OASIS reference TAXII 2.1 server implementation, written
+#   in Python on top of Flask. The canonical Docker Hub image
+#   (oasis-open/medallion) does NOT exist — OASIS only publishes the Python
+#   source on GitHub and PyPI. This compose file uses sbirtane/medallion-taxii-server,
+#   a community-packaged image that bundles the same OASIS python package
+#   inside a python:3.9-slim base. See:
+#     - https://github.com/oasis-open/cti-taxii-server (upstream source)
+#     - https://hub.docker.com/r/sbirtane/medallion-taxii-server (community image)
+#
+# Why this stack:
+#   We need a real TAXII 2.1 endpoint to exercise castellum's
+#   POST /api/threat-intel/push/taxii. Unit tests mock the HTTP layer with
+#   MockRestServiceServer; this stack catches end-to-end issues those mocks
+#   cannot — wire format drift, header normalization, status-code parsing.
+#
+# Seeded data:
+#   The in-memory backend boots with one trust group (/trustgroup1/) and one
+#   writable collection. The collection ID is fixed for reproducibility:
+#     91a7b528-80eb-42ed-a74d-c6fbd5a26116
+#   Export it as TAXII_COLLECTION_ID before the smoke push.
+#
+# Authentication:
+#   HTTP Basic with admin:Password0 (declared in medallion-config.json).
+#   Castellum reads TAXII_USERNAME / TAXII_PASSWORD env vars; set those to
+#   match before starting the backend.
+#
+# Persistence: none. `docker compose down -v` resets the stack between runs.
+
+services:
+  medallion:
+    image: sbirtane/medallion-taxii-server:latest
+    container_name: castellum-medallion
+    ports:
+      - "5000:80"
+    volumes:
+      - ./medallion-config.json:/app/medallion_config.json:ro
+      - ./medallion-seed.json:/etc/medallion/medallion-seed.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request,base64; req=urllib.request.Request(\"http://localhost:80/taxii2/\", headers={\"Authorization\":\"Basic \"+base64.b64encode(b\"admin:Password0\").decode(),\"Accept\":\"application/taxii+json;version=2.1\"}); urllib.request.urlopen(req, timeout=2).status'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12

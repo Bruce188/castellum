@@ -1,0 +1,37 @@
+{
+  "/discovery": {
+    "title": "Castellum Smoke-Test Medallion Server",
+    "description": "Local TAXII 2.1 server for castellum smoke-testing the threat-intel push paths.",
+    "contact": "smoke-test",
+    "default": "http://localhost:5000/trustgroup1/",
+    "api_roots": [
+      "http://localhost:5000/trustgroup1/"
+    ]
+  },
+  "trustgroup1": {
+    "information": {
+      "title": "Castellum Smoke API Root",
+      "description": "Default API root seeded for smoke-testing castellum.",
+      "versions": [
+        "application/taxii+json;version=2.1"
+      ],
+      "max_content_length": 524288000
+    },
+    "collections": [
+      {
+        "id": "91a7b528-80eb-42ed-a74d-c6fbd5a26116",
+        "title": "Castellum default collection",
+        "description": "Stateless collection accepting STIX 2.1 bundles posted by castellum.",
+        "can_read": true,
+        "can_write": true,
+        "media_types": [
+          "application/stix+json;version=2.1"
+        ],
+        "objects": [],
+        "manifest": [],
+        "responses": []
+      }
+    ],
+    "status": []
+  }
+}
