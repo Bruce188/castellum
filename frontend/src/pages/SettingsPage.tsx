@@ -1,5 +1,6 @@
 import { ChangePasswordForm } from '../components/ChangePasswordForm';
 import { DiscoveryControlPanel } from '../components/DiscoveryControlPanel';
+import { FeedSyncPanel } from '../components/FeedSyncPanel';
 import { MispConfigPanel } from '../components/MispConfigPanel';
 import { OtProbePanel } from '../components/OtProbePanel';
 import { ScanPolicyPanel } from '../components/ScanPolicyPanel';
@@ -31,6 +32,7 @@ export function SettingsPage() {
       <DiscoveryControlPanel isAdmin={isAdmin} />
       <OtProbePanel isAdmin={isAdmin} />
       <ScanPolicyPanel isAdmin={isAdmin} />
+      <FeedSyncPanel isAdmin={isAdmin} />
       <h2 className="text-lg font-semibold text-gray-800 mt-8 mb-2">Integrations</h2>
       <StixExportPanel isAdmin={isAdmin} />
       <TaxiiConfigPanel isAdmin={isAdmin} />
