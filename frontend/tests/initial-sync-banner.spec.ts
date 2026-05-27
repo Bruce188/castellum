@@ -23,19 +23,23 @@ async function signIn(page: Page, who: { username: string; password: string }) {
 test.describe('EmptyCorpusBanner — banner → click → poll → dismiss', () => {
   test('admin sees banner and sync button; clicking switches to Syncing…; banner dismisses after poll', async ({ page }) => {
     // Stub the backend feeds/status to return all-zero on first call, then non-zero on second.
-    let feedsCallCount = 0;
+    // Feeds stay empty until the admin actually triggers a sync; only then do
+    // counts report non-zero so the banner dismisses on the next poll. Gating on
+    // a real trigger (not a call counter) is robust to React StrictMode, which
+    // double-invokes the banner's mount effect and fires feeds/status twice
+    // back-to-back before any assertion runs — a counter would flip on call #2.
+    let syncTriggered = false;
     await page.route('**/api/risk/feeds/status', route => {
-      feedsCallCount += 1;
-      const body = feedsCallCount === 1
+      const body = syncTriggered
         ? JSON.stringify({
-            epss: { scoreDate: null, rowCount: 0 },
-            kev: { lastIngestedAt: null, entryCount: 0 },
-            nvd: { lastModified: null, rowCount: 0 },
-          })
-        : JSON.stringify({
             epss: { scoreDate: '2025-01-01', rowCount: 1000 },
             kev: { lastIngestedAt: '2025-01-01T00:00:00Z', entryCount: 100 },
             nvd: { lastModified: '2025-01-01T00:00:00Z', rowCount: 200000 },
+          })
+        : JSON.stringify({
+            epss: { scoreDate: null, rowCount: 0 },
+            kev: { lastIngestedAt: null, entryCount: 0 },
+            nvd: { lastModified: null, rowCount: 0 },
           });
       route.fulfill({
         status: 200,
@@ -44,8 +48,9 @@ test.describe('EmptyCorpusBanner — banner → click → poll → dismiss', () 
       });
     });
 
-    // Stub the initial-sync endpoint
+    // Stub the initial-sync endpoint; flip feeds non-zero once the admin syncs.
     await page.route('**/api/admin/initial-sync', route => {
+      syncTriggered = true;
       route.fulfill({
         status: 202,
         contentType: 'application/json',
