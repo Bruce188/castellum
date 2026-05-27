@@ -47,15 +47,63 @@ const mocks = factoryMock.__mocks;
 
 import type { DiscoverySource } from '../api/types';
 
-function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySource?: DiscoverySource | null): Device {
+function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySource?: DiscoverySource | null, serviceCount = 0): Device {
   return {
     id, ipAddress: ip, hostname: `h${id}`, macAddress: null,
     firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z',
     criticality: 'MEDIUM', discoveryScope: scope,
     lastSeenIface: null,
     discoverySource: discoverySource ?? null,
+    serviceCount,
   };
 }
+
+describe('<TopologyView /> window seam', () => {
+  beforeEach(() => {
+    factoryMock.mockClear();
+    mocks.add.mockClear();
+    mocks.elements.mockClear();
+    mocks.layout.mockClear();
+    mocks.layoutRun.mockClear();
+  });
+
+  it('topologyView_exposesCytoscapeInstanceOnWindow', () => {
+    render(
+      <TopologyView
+        devices={[makeDevice(1, '10.0.0.1', 'HOME')]}
+        risksById={new Map()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+      />
+    );
+    expect((window as unknown as { __cytoscape?: unknown }).__cytoscape).toBeTruthy();
+  });
+});
+
+describe('<TopologyView /> layout options', () => {
+  beforeEach(() => {
+    factoryMock.mockClear();
+    mocks.add.mockClear();
+    mocks.elements.mockClear();
+    mocks.layout.mockClear();
+    mocks.layoutRun.mockClear();
+  });
+
+  it('topologyView_layout_usesRandomizeTrue', () => {
+    render(
+      <TopologyView
+        devices={[makeDevice(1, '10.0.0.1', 'HOME'), makeDevice(2, '10.0.0.2', 'HOME')]}
+        risksById={new Map()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+      />
+    );
+    expect(mocks.layout).toHaveBeenCalled();
+    const opts = mocks.layout.mock.calls[mocks.layout.mock.calls.length - 1][0];
+    expect(opts.randomize).toBe(true);
+    expect(opts.name).toBe('cose-bilkent');
+  });
+});
 
 describe('<TopologyView /> scope rendering', () => {
   beforeEach(() => {
@@ -90,6 +138,19 @@ describe('<TopologyView /> scope rendering', () => {
     expect(byId('3')?.classes).toContain('scope-link-local');
     expect(byId('4')?.classes).toContain('scope-loopback');
     expect(byId('5')?.classes).toContain('scope-public');
+  });
+
+  it('topologyView_nodeData_includesServiceCount', () => {
+    const devices = [makeDevice(1, '192.168.68.50', 'HOME', 'ARP', 3), makeDevice(2, '10.0.0.1', 'HOME', null, 0)];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string; serviceCount?: number; label: string } }>;
+    const byId = (id: string) => addArgs.find(e => e.data.id === id);
+    expect(byId('1')?.data.serviceCount).toBe(3);
+    expect(byId('1')?.data.label).toContain('3 svc');
+    expect(byId('2')?.data.serviceCount).toBe(0);
   });
 
   it('topologyView_nodeData_includesDiscoverySource', () => {

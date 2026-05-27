@@ -19,7 +19,7 @@ export interface GatewayEdge {
     id: string;
     source: string;
     target: string;
-    kind: 'gateway' | 'docker-bridge';
+    kind: 'gateway' | 'docker-bridge' | 'isolated';
     gatewayIp?: string;
   };
 }
@@ -102,16 +102,23 @@ function findDockerHost(devices: Device[]): Device | null {
  *   <li>For each group with {@code >= 2} devices, pick a gateway and emit
  *       one edge per non-gateway peer → gateway with
  *       {@code kind: 'gateway'}.</li>
+ *   <li>Singleton groups that are NOT rescued by the docker-bridge path emit
+ *       a self-anchored {@code kind: 'isolated'} edge (source === target ===
+ *       device id) so lone nodes (e.g. APIPA/LINK_LOCAL) carry an explicit
+ *       unrouted affordance rather than floating with no context.</li>
  *   <li>If a docker host can be identified AND any DOCKER_BRIDGE device exists,
  *       emit one synthetic edge per DOCKER_BRIDGE peer from docker host →
  *       DOCKER_BRIDGE device with {@code kind: 'docker-bridge'}.</li>
- *   <li>Singleton groups produce no edges.</li>
  * </ol>
  */
 export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
   if (devices.length === 0) return [];
 
   const edges: GatewayEdge[] = [];
+
+  // Compute docker host BEFORE the groups loop so the singleton branch can
+  // check whether a DOCKER_BRIDGE device will be rescued by a db- edge.
+  const dockerHost = findDockerHost(devices);
 
   // Step 1+2: gateway edges per /24.
   const groups = new Map<string, Device[]>();
@@ -123,7 +130,24 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
     groups.set(key, list);
   }
   for (const group of groups.values()) {
-    if (group.length < 2) continue;
+    if (group.length < 2) {
+      // Singleton /24 group: emit an isolated self-anchor unless the device is
+      // a DOCKER_BRIDGE device that will be rescued by the docker-bridge path
+      // (i.e. a docker host exists and will emit a db- edge for it).
+      const lone = group[0];
+      const rescuedByDockerBridge = lone.discoveryScope === 'DOCKER_BRIDGE' && dockerHost !== null;
+      if (!rescuedByDockerBridge) {
+        edges.push({
+          data: {
+            id: `iso-${lone.id}`,
+            source: String(lone.id),
+            target: String(lone.id),
+            kind: 'isolated',
+          },
+        });
+      }
+      continue;
+    }
     const gateway = pickGateway(group);
     for (const peer of group) {
       if (peer.id === gateway.id) continue;
@@ -140,7 +164,6 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
   }
 
   // Step 3: docker-bridge synthetic edges.
-  const dockerHost = findDockerHost(devices);
   if (dockerHost) {
     for (const d of devices) {
       if (d.discoveryScope !== 'DOCKER_BRIDGE') continue;
