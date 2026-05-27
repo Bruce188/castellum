@@ -58,4 +58,19 @@ class EdgeWeightsTest {
         // composite=0.0 → weight = 11.0 - 0.0 = 11.0
         assertThat(EdgeWeights.exploitableVulnWeight(score("0.0"))).isCloseTo(11.0, offset(1e-9));
     }
+
+    @Test
+    void gatewayPivotWeightIsConstant3() {
+        assertThat(EdgeWeights.gatewayPivotWeight()).isEqualTo(3.0);
+    }
+
+    @Test
+    void gatewayPivotRiskIsConstant4() {
+        assertThat(EdgeWeights.gatewayPivotRisk()).isEqualTo(4.0);
+    }
+
+    @Test
+    void gatewayPivotWeightIsHeavierThanSameSubnet() {
+        assertThat(EdgeWeights.gatewayPivotWeight()).isGreaterThan(EdgeWeights.sameSubnetWeight());
+    }
 }

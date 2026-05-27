@@ -2,6 +2,7 @@ package io.castellum.graph;
 
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
+import io.castellum.discovery.DiscoveryScope;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -46,6 +47,13 @@ import java.util.Map;
  * <p>Subnet bucketing widens to IPv6 in feature 5: IPv4 /24 and IPv6 /64 share the same
  * {@code Map<String, List<Device>>} via the {@code v4:}/{@code v6:} prefix on the bucket key
  * returned by {@link #extractSubnetKey(String)}.
+ *
+ * <p>A third, additive gateway-bridge pass runs after the EXPLOITABLE_VULN pass. It detects a
+ * single HOME-scope pivot node (matched by hostname {@code "host.docker.internal"} or by the
+ * configured {@link GraphProperties#getDockerHostIp()}) and emits bidirectional
+ * {@link EdgeType#GATEWAY_PIVOT} edges between the pivot and every DOCKER_BRIDGE device.
+ * LINK_LOCAL and LOOPBACK scopes are explicitly excluded. When no pivot is detected,
+ * DOCKER_BRIDGE devices remain isolated.
  */
 @Component
 public class GraphBuilder {
@@ -166,6 +174,43 @@ public class GraphBuilder {
         }
 
         // WEAK_CRED_PATH: typed-but-empty seam — no signal source in v1; see analysis-v5 § 3.
+
+        // GATEWAY_PIVOT pass — bridges HOME and DOCKER_BRIDGE scopes through a single pivot node.
+        // Pivot detection: a HOME-scope device whose hostname is "host.docker.internal" or whose
+        // IP matches the configured dockerHostIp. If multiple qualify, pick by lowest device id.
+        // LINK_LOCAL and LOOPBACK scopes are never bridged by this pass.
+        Device pivot = devices.stream()
+            .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
+            .filter(d -> "host.docker.internal".equals(d.getHostname())
+                || properties.getDockerHostIp().equals(d.getIpAddress()))
+            .min(Comparator.comparingLong(Device::getId))
+            .orElse(null);
+
+        if (pivot != null) {
+            List<Device> dockerMembers = devices.stream()
+                .filter(d -> d.getDiscoveryScope() == DiscoveryScope.DOCKER_BRIDGE)
+                .toList();
+            if (dockerMembers.size() > properties.getSubnetCap()) {
+                log.warn("docker-bridge set has {} members, exceeds subnet-cap={}; skipping GATEWAY_PIVOT edges",
+                    dockerMembers.size(), properties.getSubnetCap());
+            } else {
+                DeviceVertex vPivot = vertexById.get(pivot.getId());
+                String techniqueId = AttackTechniqueMapper.forEdgeType(EdgeType.GATEWAY_PIVOT).id();
+                for (Device member : dockerMembers) {
+                    DeviceVertex vMember = vertexById.get(member.getId());
+                    AttackEdge fwd = new AttackEdge(EdgeType.GATEWAY_PIVOT,
+                        EdgeWeights.gatewayPivotRisk(), null, techniqueId);
+                    if (graph.addEdge(vPivot, vMember, fwd)) {
+                        graph.setEdgeWeight(fwd, EdgeWeights.gatewayPivotWeight());
+                    }
+                    AttackEdge rev = new AttackEdge(EdgeType.GATEWAY_PIVOT,
+                        EdgeWeights.gatewayPivotRisk(), null, techniqueId);
+                    if (graph.addEdge(vMember, vPivot, rev)) {
+                        graph.setEdgeWeight(rev, EdgeWeights.gatewayPivotWeight());
+                    }
+                }
+            }
+        }
 
         return new BuiltGraph(graph, Map.copyOf(vertexById));
     }

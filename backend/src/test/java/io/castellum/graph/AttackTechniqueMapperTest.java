@@ -58,4 +58,16 @@ class AttackTechniqueMapperTest {
         AttackTechnique t = AttackTechniqueMapper.forEdgeType(EdgeType.EXPLOITABLE_VULN, null);
         assertThat(t.id()).isEqualTo("T1190");
     }
+
+    @Test
+    void gatewayPivotMapsToT1090Proxy() {
+        AttackTechnique t = AttackTechniqueMapper.forEdgeType(EdgeType.GATEWAY_PIVOT);
+        assertThat(t.id()).isEqualTo("T1090");
+        assertThat(t.name()).isEqualTo("Proxy");
+    }
+
+    @Test
+    void nameForResolvesT1090() {
+        assertThat(AttackTechniqueMapper.nameFor("T1090", EdgeType.GATEWAY_PIVOT)).isEqualTo("Proxy");
+    }
 }

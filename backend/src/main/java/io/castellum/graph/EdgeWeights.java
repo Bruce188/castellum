@@ -40,4 +40,14 @@ public final class EdgeWeights {
     public static double exploitableVulnRisk(RiskScore score) {
         return score.score().doubleValue();
     }
+
+    /**
+     * Gateway-pivot edge Dijkstra cost. Strictly positive; heavier than SAME_SUBNET (1.0) and
+     * WEAK_CRED_PATH (2.0) so within-subnet moves are preferred and a cross-scope pivot is only
+     * taken when no cheaper path exists. Sits within the 1–11 EXPLOITABLE_VULN band.
+     */
+    public static double gatewayPivotWeight() { return 3.0; }
+
+    /** Gateway-pivot edge risk contribution (defender-pain dual of weight). */
+    public static double gatewayPivotRisk() { return 4.0; }
 }
