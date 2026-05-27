@@ -316,12 +316,12 @@ export function CvesPage() {
                 )}
               </td>
               <td className="px-2 py-1 border tabular-nums select-text">
-                {cve.epssScore !== null
+                {cve.epssScore != null
                   ? `${(Number(cve.epssScore) * 100).toFixed(2)}%`
                   : <span className="text-gray-400">—</span>}
               </td>
               <td className={`px-2 py-1 border tabular-nums select-text ${severityClassFromString(cve.compositeScore)}`}>
-                {cve.compositeScore !== null
+                {cve.compositeScore != null
                   ? Number(cve.compositeScore).toFixed(2)
                   : <span className="text-gray-400">—</span>}
               </td>
