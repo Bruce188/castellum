@@ -10,6 +10,7 @@ import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
+import io.castellum.risk.RiskCacheEvictor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -55,6 +56,7 @@ public class ScanExecutionService {
     private final NetworkServiceRepository networkServiceRepository;
     private final AuditService auditService;
     private final ScanRetryService scanRetryService;
+    private final RiskCacheEvictor riskCacheEvictor;
 
     public ScanExecutionService(
             NmapRunner nmapRunner,
@@ -63,7 +65,8 @@ public class ScanExecutionService {
             DeviceUpsertService deviceUpsertService,
             NetworkServiceRepository networkServiceRepository,
             AuditService auditService,
-            ScanRetryService scanRetryService) {
+            ScanRetryService scanRetryService,
+            RiskCacheEvictor riskCacheEvictor) {
         this.nmapRunner = nmapRunner;
         this.scanRepository = scanRepository;
         this.nmapOutputParser = nmapOutputParser;
@@ -71,6 +74,7 @@ public class ScanExecutionService {
         this.networkServiceRepository = networkServiceRepository;
         this.auditService = auditService;
         this.scanRetryService = scanRetryService;
+        this.riskCacheEvictor = riskCacheEvictor;
     }
 
     /**
@@ -168,6 +172,10 @@ public class ScanExecutionService {
             // 9. SCAN_COMPLETE audit
             auditService.recordEvent("system", "SCAN_COMPLETE", "scan",
                 String.valueOf(scanId), scan);
+
+            // 10. Invalidate risk/CVE aggregate caches — newly discovered services/CVEs can
+            // change per-device scores, the top-N ranking, and the fleet CVE listing.
+            riskCacheEvictor.onScanComplete();
 
         } catch (Exception e) {
             // Restore interrupt flag for InterruptedException

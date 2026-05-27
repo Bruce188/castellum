@@ -9,8 +9,16 @@ spring:
     password:
     driver-class-name: org.h2.Driver
   jpa:
+    # 'create' (not 'create-drop') is deliberate: every Spring context attaches to the same
+    # shared in-memory database (jdbc:h2:mem:test). With 'create-drop' the FIRST @SpringBootTest
+    # context to close drops every table, emptying the DB out from under any context still live
+    # (and under background @Scheduled beans such as ScanRetryService), which surfaces as flaky
+    # "Table ... not found (this database is empty)" errors whose victim shifts with test
+    # ordering. 'create' rebuilds the schema at startup but never drops on close, so concurrent
+    # contexts no longer wipe each other. @DataJpaTest slices roll back per test and are
+    # unaffected.
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: create
     database-platform: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false

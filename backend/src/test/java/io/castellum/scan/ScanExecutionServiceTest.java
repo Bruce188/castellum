@@ -37,6 +37,7 @@ class ScanExecutionServiceTest {
     @Mock NetworkServiceRepository networkServiceRepository;
     @Mock AuditService auditService;
     @Mock ScanRetryService scanRetryService;
+    @Mock io.castellum.risk.RiskCacheEvictor riskCacheEvictor;
 
     ScanExecutionService service;
 
@@ -45,7 +46,7 @@ class ScanExecutionServiceTest {
         service = new ScanExecutionService(
             nmapRunner, scanRepository, nmapOutputParser,
             deviceUpsertService, networkServiceRepository, auditService,
-            scanRetryService);
+            scanRetryService, riskCacheEvictor);
     }
 
     // -----------------------------------------------------------------------

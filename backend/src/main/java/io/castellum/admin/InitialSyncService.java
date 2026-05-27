@@ -10,6 +10,7 @@ import io.castellum.audit.AuditService;
 import io.castellum.cve.NvdSyncService;
 import io.castellum.risk.EpssIngestionService;
 import io.castellum.risk.KevIngestionService;
+import io.castellum.risk.RiskCacheEvictor;
 import io.castellum.web.dto.InitialSyncRequest;
 import io.castellum.web.dto.InitialSyncResponse;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ public class InitialSyncService {
     private final KevIngestionService kevIngestionService;
     private final AuditService auditService;
     private final AuditLogRepository auditLogRepository;
+    private final RiskCacheEvictor riskCacheEvictor;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AtomicBoolean inFlight = new AtomicBoolean(false);
@@ -69,13 +71,15 @@ public class InitialSyncService {
             EpssIngestionService epssIngestionService,
             KevIngestionService kevIngestionService,
             AuditService auditService,
-            AuditLogRepository auditLogRepository) {
+            AuditLogRepository auditLogRepository,
+            RiskCacheEvictor riskCacheEvictor) {
         this.executor = executor;
         this.nvdSyncService = nvdSyncService;
         this.epssIngestionService = epssIngestionService;
         this.kevIngestionService = kevIngestionService;
         this.auditService = auditService;
         this.auditLogRepository = auditLogRepository;
+        this.riskCacheEvictor = riskCacheEvictor;
     }
 
     /** Returns {@code true} if a sync job is currently executing. */
@@ -146,6 +150,12 @@ public class InitialSyncService {
             }
         } finally {
             inFlight.set(false);
+
+            // Feed corpus changed — invalidate every risk/CVE aggregate cache, including the
+            // feeds-status snapshot so EmptyCorpusBanner flips on the next poll. Runs even on
+            // partial-failure syncs: any feed that did write rows must be reflected.
+            riskCacheEvictor.onFeedSyncComplete();
+
             boolean ok = failedFeeds.isEmpty();
             String errMsg = ok ? null : String.join("; ", failureMessages);
 
