@@ -104,10 +104,11 @@ public class PassiveDiscoveryService {
         try {
             return runSweep(req, sweepId);
         } catch (DiscoveryUnavailableException due) {
-            recorder.finish(sweepId, "UNAVAILABLE", 0, 0, null);
+            recorder.finish(sweepId, "UNAVAILABLE", 0, 0, null, req.iface());
             throw due;
         } catch (RuntimeException e) {
-            recorder.finish(sweepId, "FAILED", 0, 0, null);
+            log.error("Passive sweep {} failed", sweepId, e);
+            recorder.finish(sweepId, "FAILED", 0, 0, null, req.iface());
             throw e;
         }
     }
@@ -218,15 +219,23 @@ public class PassiveDiscoveryService {
         // Upsert unique discoveries — single batch round-trip via upsertAll
         List<Long> deviceIds = new ArrayList<>();
         int totalDeduped = withMac.size() + withoutMac.size();
+        List<Discovery> batch = new ArrayList<>(withMac.size() + withoutMac.size());
+        batch.addAll(withMac.values());
+        batch.addAll(withoutMac.values());
         if (totalDeduped > 0) {
-            List<Discovery> batch = new ArrayList<>(withMac.size() + withoutMac.size());
-            batch.addAll(withMac.values());
-            batch.addAll(withoutMac.values());
             List<Device> persisted = upsertService.upsertAll(batch);
             for (Device d : persisted) {
                 deviceIds.add(d.getId());
             }
         }
+
+        // Derive observed iface from the deduped batch: first non-blank iface among collected
+        // neighbors (option a — records the interface the sweep actually observed on, truthful
+        // for both manual and scheduled paths; null when no neighbors carried an iface).
+        String observedIface = batch.stream()
+            .map(Discovery::iface)
+            .filter(s -> s != null && !s.isBlank())
+            .findFirst().orElse(null);
 
         // Emit audit event — sweepId now references the discovery_sweep row created at start.
         io.castellum.audit.AuditLog auditLog = auditService.recordEvent(
@@ -243,7 +252,7 @@ public class PassiveDiscoveryService {
             )
         );
         Long auditLogId = auditLog == null ? null : auditLog.getId();
-        recorder.finish(sweepId, "OK", totalDeduped, deviceIds.size(), auditLogId);
+        recorder.finish(sweepId, "OK", totalDeduped, deviceIds.size(), auditLogId, observedIface);
 
         return new PassiveDiscoveryResponse(totalDeduped, deviceIds, perSourceCount, sweepId);
     }

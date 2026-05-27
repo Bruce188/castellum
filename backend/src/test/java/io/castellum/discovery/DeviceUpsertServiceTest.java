@@ -9,6 +9,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -162,5 +163,32 @@ class DeviceUpsertServiceTest {
 
         var found = repo.findByIpAddress("10.0.7.3").orElseThrow();
         assertThat(found.getLastSeenIface()).isEqualTo("wlan0");
+    }
+
+    /**
+     * AC2 regression: a known IP with null MAC that is re-observed with a MAC via the
+     * batch entry point must UPDATE in place (MAC backfilled), not INSERT a second row
+     * and violate the {@code device_ip_unique} constraint.
+     *
+     * <p>On the pre-AC1 batch path this would throw a {@code DataIntegrityViolationException}
+     * because the MAC-bearing discovery's IP was never added to {@code ipSet}, so the existing
+     * row was missed and an INSERT was attempted. Post-AC1 the IP is always in {@code ipSet},
+     * the row is found via the {@code existingByIp} fallback, and the UPDATE branch fires.
+     */
+    @Test
+    void upsertAll_knownIpNullMac_reobservedWithMac_updatesInPlace_noConstraintCrash() {
+        // Pre-seed a known IP with null MAC (common after a ping-sweep with no ARP response)
+        Device seed = new Device(null, "10.0.9.1", null, null, T1, T1);
+        repo.save(seed);
+
+        // Re-observe the same IP WITH a MAC via the batch path
+        service.upsertAll(List.of(new Discovery("10.0.9.1", "aa:bb:cc:dd:ee:99", null, DiscoverySource.ARP, T2, "eth0")));
+
+        // Must be exactly one row — UPDATE, not INSERT
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.9.1").orElseThrow();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:99");  // backfilled
+        assertThat(found.getLastSeen()).isEqualTo(T2);
+        assertThat(found.getLastSeenIface()).isEqualTo("eth0");
     }
 }

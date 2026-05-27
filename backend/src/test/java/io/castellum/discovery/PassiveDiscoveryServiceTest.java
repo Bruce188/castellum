@@ -25,6 +25,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -217,5 +218,63 @@ class PassiveDiscoveryServiceTest {
         List<Discovery> captured = captor.getValue();
         assertThat(captured).hasSize(1);
         assertThat(captured.get(0).iface()).isEqualTo("eth0");
+    }
+
+    /**
+     * AC3 — success path: recorder.finish receives the real neighbor_count (not 0) and the
+     * observed iface derived from the collected neighbors' iface field.
+     */
+    @Test
+    void sweep_arpSuccess_recordsRealNeighborCountAndObservedIface() throws Exception {
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.0.1", "aa:00:00:00:00:01", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.0.2", "aa:00:00:00:00:02", "0x1", "0x2", "eth0", null),
+            new DiscoveredNeighbor("10.0.0.3", "aa:00:00:00:00:03", "0x1", "0x2", "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
+        service.sweep(req);
+
+        // finish must receive real neighbor_count=3 and observed iface="eth0"
+        verify(recorder).finish(eq(42L), eq("OK"), eq(3), eq(3), any(), eq("eth0"));
+    }
+
+    /**
+     * AC3 — scheduled path: even though scheduledSweep() builds the request with a null iface,
+     * the finish call must carry the observed iface derived from the ARP neighbors.
+     * Pure Mockito — no real scheduler is invoked, no host interface is touched.
+     */
+    @Test
+    void scheduledSweep_recordsObservedIfaceEvenWhenRequestIfaceNull() throws Exception {
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.8.1", "dd:00:00:00:00:01", "0x1", "0x2", "eth0", null)
+        ));
+
+        service.scheduledSweep();
+
+        // The request has iface=null, but the collected neighbor carries "eth0"
+        verify(recorder).finish(eq(42L), eq("OK"), eq(1), eq(1), any(), eq("eth0"));
+    }
+
+    /**
+     * AC4 — FAILED path: when upsertAll throws a RuntimeException, the sweep must be recorded
+     * as FAILED and the exception re-thrown. (The log.error with stack trace is not asserted
+     * here — AC4 only requires it be logged; assert the FAILED-record + rethrow contract.)
+     */
+    @Test
+    void sweep_runtimeFailure_recordsFailedAndRethrows() throws Exception {
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.1", "ee:00:00:00:00:01", "0x1", "0x2", "eth0", null)
+        ));
+        // upsertAll throws after successful neighbor collection → hits catch (RuntimeException)
+        when(upsertService.upsertAll(anyList())).thenThrow(new RuntimeException("DB constraint"));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
+
+        assertThatThrownBy(() -> service.sweep(req))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("DB constraint");
+
+        verify(recorder).finish(eq(42L), eq("FAILED"), eq(0), eq(0), isNull(), any());
     }
 }
