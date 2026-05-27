@@ -191,4 +191,63 @@ class DeviceUpsertServiceTest {
         assertThat(found.getLastSeen()).isEqualTo(T2);
         assertThat(found.getLastSeenIface()).isEqualTo("eth0");
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // AC2 — discoverySource persistence (single upsert + batch upsertAll)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** AC2: single upsert INSERT path persists the discovery source. */
+    @Test
+    void upsert_persistsSource_onInsert() {
+        Discovery d = new Discovery("10.0.10.1", null, null, DiscoverySource.NMAP_SCAN, T1, null);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("10.0.10.1").orElseThrow();
+        assertThat(found.getDiscoverySource()).isEqualTo(DiscoverySource.NMAP_SCAN);
+    }
+
+    /** AC2: single upsert UPDATE path overwrites prior discovery source (last-writer-wins). */
+    @Test
+    void upsert_overwritesSource_onUpdate() {
+        // Seed with ARP source
+        Discovery first = new Discovery("10.0.10.2", "aa:bb:cc:dd:ee:a2", null, DiscoverySource.ARP, T1, null);
+        service.upsert(first);
+
+        // Re-observe via NMAP_SCAN — source must be overwritten
+        Discovery second = new Discovery("10.0.10.2", null, null, DiscoverySource.NMAP_SCAN, T2, null);
+        service.upsert(second);
+
+        var found = repo.findByIpAddress("10.0.10.2").orElseThrow();
+        assertThat(found.getDiscoverySource()).isEqualTo(DiscoverySource.NMAP_SCAN);
+        assertThat(found.getLastSeen()).isEqualTo(T2);
+    }
+
+    /**
+     * AC2: batch upsertAll must set discoverySource on BOTH insert and update paths.
+     *
+     * <p>This test is the load-bearing guard for the upsertAll callsites. A missed
+     * insert callsite causes the null assertion on the seeded device to fail; a missed
+     * update callsite causes the NMAP_SCAN assertion to remain ARP.
+     */
+    @Test
+    void upsertAll_persistsSource_coversInsertAndUpdate() {
+        // Seed one existing device (will be updated via ARP)
+        Device seed = new Device(null, "10.0.11.1", null, "aa:bb:cc:dd:ee:b1", T1, T1);
+        repo.save(seed);
+
+        // Batch: ARP observation of existing device (UPDATE path) + new device (INSERT path)
+        List<Discovery> batch = List.of(
+            new Discovery("10.0.11.1", "aa:bb:cc:dd:ee:b1", null, DiscoverySource.ARP, T2, "eth0"),
+            new Discovery("10.0.11.2", null, null, DiscoverySource.NMAP_SCAN, T2, null)
+        );
+        service.upsertAll(batch);
+
+        // Existing device — UPDATE path — source must be set to ARP
+        var updated = repo.findByIpAddress("10.0.11.1").orElseThrow();
+        assertThat(updated.getDiscoverySource()).isEqualTo(DiscoverySource.ARP);
+
+        // New device — INSERT path — source must be NMAP_SCAN
+        var inserted = repo.findByIpAddress("10.0.11.2").orElseThrow();
+        assertThat(inserted.getDiscoverySource()).isEqualTo(DiscoverySource.NMAP_SCAN);
+    }
 }

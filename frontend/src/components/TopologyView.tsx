@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import cytoscape from 'cytoscape';
 // @ts-expect-error - cose-bilkent has no shipped types
 import coseBilkent from 'cytoscape-cose-bilkent';
-import type { Device, DeviceRiskDto, DiscoveryScope } from '../api/types';
+import type { Device, DeviceRiskDto, DiscoveryScope, DiscoverySource } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
@@ -129,19 +129,33 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       ? devices.filter(d => scopeVisibility[d.discoveryScope] ?? true)
       : devices;
 
+    // Source-class map — thin badge affordance mirroring SCOPE_CLASS pattern.
+    // Active sources (ARP, MDNS, PCAP) get no extra class (they are the common case).
+    // NMAP_SCAN and OT_PROBE carry a thin 'source-active-scan' marker so the topology
+    // legend or future CSS can distinguish passive vs active discovery.
+    const SOURCE_CLASS: Partial<Record<DiscoverySource, string>> = {
+      NMAP_SCAN: 'source-active-scan',
+      OT_PROBE: 'source-active-scan',
+    };
+
     const nodes = visibleDevices.map(d => {
       const risk = risksById.get(d.id);
       const score = risk ? Number(risk.score) : null;
       const tier = toRiskTier(score);
       const scopeClass = SCOPE_CLASS[d.discoveryScope];
+      const sourceClass = d.discoverySource ? (SOURCE_CLASS[d.discoverySource] ?? null) : null;
+      const extraClasses = [scopeClass, sourceClass].filter(Boolean).join(' ');
       return {
         data: {
           id: String(d.id),
           label: d.hostname ?? d.ipAddress,
           ip: d.ipAddress,
           riskTier: tier,
+          // discoverySource threaded into node data for tooltip/legend consumers.
+          // null when device predates V19 migration.
+          discoverySource: d.discoverySource,
         },
-        classes: scopeClass ? `risk-${tier} ${scopeClass}` : `risk-${tier}`,
+        classes: extraClasses ? `risk-${tier} ${extraClasses}` : `risk-${tier}`,
       };
     });
 
