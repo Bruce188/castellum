@@ -10,7 +10,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -44,6 +43,8 @@ public class ScanRecoveryService {
     private final ScanRepository scanRepository;
     private final ScanExecutionService scanExecutionService;
     private final AuditService auditService;
+    // clock is retained for potential future use (e.g. re-sampling on second recovery pass);
+    // processStart is captured once at construction — the clock field is intentionally kept.
     private final Clock clock;
     private final Instant processStart;
 
@@ -62,9 +63,22 @@ public class ScanRecoveryService {
      * Called by Spring on {@link ApplicationReadyEvent}. Finds all recoverable scans,
      * claims each via CAS, dispatches execution for successfully claimed rows, and
      * emits a single {@code SCAN_RECOVERY} audit record.
+     *
+     * <p>This method is intentionally <em>not</em> {@code @Transactional}. Each call to
+     * {@link ScanRepository#claimForRecovery} is annotated {@code @Transactional} on the
+     * repository interface so it self-commits in its own short transaction. Only after that
+     * CAS is durable on the DB is {@link ScanExecutionService#executeAsync} dispatched.
+     * This mirrors the commit-then-dispatch pattern used by
+     * {@link io.castellum.web.ScanController#submit} and
+     * {@link ScanRetryService#promoteDueRetries}, and closes the lost-update window that
+     * would exist if the async dispatch raced an outer transaction's commit.
+     *
+     * <p>Interleaving with the {@code @Scheduled} {@link ScanRetryService#pollDueRetries} is
+     * safe by construction: recovery operates on {@code PENDING ∪ stale-RUNNING} and retry
+     * operates on {@code FAILED} — disjoint status sets. The CAS guards each individual
+     * transition, so no scan is double-dispatched even if both sweep concurrently.
      */
     @EventListener(ApplicationReadyEvent.class)
-    @Transactional
     public void recoverInterruptedScans() {
         List<Scan> candidates = scanRepository.findRecoverable(processStart);
 
@@ -81,6 +95,8 @@ public class ScanRecoveryService {
                 staleCount++;
             }
 
+            // claimForRecovery is @Transactional on the repository — it self-commits before
+            // executeAsync fires, so the async thread reads a durable PENDING row.
             int claimed = scanRepository.claimForRecovery(scan.getId(), observed);
             if (claimed == 1) {
                 try {
