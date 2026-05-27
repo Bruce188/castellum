@@ -10,11 +10,24 @@ test.describe('CVE + KEV + EPSS + Composite', () => {
     });
 
     await test.step('operator sees key column headers', async () => {
-      await expect(page.getByText('CVE ID')).toBeVisible();
-      await expect(page.getByText('CVSS v3.1')).toBeVisible();
-      await expect(page.getByText('KEV')).toBeVisible();
-      await expect(page.getByText('EPSS')).toBeVisible();
-      await expect(page.getByText('Composite')).toBeVisible();
+      // Scope to <th> column headers. A bare getByText('KEV') also matches the
+      // "KEV only" filter toggle, which trips Playwright strict mode; the
+      // columnheader role resolves each header unambiguously.
+      await expect(
+        page.getByRole('columnheader', { name: 'CVE ID' }).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('columnheader', { name: 'CVSS v3.1' }).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('columnheader', { name: 'KEV' }).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('columnheader', { name: 'EPSS' }).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('columnheader', { name: 'Composite' }).first(),
+      ).toBeVisible();
     });
   });
 

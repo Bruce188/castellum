@@ -1,8 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
+import { CREDS, VIEWER_CREDS, BASE_URL } from './helpers';
 
-const APP = 'http://127.0.0.1:5173';
-const ADMIN = { username: 'admin', password: 'admin' };
-const VIEWER = { username: 'viewer', password: 'admin' };
+const APP = BASE_URL;
+const ADMIN = CREDS;
+const VIEWER = VIEWER_CREDS;
 
 async function signIn(page: Page, who: { username: string; password: string }) {
   await page.goto(APP);

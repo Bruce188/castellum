@@ -68,6 +68,14 @@ jobs:
           # Falls back to a real bcrypt hash of "admin12345" (cost 10) when the secret is absent
           # (CI-only default). This hash bcrypt-validates against the default E2E_ADMIN_PASSWORD below.
           CASTELLUM_ADMIN_PASSWORD_HASH: ${{ secrets.CASTELLUM_ADMIN_PASSWORD_HASH || '$2a$10$KSSVUuIFRMxdvD3DmY1KHOSHBtgsAsv8iY4BjiBdwfg85WUMgJ9o.' }}
+          # Viewer account drives the RBAC E2E specs (qa-sweep "viewer sign-in",
+          # initial-sync "viewer sees banner but no sync button"). The backend's
+          # BootstrapAdminInitializer skips the viewer when these are unset, which
+          # would 401 the viewer login. Reuses the same CI-only bcrypt hash as admin
+          # (it validates "admin12345"); the viewer password is identical in CI —
+          # a disposable test fixture, never a production credential.
+          CASTELLUM_VIEWER_USERNAME: viewer
+          CASTELLUM_VIEWER_PASSWORD_HASH: ${{ secrets.CASTELLUM_VIEWER_PASSWORD_HASH || '$2a$10$KSSVUuIFRMxdvD3DmY1KHOSHBtgsAsv8iY4BjiBdwfg85WUMgJ9o.' }}
           CASTELLUM_SECURITY_JWT_SECRET: e2e-test-jwt-secret-not-used-in-production-32ch
           # Playwright serves the frontend at 127.0.0.1:5173, so the browser's
           # Origin is http://127.0.0.1:5173. The backend CORS allowlist defaults
@@ -104,6 +112,8 @@ jobs:
           E2E_API_URL: http://localhost:8081
           E2E_ADMIN_USERNAME: admin
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD || 'admin12345' }}
+          E2E_VIEWER_USERNAME: viewer
+          E2E_VIEWER_PASSWORD: ${{ secrets.E2E_VIEWER_PASSWORD || 'admin12345' }}
         run: cd frontend && npx playwright test
 
       - name: Upload Playwright report
