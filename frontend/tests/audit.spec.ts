@@ -20,8 +20,10 @@ test.describe('Audit log + CSV export', () => {
       const download = await downloadPromise;
 
       const filePath = await download.path();
+      expect(filePath).not.toBeNull();
       expect(filePath).toBeTruthy();
-      expect(fs.statSync(filePath!).size).toBeGreaterThan(0);
+      const size = fs.statSync(filePath as string).size;
+      expect(size).toBeGreaterThan(0);
 
       expect(download.suggestedFilename()).toMatch(/\.csv$/i);
     });

@@ -42,6 +42,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+
       # CASTELLUM_ADMIN_PASSWORD_HASH must be a bcrypt hash of E2E_ADMIN_PASSWORD.
       # Store the hash as a repo secret CASTELLUM_ADMIN_PASSWORD_HASH.
       # Default E2E_ADMIN_PASSWORD is admin12345; generate a matching hash with:
@@ -55,8 +62,9 @@ jobs:
           DATABASE_PASSWORD: castellum
           CASTELLUM_ADMIN_USERNAME: admin
           # Bcrypt hash for the E2E admin password (set CASTELLUM_ADMIN_PASSWORD_HASH as a repo secret).
-          # Falls back to a pre-computed hash of "admin12345" when the secret is absent (CI-only default).
-          CASTELLUM_ADMIN_PASSWORD_HASH: ${{ secrets.CASTELLUM_ADMIN_PASSWORD_HASH || '$2a$10$7EqJtq98hPqEX7fNZaFWoO.PFkPqMHEAlFPKAEuT8AsTw5gRHOm3u' }}
+          # Falls back to a real bcrypt hash of "admin12345" (cost 10) when the secret is absent
+          # (CI-only default). This hash bcrypt-validates against the default E2E_ADMIN_PASSWORD below.
+          CASTELLUM_ADMIN_PASSWORD_HASH: ${{ secrets.CASTELLUM_ADMIN_PASSWORD_HASH || '$2a$10$KSSVUuIFRMxdvD3DmY1KHOSHBtgsAsv8iY4BjiBdwfg85WUMgJ9o.' }}
           CASTELLUM_SECURITY_JWT_SECRET: e2e-test-jwt-secret-not-used-in-production-32ch
         run: |
           cd backend

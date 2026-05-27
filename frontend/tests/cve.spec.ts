@@ -27,14 +27,8 @@ test.describe('CVE + KEV + EPSS + Composite', () => {
       const compositeHeader = page
         .getByRole('columnheader', { name: /Composite/i })
         .first();
-      const fallback = page.getByText('Composite', { exact: false }).first();
-
-      const headerCount = await compositeHeader.count();
-      if (headerCount > 0) {
-        await compositeHeader.click();
-      } else {
-        await fallback.click();
-      }
+      await expect(compositeHeader).toBeVisible();
+      await compositeHeader.click();
     });
 
     await test.step('operator sees sort=composite in the URL', async () => {
@@ -79,16 +73,15 @@ test.describe('CVE + KEV + EPSS + Composite', () => {
         .first();
       await expect(tableOrContainer).toBeVisible();
 
-      // Count data rows (tbody tr or role=row excluding the header row).
-      const rows = page.locator('tbody tr, [role="row"]:not([aria-rowindex="1"])');
+      // Count data rows. Scope to tbody tr only — most tables do not set
+      // aria-rowindex, so an aria-rowindex exclusion would let the header row
+      // count as data.
+      const rows = page.locator('tbody tr');
       const rowCount = await rows.count();
 
       if (rowCount === 0) {
-        // When the list is empty the page must show a non-empty-state message.
-        // Accept any visible element that carries "no" / "empty" / "0 CVEs" semantics.
-        const emptyIndicator = page.locator(
-          '[data-testid*="empty"], [class*="empty"], :text("No CVEs"), :text("No results"), :text("No data")',
-        );
+        // When the list is empty the page must show an empty-state message.
+        const emptyIndicator = page.getByText(/no (cves|results|data)/i);
         await expect(emptyIndicator.first()).toBeVisible();
       }
       // If rows are present the table renders correctly; assertion above covers it.

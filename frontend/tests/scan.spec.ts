@@ -34,9 +34,15 @@ test.describe('Scan trigger + detail', () => {
       try {
         token = await apiLogin(page.request);
         scanId = await triggerScan(page.request, token);
-      } catch {
-        test.skip(true, 'backend unavailable — cannot seed scan');
-        return;
+      } catch (err) {
+        // Only skip when the backend is unreachable (connection-level failure).
+        // A genuine 4xx/5xx from a live backend must FAIL the test, not be
+        // masked — apiLogin/triggerScan embed the status text in the message.
+        if (/ECONNREFUSED|fetch failed|connect|ENOTFOUND/i.test(String(err))) {
+          test.skip(true, 'backend unavailable — cannot seed scan');
+          return;
+        }
+        throw err;
       }
     });
 

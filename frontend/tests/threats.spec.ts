@@ -55,13 +55,25 @@ test.describe('Threat intel + linked CVEs', () => {
 
     await test.step('operator expands each row looking for a no-CVEs device', async () => {
       const count = await rows.count();
-      for (let i = 0; i < count; i++) {
-        await rows.nth(i).click();
-        const panel = page.locator(sel.relatedCvesPanelPrefix).nth(i);
-        const appeared = await panel.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+      // Cap the probe — a smoke test should not click through an unbounded list.
+      const limit = Math.min(count, 8);
+      for (let i = 0; i < limit; i++) {
+        const row = rows.nth(i);
+        await row.click();
+
+        // Target the panel by the clicked row's own deviceId rather than DOM
+        // order — panel render order need not match row click order.
+        const rowTestId = await row.getAttribute('data-testid');
+        const deviceId = rowTestId?.replace('threats-row-', '');
+        if (!deviceId) {
+          await row.click().catch(() => undefined);
+          continue;
+        }
+        const panel = page.locator(`[data-testid="related-cves-panel-${deviceId}"]`);
+        const appeared = await panel.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false);
         if (!appeared) {
           // Panel did not render for this row — collapse and try next.
-          await rows.nth(i).click().catch(() => undefined);
+          await row.click().catch(() => undefined);
           continue;
         }
         const emptyState = panel.locator(sel.relatedCvesEmpty);
@@ -71,7 +83,7 @@ test.describe('Threat intel + linked CVEs', () => {
           break;
         }
         // Collapse before moving to the next row so the UI stays predictable.
-        await rows.nth(i).click().catch(() => undefined);
+        await row.click().catch(() => undefined);
       }
     });
 
