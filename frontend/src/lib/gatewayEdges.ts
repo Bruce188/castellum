@@ -2,12 +2,14 @@ import type { Device } from '../api/types';
 import { ipv4Slash24 } from './subnetEdges';
 
 /**
- * Edge produced by {@link buildGatewayEdges}. Two structurally identical kinds
+ * Edge produced by {@link buildGatewayEdges}. Structurally identical kinds
  * coexist so Cytoscape can style them via {@code edge[kind = ...]} selectors:
  *
  * <ul>
  *   <li>{@code gateway} — peer → gateway-of-/24 (solid stroke).</li>
  *   <li>{@code docker-bridge} — docker-host → DOCKER_BRIDGE device (dashed).</li>
+ *   <li>{@code isolated} — self-anchored marker for a lone link-local/APIPA
+ *       node so it is not silently dropped (source === target === id).</li>
  * </ul>
  *
  * {@code gatewayIp} is informational metadata for the {@code gateway} kind; it

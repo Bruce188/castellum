@@ -113,12 +113,18 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
 
     cyRef.current = cy;
     // Expose the cytoscape instance for Playwright e2e assertions (position
-    // data is only accessible through the cy API, not the DOM).
-    (window as unknown as { __cytoscape?: cytoscape.Core }).__cytoscape = cy;
+    // data is only accessible through the cy API, not the DOM). Gated to
+    // non-production so the debug handle is tree-shaken out of shipped bundles;
+    // the e2e dev server (vite dev) still sets it.
+    if (import.meta.env.MODE !== 'production') {
+      (window as unknown as { __cytoscape?: cytoscape.Core }).__cytoscape = cy;
+    }
     return () => {
       cy.destroy();
       cyRef.current = null;
-      delete (window as unknown as { __cytoscape?: cytoscape.Core }).__cytoscape;
+      if (import.meta.env.MODE !== 'production') {
+        delete (window as unknown as { __cytoscape?: cytoscape.Core }).__cytoscape;
+      }
     };
   }, []);
 
@@ -155,7 +161,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       return {
         data: {
           id: String(d.id),
-          label: `${baseName} · ${d.serviceCount} svc`,
+          label: d.serviceCount > 0 ? `${baseName} · ${d.serviceCount} svc` : baseName,
           ip: d.ipAddress,
           riskTier: tier,
           // discoverySource threaded into node data for tooltip/legend consumers.
