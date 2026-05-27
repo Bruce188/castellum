@@ -6,6 +6,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import org.springframework.beans.factory.annotation.Autowired;
+
 import java.net.Inet4Address;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
@@ -49,7 +51,10 @@ public class ActiveNetworkDetector {
 
     /**
      * Production constructor — Spring-managed, uses real NetworkInterface.
+     * {@code @Autowired} is explicit because a second test-only constructor exists;
+     * without it Spring 6 cannot resolve the primary constructor.
      */
+    @Autowired
     public ActiveNetworkDetector(
             @Value("${castellum.discovery.route.proc-path:/proc/net/route}") String routePath) {
         this.routePath = routePath;
