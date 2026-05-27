@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:bundle": "vite build && vitest run --testNamePattern=bundle"
+    "test:bundle": "vite build && vitest run --testNamePattern=bundle",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.4",
