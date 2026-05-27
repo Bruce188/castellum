@@ -1,0 +1,206 @@
+import { StrictMode } from 'react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { RelatedCvesPanel } from '../components/RelatedCvesPanel';
+import { api } from '../api/client';
+
+vi.mock('../api/client', () => ({
+  api: {
+    listFleetCves: vi.fn(),
+    cveDetail: vi.fn(),
+  },
+}));
+
+const makeSummary = (cveId: string, cvss: string, kev: boolean) => ({
+  cveId,
+  published: '2024-01-01T00:00:00Z',
+  lastModified: '2024-01-02T00:00:00Z',
+  vulnStatus: 'Analyzed',
+  description: `desc-${cveId}`,
+  cvssV31Score: cvss,
+  cvssV31Vector: 'CVSS:3.1/AV:N/AC:L',
+  cvssV30Score: null,
+  cvssV30Vector: null,
+  cvssV2Score: null,
+  cvssV2Vector: null,
+  fetchedAt: null,
+  kev,
+  epssScore: '0.1',
+  compositeScore: cvss,
+});
+
+const makePage = (content: ReturnType<typeof makeSummary>[]) => ({
+  content,
+  totalElements: content.length,
+  totalPages: 1,
+  number: 0,
+  size: 50,
+});
+
+const makeDetail = (cveId: string, description: string) => ({
+  cveId,
+  published: '2024-01-01T00:00:00Z',
+  lastModified: '2024-01-02T00:00:00Z',
+  vulnStatus: 'Analyzed',
+  description,
+  cvssV31Score: '8.0',
+  cvssV31Vector: 'CVSS:3.1/AV:N/AC:L',
+  cvssV30Score: null,
+  cvssV30Vector: null,
+  cvssV2Score: null,
+  cvssV2Vector: null,
+  fetchedAt: null,
+  rawJson: null,
+  kev: false,
+  epssScore: '0.1',
+  compositeScore: '8.0',
+});
+
+describe('<RelatedCvesPanel />', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders empty-state copy when api returns zero content', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    render(<RelatedCvesPanel deviceId={42} hostname="host-42" ipAddress="10.0.0.42" />);
+    const empty = await screen.findByTestId('related-cves-empty');
+    expect(empty).toHaveTextContent('No linked CVEs for this threat.');
+  });
+
+  it('renders one row per matched cve when api returns content', async () => {
+    const deviceId = 7;
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([
+        makeSummary('CVE-2024-0001', '8.5', false),
+        makeSummary('CVE-2024-0002', '5.0', false),
+        makeSummary('CVE-2024-0003', '3.0', false),
+      ]),
+    );
+    render(<RelatedCvesPanel deviceId={deviceId} hostname="host-1" ipAddress="10.0.0.1" />);
+    const firstRow = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+    expect(firstRow).toHaveTextContent('CVE-2024-0001');
+    const secondRow = screen.getByTestId('related-cves-row-CVE-2024-0002');
+    expect(secondRow).toBeInTheDocument();
+    expect(secondRow).toHaveTextContent('CVE-2024-0002');
+    const thirdRow = screen.getByTestId('related-cves-row-CVE-2024-0003');
+    expect(thirdRow).toBeInTheDocument();
+    expect(thirdRow).toHaveTextContent('CVE-2024-0003');
+    // Locks the call-argument contract so a future refactor cannot silently
+    // shift the deviceId positional argument.
+    expect(api.listFleetCves).toHaveBeenCalledWith(0, 50, undefined, deviceId);
+  });
+
+  it('renders kev badge when cve kev is true', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([
+        makeSummary('CVE-KEV', '8.5', true),
+        makeSummary('CVE-NORMAL', '5.0', false),
+      ]),
+    );
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    await screen.findByTestId('related-cves-row-CVE-KEV');
+    expect(screen.getByTestId('related-cves-kev-badge-CVE-KEV')).toBeInTheDocument();
+    expect(screen.queryByTestId('related-cves-kev-badge-CVE-NORMAL')).toBeNull();
+  });
+
+  it('lazy-fetches cve detail on row click', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeDetail('CVE-2024-0001', 'Test description'),
+    );
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+    fireEvent.click(row);
+    await waitFor(() => expect(api.cveDetail).toHaveBeenCalledTimes(1));
+    expect(api.cveDetail).toHaveBeenCalledWith('CVE-2024-0001');
+    const detail = await screen.findByTestId('related-cves-detail-CVE-2024-0001');
+    expect(detail).toHaveTextContent('Test description');
+  });
+
+  it('keyboard enter and space on row both trigger detail lazy fetch', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeDetail('CVE-2024-0001', 'Test description'),
+    );
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+
+    // Enter expands and triggers cveDetail fetch (1)
+    fireEvent.keyDown(row, { key: 'Enter' });
+    await waitFor(() => expect(api.cveDetail).toHaveBeenCalledTimes(1));
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+
+    // Enter again collapses; cached 'ok' status means no refetch
+    fireEvent.keyDown(row, { key: 'Enter' });
+    await waitFor(() => expect(row).toHaveAttribute('aria-expanded', 'false'));
+
+    // Space re-expands; cache hit, still only one fetch overall
+    fireEvent.keyDown(row, { key: ' ' });
+    await waitFor(() => expect(row).toHaveAttribute('aria-expanded', 'true'));
+    expect(api.cveDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it('keyboard space on a cold row triggers detail lazy fetch', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeDetail('CVE-2024-0001', 'Test description'),
+    );
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+    // Space is the very first interaction — exercises the cold-cache path
+    // without an Enter warming it first.
+    fireEvent.keyDown(row, { key: ' ' });
+    await waitFor(() => expect(api.cveDetail).toHaveBeenCalledTimes(1));
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(api.cveDetail).toHaveBeenCalledWith('CVE-2024-0001');
+  });
+
+  it('renders error sub-row when cveDetail rejects', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+    fireEvent.click(row);
+    const detail = await screen.findByTestId('related-cves-detail-CVE-2024-0001');
+    const errorDiv = await screen.findByText('boom');
+    expect(detail).toContainElement(errorDiv);
+    expect(errorDiv).toHaveClass('text-red-600');
+  });
+
+  it('renders error message when list fleet cves rejects', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    const errorEl = await screen.findByText(/boom/);
+    expect(errorEl).toHaveClass('text-red-600');
+  });
+
+  it('strictmode_doesNotDoubleFireCveDetail_onFirstExpand', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeDetail('CVE-2024-0001', 'Strict description'),
+    );
+    render(
+      <StrictMode>
+        <RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />
+      </StrictMode>,
+    );
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+    fireEvent.click(row);
+    await waitFor(() => expect(api.cveDetail).toHaveBeenCalledTimes(1));
+    // Allow a microtask flush; pre-fix, StrictMode's double-invocation of the
+    // setExpanded updater would fire a second request here.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(api.cveDetail).toHaveBeenCalledTimes(1);
+  });
+});

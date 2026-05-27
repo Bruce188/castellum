@@ -3,20 +3,42 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ThreatsDashboard } from '../components/ThreatsDashboard';
 import { api } from '../api/client';
 
-const navigateMock = vi.fn();
-
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigateMock,
-}));
-
 vi.mock('../api/client', () => ({
   api: {
     topRisk: vi.fn(),
     feedsStatus: vi.fn(),
+    listFleetCves: vi.fn(),
+    cveDetail: vi.fn(),
   },
 }));
 
 const NOW = new Date('2026-05-25T12:00:00Z').getTime();
+
+const makeSummary = (cveId: string, cvss: string, kev: boolean) => ({
+  cveId,
+  published: '2024-01-01T00:00:00Z',
+  lastModified: '2024-01-02T00:00:00Z',
+  vulnStatus: 'Analyzed',
+  description: `desc-${cveId}`,
+  cvssV31Score: cvss,
+  cvssV31Vector: 'CVSS:3.1/AV:N/AC:L',
+  cvssV30Score: null,
+  cvssV30Vector: null,
+  cvssV2Score: null,
+  cvssV2Vector: null,
+  fetchedAt: null,
+  kev,
+  epssScore: '0.1',
+  compositeScore: cvss,
+});
+
+const makePage = (content: ReturnType<typeof makeSummary>[]) => ({
+  content,
+  totalElements: content.length,
+  totalPages: 1,
+  number: 0,
+  size: 50,
+});
 
 describe('<ThreatsDashboard />', () => {
   beforeAll(() => {
@@ -29,7 +51,6 @@ describe('<ThreatsDashboard />', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    navigateMock.mockReset();
   });
 
   it('shows loading state then top-10 table on success', async () => {
@@ -121,7 +142,7 @@ describe('<ThreatsDashboard />', () => {
     await waitFor(() => screen.getByText(/No devices ranked/i));
   });
 
-  it('navigates to /cves?deviceId=<id> when a row is clicked', async () => {
+  it('expands the related-CVEs panel in place when a row is clicked', async () => {
     (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
       { deviceId: 42, hostname: 'host-42', ipAddress: '10.0.0.42', criticality: 'HIGH', score: '9.10', kevCount: 1 },
     ]);
@@ -130,14 +151,15 @@ describe('<ThreatsDashboard />', () => {
       kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
       nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
     });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
 
     render(<ThreatsDashboard />);
     const row = await screen.findByTestId('threats-row-42');
     fireEvent.click(row);
-    expect(navigateMock).toHaveBeenCalledWith('/cves?deviceId=42');
+    await screen.findByTestId('threats-related-panel-42');
   });
 
-  it('navigates on Enter and Space keydown', async () => {
+  it('expands the panel on Enter and Space keydown', async () => {
     (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
       { deviceId: 7, hostname: 'host-7', ipAddress: '10.0.0.7', criticality: 'HIGH', score: '7.10', kevCount: 0 },
     ]);
@@ -146,14 +168,19 @@ describe('<ThreatsDashboard />', () => {
       kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
       nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
     });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
 
     render(<ThreatsDashboard />);
     const row = await screen.findByTestId('threats-row-7');
+
     fireEvent.keyDown(row, { key: 'Enter' });
-    expect(navigateMock).toHaveBeenCalledWith('/cves?deviceId=7');
-    navigateMock.mockClear();
+    await screen.findByTestId('threats-related-panel-7');
+
+    fireEvent.keyDown(row, { key: 'Enter' });
+    await waitFor(() => expect(screen.queryByTestId('threats-related-panel-7')).toBeNull());
+
     fireEvent.keyDown(row, { key: ' ' });
-    expect(navigateMock).toHaveBeenCalledWith('/cves?deviceId=7');
+    await screen.findByTestId('threats-related-panel-7');
   });
 
   it('shows error message when topRisk fails', async () => {
@@ -166,5 +193,95 @@ describe('<ThreatsDashboard />', () => {
 
     render(<ThreatsDashboard />);
     await waitFor(() => screen.getByText(/boom/));
+  });
+
+  it('panel_rendersEmptyStateCopy_whenDeviceHasNoLinkedCves', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 11, hostname: 'host-11', ipAddress: '10.0.0.11', criticality: 'LOW', score: '0.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+
+    render(<ThreatsDashboard />);
+    const row = await screen.findByTestId('threats-row-11');
+    fireEvent.click(row);
+    const empty = await screen.findByText('No linked CVEs for this threat.');
+    expect(empty).toBeInTheDocument();
+  });
+
+  it('panel_rendersMatchedCves_whenListFleetCvesReturnsContent', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 22, hostname: 'host-22', ipAddress: '10.0.0.22', criticality: 'HIGH', score: '8.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([
+        makeSummary('CVE-2024-0001', '8.5', true),
+        makeSummary('CVE-2024-0002', '5.0', false),
+      ]),
+    );
+
+    render(<ThreatsDashboard />);
+    const row = await screen.findByTestId('threats-row-22');
+    fireEvent.click(row);
+
+    await screen.findByTestId('threats-related-panel-22');
+    expect(screen.getByTestId('related-cves-row-CVE-2024-0001')).toBeInTheDocument();
+    expect(screen.getByTestId('related-cves-row-CVE-2024-0002')).toBeInTheDocument();
+    expect(screen.getByTestId('related-cves-kev-badge-CVE-2024-0001')).toBeInTheDocument();
+  });
+
+  it('panel_viewAllLink_pointsToCvesPageWithDeviceIdFilter', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 42, hostname: 'host-42', ipAddress: '10.0.0.42', criticality: 'HIGH', score: '8.50', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+
+    render(<ThreatsDashboard />);
+    const row = await screen.findByTestId('threats-row-42');
+    fireEvent.click(row);
+
+    await screen.findByTestId('threats-related-panel-42');
+    const viewAll = screen.getByTestId('related-cves-view-all') as HTMLAnchorElement;
+    expect(viewAll.getAttribute('href')).toBe('/cves?deviceId=42');
+  });
+
+  it('panel_clickingSecondRow_collapsesFirstAndExpandsSecond', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH', score: '8.50', kevCount: 1 },
+      { deviceId: 2, hostname: 'h2', ipAddress: '10.0.0.2', criticality: 'MEDIUM', score: '5.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+
+    render(<ThreatsDashboard />);
+    const row1 = await screen.findByTestId('threats-row-1');
+    const row2 = await screen.findByTestId('threats-row-2');
+
+    fireEvent.click(row1);
+    await screen.findByTestId('threats-related-panel-1');
+
+    fireEvent.click(row2);
+    await screen.findByTestId('threats-related-panel-2');
+    expect(screen.queryByTestId('threats-related-panel-1')).toBeNull();
   });
 });
