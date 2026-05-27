@@ -71,6 +71,9 @@ castellum:
       core-pool-size: ${CASTELLUM_SCAN_EXECUTOR_CORE_POOL_SIZE:2}
       max-pool-size: ${CASTELLUM_SCAN_EXECUTOR_MAX_POOL_SIZE:4}
       queue-capacity: ${CASTELLUM_SCAN_EXECUTOR_QUEUE_CAPACITY:10}
+    nmap:
+      port-scan-host-timeout: ${CASTELLUM_SCAN_NMAP_PORT_SCAN_HOST_TIMEOUT:180s}
+      ping-host-timeout: ${CASTELLUM_SCAN_NMAP_PING_HOST_TIMEOUT:30s}
   initial-sync:
     executor:
       # Single-threaded executor for the one-click initial data-sync background job.
