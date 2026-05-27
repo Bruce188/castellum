@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Fragment, useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { FeedsStatusDto, TopRiskDeviceDto } from '../api/types';
 import { freshnessTier, FRESHNESS_BADGE_CLASSES, FRESHNESS_DOT_CLASSES } from '../lib/freshness';
+import { RelatedCvesPanel } from './RelatedCvesPanel';
 
 interface State {
   loading: boolean;
@@ -20,13 +20,18 @@ const INITIAL: State = { loading: true, error: null, top: [], feeds: null };
  *
  * <p>Single fetch on mount; not auto-refreshing. Operators trigger refreshes via the
  * existing scan / sync surfaces, then page-reload or click "Refresh" (when added).
+ *
+ * <p><b>v3-F2:</b> Row click now toggles an inline {@link RelatedCvesPanel} sub-row
+ * instead of navigating to {@code /cves?deviceId=...}. The previous deep-link path
+ * is preserved as a "View all in CVE explorer" anchor inside the expanded panel.
+ * Only one row may be expanded at a time — expanding a second row collapses the first.
  */
 export function ThreatsDashboard() {
   const [state, setState] = useState<State>(INITIAL);
-  const navigate = useNavigate();
+  const [expandedDeviceId, setExpandedDeviceId] = useState<number | null>(null);
 
-  const openDevice = (deviceId: number) => {
-    navigate(`/cves?deviceId=${deviceId}`);
+  const toggleDeviceRow = (deviceId: number) => {
+    setExpandedDeviceId(prev => prev === deviceId ? null : deviceId);
   };
 
   useEffect(() => {
@@ -108,39 +113,52 @@ export function ThreatsDashboard() {
           </thead>
           <tbody>
             {state.top.map((d, i) => (
-              <tr
-                key={d.deviceId}
-                role="button"
-                tabIndex={0}
-                data-testid={`threats-row-${d.deviceId}`}
-                onClick={() => openDevice(d.deviceId)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openDevice(d.deviceId);
-                  }
-                }}
-                className="border-b cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
-              >
-                <td className="py-1 pr-2 text-gray-500">{i + 1}</td>
-                <td className="py-1 pr-2">
-                  <div className="font-mono">{d.hostname ?? d.ipAddress}</div>
-                  {d.hostname && (
-                    <div className="text-xs text-gray-500">{d.ipAddress}</div>
-                  )}
-                </td>
-                <td className="py-1 pr-2">{d.criticality}</td>
-                <td className="py-1 pr-2">
-                  {d.kevCount > 0 ? (
-                    <span className="inline-block px-1 rounded bg-red-100 text-red-800 text-xs">
-                      {d.kevCount}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </td>
-                <td className="py-1 pr-2 text-right font-mono">{d.score}</td>
-              </tr>
+              <Fragment key={d.deviceId}>
+                <tr
+                  role="button"
+                  tabIndex={0}
+                  data-testid={`threats-row-${d.deviceId}`}
+                  aria-expanded={expandedDeviceId === d.deviceId}
+                  onClick={() => toggleDeviceRow(d.deviceId)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleDeviceRow(d.deviceId);
+                    }
+                  }}
+                  className="border-b cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
+                >
+                  <td className="py-1 pr-2 text-gray-500">{i + 1}</td>
+                  <td className="py-1 pr-2">
+                    <div className="font-mono">{d.hostname ?? d.ipAddress}</div>
+                    {d.hostname && (
+                      <div className="text-xs text-gray-500">{d.ipAddress}</div>
+                    )}
+                  </td>
+                  <td className="py-1 pr-2">{d.criticality}</td>
+                  <td className="py-1 pr-2">
+                    {d.kevCount > 0 ? (
+                      <span className="inline-block px-1 rounded bg-red-100 text-red-800 text-xs">
+                        {d.kevCount}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+                  <td className="py-1 pr-2 text-right font-mono">{d.score}</td>
+                </tr>
+                {expandedDeviceId === d.deviceId && (
+                  <tr data-testid={`threats-related-panel-${d.deviceId}`}>
+                    <td colSpan={5} className="p-0">
+                      <RelatedCvesPanel
+                        deviceId={d.deviceId}
+                        hostname={d.hostname}
+                        ipAddress={d.ipAddress}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
