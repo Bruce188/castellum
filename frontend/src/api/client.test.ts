@@ -46,4 +46,14 @@ describe('api.listFleetCves URL building', () => {
     await api.listFleetCves(0, 25, undefined, undefined, undefined, 'composite');
     expect(capturedUrl()).toContain('sort=composite');
   });
+
+  it('listFleetCves_buildsSortParam_whenKevRequested', async () => {
+    await api.listFleetCves(0, 25, undefined, undefined, undefined, 'kev');
+    expect(capturedUrl()).toContain('sort=kev');
+  });
+
+  it('listFleetCves_buildsSortParam_whenEpssRequested', async () => {
+    await api.listFleetCves(0, 25, undefined, undefined, undefined, 'epss');
+    expect(capturedUrl()).toContain('sort=epss');
+  });
 });

@@ -74,7 +74,12 @@ export function CvesPage() {
     [setSearchParams],
   );
 
+  // Manual refresh path (Refresh button). Closure-scoped `cancelled` guard
+  // discards results from any prior in-flight invocation when the user clicks
+  // Refresh repeatedly faster than the network resolves, preventing stale
+  // page state from clobbering the most recent click (perf-tuner NB4).
   const fetchPage = useCallback(async () => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     try {
@@ -87,13 +92,16 @@ export function CvesPage() {
         kevOnly || undefined,
         sort,
       );
+      if (cancelled) return;
       setPage(result);
     } catch (err) {
+      if (cancelled) return;
       setError(err instanceof Error ? err.message : 'Failed to load CVEs');
       setPage(null);
     } finally {
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     }
+    return () => { cancelled = true; };
   }, [pageNumber, severity, deviceId, kevOnly, sort]);
 
   useEffect(() => {
@@ -157,9 +165,22 @@ export function CvesPage() {
     });
   };
 
-  /** Toggle sort: clicking the active sort key clears it; otherwise sets to that key. */
+  /**
+   * Toggle sort: clicking the active sort key clears it; otherwise sets to that
+   * key. Always resets {@code page} back to 0 because changing the order
+   * key under a stale page index would surface a confusing slice of the new
+   * ordering (e.g. lingering on page 4 of CVSS-DESC while sorting flipped to
+   * composite-DESC). Matches the page-reset convention of severity and KEV
+   * toggles. (code-reviewer NB-2)
+   */
   const onSortToggle = (key: CveFleetSort) => {
-    updateParam('sort', sort === key ? null : key);
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev);
+      if (sort === key) params.delete('sort');
+      else params.set('sort', key);
+      params.delete('page');
+      return params;
+    });
   };
 
   const onKevOnlyToggle = () => {
