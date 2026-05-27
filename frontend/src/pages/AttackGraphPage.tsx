@@ -47,14 +47,8 @@ export function AttackGraphPage({ isAdmin }: Props) {
         const page = await api.listDevices();
         if (cancelled) return;
         setDevices(page.content);
-        const results = await Promise.allSettled(
-          page.content.map(d => api.deviceRisk(d.id))
-        );
+        const map = await api.deviceRisksBatch(page.content.map(d => d.id));
         if (cancelled) return;
-        const map = new Map<number, DeviceRiskDto>();
-        results.forEach((r, i) => {
-          if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
-        });
         setRisksById(map);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'load failed');

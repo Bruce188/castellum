@@ -35,6 +35,7 @@ vi.mock('../api/client', () => ({
   api: {
     listDevices: vi.fn(),
     deviceRisk: vi.fn(),
+    deviceRisksBatch: vi.fn(),
     listScans: vi.fn(),
     listServicesForDevice: vi.fn(),
     feedsStatus: vi.fn(),
@@ -49,6 +50,7 @@ import { api } from '../api/client';
 const mockApi = api as unknown as {
   listDevices: ReturnType<typeof vi.fn>;
   deviceRisk: ReturnType<typeof vi.fn>;
+  deviceRisksBatch: ReturnType<typeof vi.fn>;
   listScans: ReturnType<typeof vi.fn>;
   listServicesForDevice: ReturnType<typeof vi.fn>;
   feedsStatus: ReturnType<typeof vi.fn>;
@@ -85,6 +87,9 @@ describe('<TopologyPage /> mount fanout', () => {
     localStorage.clear();
     mockApi.listDevices.mockResolvedValue(DEVICES_PAGE);
     mockApi.deviceRisk.mockResolvedValue(RISK);
+    mockApi.deviceRisksBatch.mockResolvedValue(
+      new Map(DEVICES.map(d => [d.id, RISK]))
+    );
     mockApi.listScans.mockResolvedValue(SCANS_PAGE);
     mockApi.listServicesForDevice.mockResolvedValue([]);
     // EmptyCorpusBanner (mounted inside TopologyPage) calls feedsStatus and syncStatus
@@ -109,12 +114,12 @@ describe('<TopologyPage /> mount fanout', () => {
     expect(mockApi.listDevices).toHaveBeenCalledTimes(1);
   });
 
-  it('calls api.deviceRisk once per device (no duplicate fanout)', async () => {
+  it('calls api.deviceRisksBatch once with all device ids (no per-device fanout)', async () => {
     render(<TopologyPage />);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    // Exactly one risk call per device — not 2x because we collapsed the duplicate effect.
-    expect(mockApi.deviceRisk).toHaveBeenCalledTimes(DEVICES.length);
-    const calledIds = mockApi.deviceRisk.mock.calls.map(call => call[0]).sort();
+    // Single batch call replaces the per-device fanout.
+    expect(mockApi.deviceRisksBatch).toHaveBeenCalledTimes(1);
+    const calledIds = mockApi.deviceRisksBatch.mock.calls[0][0].slice().sort();
     expect(calledIds).toEqual(DEVICES.map(d => d.id).sort());
   });
 

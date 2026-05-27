@@ -7,6 +7,7 @@ vi.mock('../api/client', () => ({
   api: {
     listDevices: vi.fn(),
     deviceRisk: vi.fn(),
+    deviceRisksBatch: vi.fn(),
     shortestPath: vi.fn(),
   },
 }));
@@ -24,6 +25,7 @@ vi.mock('../components/TopologyView', () => ({
 
 const listDevices = vi.mocked(api.listDevices);
 const deviceRisk = vi.mocked(api.deviceRisk);
+const deviceRisksBatch = vi.mocked(api.deviceRisksBatch);
 const shortestPath = vi.mocked(api.shortestPath);
 
 const DEVICES_PAGE = {
@@ -38,9 +40,13 @@ const DEVICES_PAGE = {
 beforeEach(() => {
   listDevices.mockReset();
   deviceRisk.mockReset();
+  deviceRisksBatch.mockReset();
   shortestPath.mockReset();
   listDevices.mockResolvedValue(DEVICES_PAGE);
   deviceRisk.mockResolvedValue({ deviceId: 1, score: '5.0', topCveIds: [] });
+  deviceRisksBatch.mockResolvedValue(
+    new Map(DEVICES_PAGE.content.map(d => [d.id, { deviceId: d.id, score: '5.0', topCveIds: [] }]))
+  );
 });
 
 describe('<AttackGraphPage />', () => {

@@ -123,6 +123,17 @@ export const api = {
   },
   deviceRisk: (id: number) =>
     request<DeviceRiskDto>(`/api/risk/device/${id}`),
+  deviceRisksBatch: async (ids: number[]): Promise<Map<number, DeviceRiskDto>> => {
+    if (ids.length === 0) return new Map();
+    const obj = await request<Record<number, DeviceRiskDto>>(
+      `/api/risk/devices?ids=${ids.join(',')}`
+    );
+    const map = new Map<number, DeviceRiskDto>();
+    for (const [k, v] of Object.entries(obj)) {
+      map.set(Number(k), v);
+    }
+    return map;
+  },
   topRisk: (n: number = 10) =>
     request<TopRiskDeviceDto[]>(`/api/risk/top?n=${n}`),
   cveDetail: (cveId: string) =>
