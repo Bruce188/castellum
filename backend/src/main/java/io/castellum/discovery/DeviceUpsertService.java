@@ -91,6 +91,19 @@ public class DeviceUpsertService {
      * <p>Returns devices in the same order as the input list, so callers can correlate
      * {@code deviceIds} with their original {@link Discovery} sequence.
      *
+     * <p><b>Atomic-sweep contract (AC5):</b> this method is intentionally {@code @Transactional}
+     * all-or-nothing. A passive sweep is a single audit unit; if any upsert fails the whole
+     * batch rolls back and the sweep is recorded FAILED. Per-row catch-and-continue is
+     * explicitly <em>not</em> used. This design is safe because:
+     * <ul>
+     *   <li>The batch is deduped upstream by {@link PassiveDiscoveryService} (MAC-primary, then
+     *       IP-fallback) so an intra-batch IP collision cannot occur.</li>
+     *   <li>AC1 (every observed IP added to {@code ipSet} unconditionally) closes the
+     *       DB-vs-batch keying gap: a MAC-bearing re-observation of a known-IP/null-MAC row
+     *       now hits the UPDATE branch, preventing the {@code device_ip_unique} violation that
+     *       previously caused sweeps to be recorded FAILED.</li>
+     * </ul>
+     *
      * @param discoveries unique-by-IP discoveries (callers should dedupe upstream)
      * @return persisted devices in input order
      */
@@ -102,14 +115,16 @@ public class DeviceUpsertService {
 
         // Partition into MAC-bearing vs IP-only. MAC is the strongest equality key —
         // matching devices by MAC first prevents IP-renumber events from spawning duplicate rows.
+        // Every observed IP is added to ipSet unconditionally (AC1): a MAC-bearing discovery
+        // of a known-IP/null-MAC row must also hit the existingByIp fallback lookup so it
+        // takes the UPDATE branch and backfills the null MAC in place.
         Set<String> macSet = new HashSet<>();
         Set<String> ipSet = new HashSet<>();
         for (Discovery d : discoveries) {
             if (d.macAddress() != null && !d.macAddress().isBlank()) {
                 macSet.add(d.macAddress());
-            } else {
-                ipSet.add(d.ipAddress());
             }
+            ipSet.add(d.ipAddress());   // ALWAYS — every observed IP is an existence candidate
         }
 
         Map<String, Device> existingByMac = new HashMap<>();
