@@ -1,5 +1,6 @@
 package io.castellum.scan;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -25,30 +26,57 @@ public class NmapRunner {
     }
 
     private final ExecutorFactory executorFactory;
+    private final NmapScanProperties props;
+
+    /** Single private delegate constructor — all public constructors delegate here. */
+    private NmapRunner(ExecutorFactory executorFactory, NmapScanProperties props) {
+        this.executorFactory = executorFactory;
+        this.props = props;
+    }
 
     public NmapRunner() {
-        this.executorFactory = () -> Executors.newFixedThreadPool(2);
+        this(() -> Executors.newFixedThreadPool(2), new NmapScanProperties());
     }
 
     /** Package-private constructor for testing with a spy executor factory. */
     NmapRunner(ExecutorFactory executorFactory) {
-        this.executorFactory = executorFactory;
+        this(executorFactory, new NmapScanProperties());
+    }
+
+    /** Spring-used constructor — injects configurable scan properties. */
+    @Autowired
+    public NmapRunner(NmapScanProperties props) {
+        this(() -> Executors.newFixedThreadPool(2), props);
+    }
+
+    /**
+     * Pure argv assembly — package-private for unit testing without spawning nmap.
+     * Takes an already-validated cidr.
+     */
+    List<String> buildArgv(String validatedCidr, ScanType type) {
+        List<String> argv = new ArrayList<>();
+        argv.add("nmap");
+        // Aggressive timing template; per-host timeout is scan-type-aware.
+        argv.add("-T4");
+        // Port-enumerating scan types (SERVICE_DETECT, OS_FINGERPRINT) use -Pn so hosts
+        // that don't respond to host-discovery probes are still port-scanned.
+        // PING_SWEEP omits -Pn — it relies on ICMP echo, not port scanning.
+        if (type.enumeratesPorts()) {
+            argv.add("-Pn");
+        }
+        // Per-host timeout: longer budget for -sV (version detection needs more time),
+        // shorter for -sn (ping sweep — just ICMP echo, no port scan).
+        argv.add("--host-timeout");
+        argv.add(type.enumeratesPorts() ? props.getPortScanHostTimeout() : props.getPingHostTimeout());
+        argv.addAll(type.argv());
+        argv.add(validatedCidr);
+        return argv;
     }
 
     public NmapResult run(String cidr, ScanType type) throws InterruptedException, IOException {
         String validatedCidr = CidrValidator.requireValid(cidr);
 
-        List<String> argv = new ArrayList<>();
-        argv.add("nmap");
-        // Aggressive timing template + per-host cap so a stuck host doesn't drag the whole scan.
-        // -T4 = aggressive (lower probe rtt timeout, faster retransmit); --host-timeout 30s = give up
-        // on any single host after 30s. Without these, /24 sweeps on sparse networks dominated by
-        // unresponsive IPs blow the overall budget.
-        argv.add("-T4");
-        argv.add("--host-timeout");
-        argv.add("30s");
-        argv.addAll(type.argv());
-        argv.add(validatedCidr);
+        List<String> argv = buildArgv(validatedCidr, type);
 
         ProcessBuilder pb = new ProcessBuilder(argv);
         pb.redirectErrorStream(false);
