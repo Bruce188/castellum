@@ -272,7 +272,9 @@ class CveControllerTest {
     @Test
     void fleet_deviceId_filtersByDeviceServices_returnsFilteredPage() throws Exception {
         NetworkService ssh = buildService(1L, 42L, "openssh", "openssh", "8.2");
+        ssh.setName("openssh");
         NetworkService httpd = buildService(2L, 42L, "apache", "httpd", "2.4.49");
+        httpd.setName("apache");
         when(networkServiceRepository.findByDeviceId(42L)).thenReturn(List.of(ssh, httpd));
 
         Cve cve1 = buildCve("CVE-2020-15778");
@@ -282,8 +284,8 @@ class CveControllerTest {
         cve2.setId(2L);
         cve2.setCvssV31Score(new BigDecimal("9.8"));
 
-        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2")).thenReturn(List.of(cve1));
-        when(cveMatcher.findVulnerable("cpe:2.3:a:apache:httpd:2.4.49")).thenReturn(List.of(cve2));
+        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*")).thenReturn(List.of(cve1));
+        when(cveMatcher.findVulnerable("cpe:2.3:a:apache:apache:2.4.49:*:*:*:*:*:*:*")).thenReturn(List.of(cve2));
 
         when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cve2, cve1)));
@@ -296,6 +298,8 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[0].cveId").value("CVE-2021-41773"))
             .andExpect(jsonPath("$.content[1].cveId").value("CVE-2020-15778"));
 
+        verify(cveMatcher).findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*");
+        verify(cveMatcher).findVulnerable("cpe:2.3:a:apache:apache:2.4.49:*:*:*:*:*:*:*");
         verify(cveRepository).findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L)), any(Pageable.class));
     }
 

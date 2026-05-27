@@ -9,6 +9,7 @@ import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.graph.CpeMapper;
 import io.castellum.risk.Criticality;
 import io.castellum.risk.KevEntryRepository;
 import io.castellum.web.dto.CveDetailDto;
@@ -178,26 +179,29 @@ public class CveController {
                 : cveRepository.findByCvssV31ScoreGreaterThanEqual(minScore, pageable);
     }
 
+    /**
+     * Collect the union of CVE foreign-key IDs matched across a list of services,
+     * using the canonical {@link CpeMapper#toCpe23} derivation. Services with a
+     * null/blank name (which {@code toCpe23} maps to {@code null}) are skipped.
+     */
+    private Set<Long> matchedCveFks(List<NetworkService> services) {
+        Set<Long> cveFks = new HashSet<>();
+        for (NetworkService s : services) {
+            String cpe = CpeMapper.toCpe23(s);
+            if (cpe == null) continue;
+            for (Cve cve : cveMatcher.findVulnerable(cpe)) {
+                cveFks.add(cve.getId());
+            }
+        }
+        return cveFks;
+    }
+
     private Page<Cve> fleetByDevice(Long deviceId, BigDecimal minScore, Pageable pageable) {
         List<NetworkService> services = networkServiceRepository.findByDeviceId(deviceId);
         if (services.isEmpty()) {
             return Page.empty(pageable);
         }
-        Set<Long> cveFks = new HashSet<>();
-        for (NetworkService s : services) {
-            if (s.getVendor() == null || s.getProduct() == null || s.getVersion() == null) {
-                continue;
-            }
-            // CPE 2.3 requires lowercase per NIST IR 7695 §6.1.2.5; category `a` (application)
-            // matches NetworkService domain (application-layer only — not OS `o` or hardware `h`).
-            String cpe23 = "cpe:2.3:a:"
-                    + s.getVendor().toLowerCase(java.util.Locale.ROOT) + ":"
-                    + s.getProduct().toLowerCase(java.util.Locale.ROOT) + ":"
-                    + s.getVersion().toLowerCase(java.util.Locale.ROOT);
-            for (Cve cve : cveMatcher.findVulnerable(cpe23)) {
-                cveFks.add(cve.getId());
-            }
-        }
+        Set<Long> cveFks = matchedCveFks(services);
         if (cveFks.isEmpty()) {
             return Page.empty(pageable);
         }
