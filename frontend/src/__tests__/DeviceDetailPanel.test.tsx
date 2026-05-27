@@ -137,4 +137,60 @@ describe('<DeviceDetailPanel />', () => {
     );
     expect(screen.queryByText('last seen iface')).not.toBeInTheDocument();
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // v3-F1 — KEV exposure chip at the top of the risk header.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('deviceDetailPanel_rendersKevExposureChip_whenComponentsKevPresentTrue', () => {
+    const riskWithKev: DeviceRiskDto = {
+      deviceId: 1,
+      score: '7.50',
+      topCveIds: [],
+      components: {
+        cvssMax: '7.5',
+        epssMax: '0.5',
+        kevPresent: true,
+        criticalityWeight: '0.25',
+      },
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={riskWithKev} services={[]} onClose={() => {}} />
+    );
+    const chip = screen.getByTestId('kev-exposure-chip');
+    expect(chip).toBeInTheDocument();
+    expect(chip).toHaveTextContent(/KEV exposure/i);
+  });
+
+  it('deviceDetailPanel_omitsKevExposureChip_whenComponentsKevPresentFalseOrAbsent', () => {
+    // Sub-assertion A: kevPresent = false → chip absent.
+    const riskKevFalse: DeviceRiskDto = {
+      deviceId: 1,
+      score: '7.50',
+      topCveIds: [],
+      components: {
+        cvssMax: '7.5',
+        epssMax: '0.5',
+        kevPresent: false,
+        criticalityWeight: '0.25',
+      },
+    };
+    const { rerender, unmount } = render(
+      <DeviceDetailPanel device={device} risk={riskKevFalse} services={[]} onClose={() => {}} />
+    );
+    expect(screen.queryByTestId('kev-exposure-chip')).toBeNull();
+
+    // Sub-assertion B: components undefined → chip absent (guards the
+    // risk?.components?.kevPresent optional-chain).
+    const riskNoComponents: DeviceRiskDto = {
+      deviceId: 1,
+      score: '7.50',
+      topCveIds: [],
+    };
+    rerender(
+      <DeviceDetailPanel device={device} risk={riskNoComponents} services={[]} onClose={() => {}} />
+    );
+    expect(screen.queryByTestId('kev-exposure-chip')).toBeNull();
+    unmount();
+  });
 });
