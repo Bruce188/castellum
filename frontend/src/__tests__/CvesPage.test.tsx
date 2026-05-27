@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { CvesPage } from '../pages/CvesPage';
 import { api } from '../api/client';
 import type { CveSummaryDto, Device, Page } from '../api/types';
@@ -94,6 +94,26 @@ const sampleDevice: Device = {
 function renderWith(initialPath = '/cves') {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
+      <Routes>
+        <Route path="/cves" element={<CvesPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+// Surfaces the live router location.search so a test can assert URL param
+// writes (e.g. that a sort-header click is observable in the URL, mirroring the
+// Playwright e2e). Rendered as a sibling of <Routes> so it always mounts and
+// re-renders on navigation.
+function LocationProbe() {
+  const loc = useLocation();
+  return <div data-testid="location-search">{loc.search}</div>;
+}
+
+function renderWithLocationProbe(initialPath = '/cves') {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <LocationProbe />
       <Routes>
         <Route path="/cves" element={<CvesPage />} />
       </Routes>
@@ -335,6 +355,33 @@ describe('<CvesPage />', () => {
       const lastCall = listFleetCves.mock.calls[listFleetCves.mock.calls.length - 1];
       // listFleetCves signature: (page, size, minScore, deviceId, kevOnly, sort)
       expect(lastCall[5]).toBe('composite');
+    });
+  });
+
+  it('cvesPage_clickingCompositeHeader_writesSortParamToUrl', async () => {
+    // Regression guard: composite is the default sort, so a prior
+    // "delete the param when the clicked key is already active" branch left the
+    // URL paramless after clicking the (default-active) Composite header — green
+    // at the unit level (the refetch still rode the default) but red in the
+    // Playwright e2e, which asserts the URL. A header click must ALWAYS write an
+    // explicit ?sort=<key> so the active ordering is deep-linkable and
+    // observable. Mirrors tests/cve.spec.ts "clicking the Composite header sorts
+    // by composite".
+    listFleetCves.mockResolvedValue(defaultPage);
+
+    renderWithLocationProbe('/cves');
+
+    await waitFor(() => {
+      expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument();
+    });
+
+    // A fresh /cves load rides the composite default without writing ?sort=.
+    expect(screen.getByTestId('location-search').textContent).not.toContain('sort=');
+
+    fireEvent.click(screen.getByRole('button', { name: /Composite/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-search').textContent).toContain('sort=composite');
     });
   });
 

@@ -53,9 +53,10 @@ export function CvesPage() {
   const pageNumber = Math.max(0, Number(searchParams.get('page') ?? '0') | 0);
   const kevOnly = searchParams.get('kevOnly') === 'true';
   const sortParam = searchParams.get('sort');
-  // Default to 'composite' so a no-param load requests composite-DESC.
-  // The onSortToggle "clear" branch (deletes 'sort' param) therefore returns
-  // to composite-DESC. An explicit ?sort= always wins (parsed first above).
+  // Default to 'composite' so a no-param load (a fresh /cves visit or a shared
+  // link without ?sort=) requests composite-DESC. Clicking any column header
+  // writes an explicit ?sort=<key> via onSortToggle, so the active ordering is
+  // always reflected in the URL. An explicit ?sort= always wins (parsed first).
   const sort: CveFleetSort =
     sortParam !== null && isSort(sortParam) ? sortParam : 'composite';
 
@@ -158,18 +159,19 @@ export function CvesPage() {
   };
 
   /**
-   * Toggle sort: clicking the active sort key clears it; otherwise sets to that
-   * key. Always resets {@code page} back to 0 because changing the order
-   * key under a stale page index would surface a confusing slice of the new
-   * ordering (e.g. lingering on page 4 of CVSS-DESC while sorting flipped to
-   * composite-DESC). Matches the page-reset convention of severity and KEV
-   * toggles. (code-reviewer NB-2)
+   * Set sort to the clicked column. A header click always writes an explicit
+   * {@code ?sort=<key>} — including for the composite default — so the active
+   * ordering is deep-linkable/shareable and a column-header click is always
+   * observable in the URL (conventional table-sort UX). Always resets
+   * {@code page} back to 0 because changing the order key under a stale page
+   * index would surface a confusing slice of the new ordering (e.g. lingering
+   * on page 4 of CVSS-DESC while sorting flipped to composite-DESC). Matches
+   * the page-reset convention of severity and KEV toggles. (code-reviewer NB-2)
    */
   const onSortToggle = (key: CveFleetSort) => {
     setSearchParams(prev => {
       const params = new URLSearchParams(prev);
-      if (sort === key) params.delete('sort');
-      else params.set('sort', key);
+      params.set('sort', key);
       params.delete('page');
       return params;
     });
