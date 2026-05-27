@@ -1,7 +1,23 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { ThreatsDashboard } from '../components/ThreatsDashboard';
 import { api } from '../api/client';
+
+/** Renders the current URL search string for test assertions. */
+function LocationProbe() {
+  const [searchParams] = useSearchParams();
+  return <div data-testid="location-probe">{searchParams.toString()}</div>;
+}
+
+function renderWith(initialPath = '/threats') {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <ThreatsDashboard />
+      <LocationProbe />
+    </MemoryRouter>
+  );
+}
 
 vi.mock('../api/client', () => ({
   api: {
@@ -64,10 +80,11 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     await screen.findByText('host-1');
     expect(screen.getByText('8.50')).toBeInTheDocument();
-    expect(screen.getByText('HIGH')).toBeInTheDocument();
+    // HIGH appears in both the criticality select options and the table cell; check at least one is present
+    expect(screen.getAllByText('HIGH').length).toBeGreaterThan(0);
     // Device with null hostname falls back to ipAddress
     expect(screen.getByText('10.0.0.2')).toBeInTheDocument();
     expect(screen.getByText('6.30')).toBeInTheDocument();
@@ -84,7 +101,7 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: null, rowCount: 0 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     await screen.findByText(/KEV-flagged CVEs/i);
     // 2 + 3 = 5
     const kevBlock = screen.getByText(/KEV-flagged CVEs/i).parentElement!;
@@ -99,7 +116,7 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const badge = await screen.findByTestId('freshness-badge');
     expect(badge.className).toMatch(/green/);
   });
@@ -112,7 +129,7 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: '2026-05-10T00:00:00Z', rowCount: 42 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const badge = await screen.findByTestId('freshness-badge');
     expect(badge.className).toMatch(/yellow|amber/);
   });
@@ -125,7 +142,7 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: null, rowCount: 0 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const badge = await screen.findByTestId('freshness-badge');
     expect(badge.className).toMatch(/red/);
   });
@@ -138,7 +155,7 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     await waitFor(() => screen.getByText(/No devices ranked/i));
   });
 
@@ -153,7 +170,7 @@ describe('<ThreatsDashboard />', () => {
     });
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const row = await screen.findByTestId('threats-row-42');
     fireEvent.click(row);
     await screen.findByTestId('threats-related-panel-42');
@@ -170,7 +187,7 @@ describe('<ThreatsDashboard />', () => {
     });
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const row = await screen.findByTestId('threats-row-7');
 
     fireEvent.keyDown(row, { key: 'Enter' });
@@ -191,7 +208,7 @@ describe('<ThreatsDashboard />', () => {
       nvd: { lastModified: null, rowCount: 0 },
     });
 
-    render(<ThreatsDashboard />);
+    renderWith();
     await waitFor(() => screen.getByText(/boom/));
   });
 
@@ -206,7 +223,7 @@ describe('<ThreatsDashboard />', () => {
     });
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const row = await screen.findByTestId('threats-row-11');
     fireEvent.click(row);
     const empty = await screen.findByText('No linked CVEs for this threat.');
@@ -229,7 +246,7 @@ describe('<ThreatsDashboard />', () => {
       ]),
     );
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const row = await screen.findByTestId('threats-row-22');
     fireEvent.click(row);
 
@@ -252,7 +269,7 @@ describe('<ThreatsDashboard />', () => {
       makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
     );
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const row = await screen.findByTestId('threats-row-42');
     fireEvent.click(row);
 
@@ -273,7 +290,7 @@ describe('<ThreatsDashboard />', () => {
     });
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
 
-    render(<ThreatsDashboard />);
+    renderWith();
     const row1 = await screen.findByTestId('threats-row-1');
     const row2 = await screen.findByTestId('threats-row-2');
 
@@ -283,5 +300,440 @@ describe('<ThreatsDashboard />', () => {
     fireEvent.click(row2);
     await screen.findByTestId('threats-related-panel-2');
     expect(screen.queryByTestId('threats-related-panel-1')).toBeNull();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 2.1: Sort tests (RED → will go GREEN after component implementation)
+  // ---------------------------------------------------------------------------
+
+  it('sort_clickingCompositeHeader_reordersRenderedRowsDescThenAsc', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'host-1', ipAddress: '10.0.0.1', criticality: 'LOW',    score: '5.00', kevCount: 0 },
+      { deviceId: 2, hostname: 'host-2', ipAddress: '10.0.0.2', criticality: 'HIGH',   score: '9.00', kevCount: 0 },
+      { deviceId: 3, hostname: 'host-3', ipAddress: '10.0.0.3', criticality: 'MEDIUM', score: '7.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Default: composite DESC → order should be row-2(9), row-3(7), row-1(5)
+    let rows = screen.getAllByTestId(/^threats-row-/);
+    expect(rows.map(r => r.getAttribute('data-testid'))).toEqual([
+      'threats-row-2', 'threats-row-3', 'threats-row-1',
+    ]);
+
+    // Click Composite header → flip to ASC
+    fireEvent.click(screen.getByTestId('sort-composite'));
+
+    rows = screen.getAllByTestId(/^threats-row-/);
+    expect(rows.map(r => r.getAttribute('data-testid'))).toEqual([
+      'threats-row-1', 'threats-row-3', 'threats-row-2',
+    ]);
+  });
+
+  it('sort_clickingHostHeader_reordersRenderedRowsAlphabetically', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'zeta',  ipAddress: '10.0.0.1', criticality: 'LOW',    score: '5.00', kevCount: 0 },
+      { deviceId: 2, hostname: 'alpha', ipAddress: '10.0.0.2', criticality: 'MEDIUM', score: '6.00', kevCount: 0 },
+      { deviceId: 3, hostname: 'mike',  ipAddress: '10.0.0.3', criticality: 'HIGH',   score: '7.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Click Host → ascending (default for host)
+    fireEvent.click(screen.getByTestId('sort-host'));
+    let rows = screen.getAllByTestId(/^threats-row-/);
+    expect(rows.map(r => r.getAttribute('data-testid'))).toEqual([
+      'threats-row-2', 'threats-row-3', 'threats-row-1',
+    ]);
+
+    // Click Host again → descending
+    fireEvent.click(screen.getByTestId('sort-host'));
+    rows = screen.getAllByTestId(/^threats-row-/);
+    expect(rows.map(r => r.getAttribute('data-testid'))).toEqual([
+      'threats-row-1', 'threats-row-3', 'threats-row-2',
+    ]);
+  });
+
+  it('sort_activeHeader_showsDirectionArrow', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH', score: '8.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Default: composite active + desc → shows ↓
+    const compositeBtn = screen.getByTestId('sort-composite');
+    expect(compositeBtn.textContent).toContain('↓');
+
+    // Flip to asc
+    fireEvent.click(compositeBtn);
+    expect(compositeBtn.textContent).toContain('↑');
+
+    // Click KEV → KEV becomes active with default desc; Composite shows no arrow
+    const kevBtn = screen.getByTestId('sort-kev');
+    fireEvent.click(kevBtn);
+    expect(kevBtn.textContent).toContain('↓');
+    expect(compositeBtn.textContent).not.toMatch(/[↑↓]/);
+  });
+
+  it('sort_doesNotRefetch', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH', score: '8.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Already called once on mount
+    expect(api.topRisk).toHaveBeenCalledTimes(1);
+
+    // Click sort header — should NOT trigger a new fetch
+    fireEvent.click(screen.getByTestId('sort-kev'));
+
+    expect(api.topRisk).toHaveBeenCalledTimes(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 3.1: Filter tests (RED → GREEN after component implementation)
+  // ---------------------------------------------------------------------------
+
+  it('filter_kevOnlyToggle_hidesNonKevRows', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH',   score: '8.50', kevCount: 2 },
+      { deviceId: 2, hostname: 'h2', ipAddress: '10.0.0.2', criticality: 'MEDIUM', score: '5.00', kevCount: 0 },
+      { deviceId: 3, hostname: 'h3', ipAddress: '10.0.0.3', criticality: 'LOW',    score: '3.00', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // All 3 rows visible initially
+    expect(screen.getByTestId('threats-row-1')).toBeInTheDocument();
+    expect(screen.getByTestId('threats-row-2')).toBeInTheDocument();
+    expect(screen.getByTestId('threats-row-3')).toBeInTheDocument();
+
+    // Toggle KEV-only
+    fireEvent.click(screen.getByTestId('kev-only-toggle'));
+
+    // rows 1 and 3 have kevCount > 0; row 2 (kevCount=0) should be hidden
+    expect(screen.getByTestId('threats-row-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('threats-row-2')).toBeNull();
+    expect(screen.getByTestId('threats-row-3')).toBeInTheDocument();
+  });
+
+  it('filter_criticalitySelect_keepsOnlyMatchingRows', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH',     score: '8.00', kevCount: 0 },
+      { deviceId: 2, hostname: 'h2', ipAddress: '10.0.0.2', criticality: 'LOW',      score: '2.00', kevCount: 0 },
+      { deviceId: 3, hostname: 'h3', ipAddress: '10.0.0.3', criticality: 'CRITICAL', score: '9.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Filter to HIGH only
+    fireEvent.change(screen.getByTestId('threats-crit-select'), { target: { value: 'HIGH' } });
+
+    expect(screen.getByTestId('threats-row-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('threats-row-2')).toBeNull();
+    expect(screen.queryByTestId('threats-row-3')).toBeNull();
+  });
+
+  it('filter_emptyAfterFilter_rendersDistinctMessage', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH',   score: '8.00', kevCount: 0 },
+      { deviceId: 2, hostname: 'h2', ipAddress: '10.0.0.2', criticality: 'MEDIUM', score: '5.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Toggle KEV-only — all rows have kevCount=0, so filter result is empty
+    fireEvent.click(screen.getByTestId('kev-only-toggle'));
+
+    // Filter-empty message appears; no-data copy must NOT appear
+    await screen.findByText(/No threats match these filters/i);
+    expect(screen.queryByText(/No devices ranked/i)).toBeNull();
+  });
+
+  it('filter_emptyFleet_stillRendersNoDataCopy_notFilterMessage', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByText(/No devices ranked/i);
+
+    expect(screen.queryByText(/No threats match these filters/i)).toBeNull();
+  });
+
+  it('filter_hostText_narrowsBySubstring', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'web-prod-1',  ipAddress: '10.0.0.1', criticality: 'HIGH',   score: '8.00', kevCount: 0 },
+      { deviceId: 2, hostname: 'db-prod-2',   ipAddress: '10.0.0.2', criticality: 'HIGH',   score: '7.00', kevCount: 0 },
+      { deviceId: 3, hostname: null,           ipAddress: '10.0.0.9', criticality: 'MEDIUM', score: '5.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    const hostInput = screen.getByTestId('threats-host-filter');
+
+    // Type 'prod' — only the two prod rows should match
+    fireEvent.change(hostInput, { target: { value: 'prod' } });
+    expect(screen.getByTestId('threats-row-1')).toBeInTheDocument();
+    expect(screen.getByTestId('threats-row-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('threats-row-3')).toBeNull();
+
+    // Clear — all three return
+    fireEvent.change(hostInput, { target: { value: '' } });
+    expect(screen.getByTestId('threats-row-1')).toBeInTheDocument();
+    expect(screen.getByTestId('threats-row-2')).toBeInTheDocument();
+    expect(screen.getByTestId('threats-row-3')).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 4.1: Row-count selector tests (RED → GREEN after component implementation)
+  // ---------------------------------------------------------------------------
+
+  it('limit_changingSelector_refetchesWithNewN', async () => {
+    const rows = [
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH' as const, score: '8.50', kevCount: 1 },
+    ];
+    (api.topRisk as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(rows)
+      .mockResolvedValueOnce(rows);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Initial call with default limit 10
+    expect(api.topRisk).toHaveBeenCalledWith(10);
+
+    // Change limit to 25
+    fireEvent.change(screen.getByTestId('threats-limit-select'), { target: { value: '25' } });
+
+    await waitFor(() => expect(api.topRisk).toHaveBeenLastCalledWith(25));
+  });
+
+  it('limit_defaultIsTen_onInitialMount', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByText(/No devices ranked/i);
+
+    expect(api.topRisk).toHaveBeenCalledWith(10);
+    expect((screen.getByTestId('threats-limit-select') as HTMLSelectElement).value).toBe('10');
+  });
+
+  it('limit_initialUrlParam_hydratesAndFetches', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith('/threats?limit=50');
+    await screen.findByText(/No devices ranked/i);
+
+    expect(api.topRisk).toHaveBeenCalledWith(50);
+    expect((screen.getByTestId('threats-limit-select') as HTMLSelectElement).value).toBe('50');
+  });
+
+  it('limit_refetch_preservesArrayCollapse', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH' as const, score: '8.50', kevCount: 0 },
+      ])
+      // Second call (after changing limit) returns non-array — should collapse to empty
+      .mockResolvedValueOnce(null as unknown as import('../api/types').TopRiskDeviceDto[]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Change limit — triggers second fetch that returns null
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    fireEvent.change(screen.getByTestId('threats-limit-select'), { target: { value: '25' } });
+
+    // Should render no-data empty state (Array.isArray collapses null → [])
+    await screen.findByText(/No devices ranked/i);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Task 5.1: URL binding round-trip tests (RED → GREEN after component impl)
+  // ---------------------------------------------------------------------------
+
+  it('url_initialParams_hydrateAllControls', async () => {
+    // Seed a row that has kevCount>0 AND criticality=HIGH so it survives crit=HIGH+kevOnly filters
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'db-server', ipAddress: '10.0.0.1', criticality: 'HIGH' as const, score: '8.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith('/threats?sort=kev&dir=asc&crit=HIGH&kevOnly=true&limit=25&host=db');
+    await screen.findByTestId('threats-row-1');
+
+    // sort=kev, dir=asc → KEV header should show ↑
+    expect(screen.getByTestId('sort-kev').textContent).toContain('↑');
+    // Composite header should have no arrow (not active)
+    expect(screen.getByTestId('sort-composite').textContent).not.toMatch(/[↑↓]/);
+    // criticality select = HIGH
+    expect((screen.getByTestId('threats-crit-select') as HTMLSelectElement).value).toBe('HIGH');
+    // kev-only-toggle = pressed
+    expect(screen.getByTestId('kev-only-toggle').getAttribute('aria-pressed')).toBe('true');
+    // limit select = 25
+    expect((screen.getByTestId('threats-limit-select') as HTMLSelectElement).value).toBe('25');
+    // host input = 'db'
+    expect((screen.getByTestId('threats-host-filter') as HTMLInputElement).value).toBe('db');
+    // api called with limit=25
+    expect(api.topRisk).toHaveBeenCalledWith(25);
+  });
+
+  it('url_togglingSort_reflectsSortAndDirParams', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 1, hostname: 'h1', ipAddress: '10.0.0.1', criticality: 'HIGH' as const, score: '8.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByTestId('threats-row-1');
+
+    // Click KEV header → sort=kev (dir omitted since desc is its default)
+    fireEvent.click(screen.getByTestId('sort-kev'));
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe').textContent ?? '';
+      expect(probe).toContain('sort=kev');
+    });
+
+    // Click KEV again → dir should flip (kev default is desc → flip to asc)
+    fireEvent.click(screen.getByTestId('sort-kev'));
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe').textContent ?? '';
+      expect(probe).toContain('dir=asc');
+    });
+  });
+
+  it('url_togglingKevOnly_reflectsKevOnlyParam', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith();
+    await screen.findByText(/No devices ranked/i);
+
+    // Toggle ON
+    fireEvent.click(screen.getByTestId('kev-only-toggle'));
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe').textContent ?? '';
+      expect(probe).toContain('kevOnly=true');
+    });
+
+    // Toggle OFF — param deleted (omit-when-default)
+    fireEvent.click(screen.getByTestId('kev-only-toggle'));
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe').textContent ?? '';
+      expect(probe).not.toContain('kevOnly');
+    });
+  });
+
+  it('url_clearingFilters_deletesParams', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+
+    renderWith('/threats?crit=HIGH&host=foo');
+    await screen.findByText(/No devices ranked/i);
+
+    // Reset criticality to 'all'
+    fireEvent.change(screen.getByTestId('threats-crit-select'), { target: { value: 'all' } });
+
+    // Clear host input
+    fireEvent.change(screen.getByTestId('threats-host-filter'), { target: { value: '' } });
+
+    await waitFor(() => {
+      const probe = screen.getByTestId('location-probe').textContent ?? '';
+      expect(probe).not.toContain('crit=');
+      expect(probe).not.toContain('host=');
+    });
   });
 });
