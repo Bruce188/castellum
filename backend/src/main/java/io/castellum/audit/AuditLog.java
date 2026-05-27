@@ -26,7 +26,7 @@ public class AuditLog {
     @Column(name = "resource_id")
     private String resourceId;
 
-    @Column
+    @Column(columnDefinition = "TEXT")
     private String payload;
 
     protected AuditLog() {}

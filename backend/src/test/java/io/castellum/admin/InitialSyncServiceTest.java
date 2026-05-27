@@ -35,6 +35,7 @@ class InitialSyncServiceTest {
     private KevIngestionService kevIngestionService;
     private AuditService auditService;
     private AuditLogRepository auditLogRepository;
+    private io.castellum.risk.RiskCacheEvictor riskCacheEvictor;
     private InitialSyncService service;
 
     /**
@@ -59,6 +60,7 @@ class InitialSyncServiceTest {
         kevIngestionService = mock(KevIngestionService.class);
         auditService = mock(AuditService.class);
         auditLogRepository = mock(AuditLogRepository.class);
+        riskCacheEvictor = mock(io.castellum.risk.RiskCacheEvictor.class);
 
         // Use a ThreadPoolTaskExecutor that executes synchronously
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -73,7 +75,7 @@ class InitialSyncServiceTest {
                 .thenReturn(Page.empty());
 
         service = new InitialSyncService(executor, nvdSyncService, epssIngestionService,
-            kevIngestionService, auditService, auditLogRepository);
+            kevIngestionService, auditService, auditLogRepository, riskCacheEvictor);
     }
 
     // ── Task A.3 CAS contract tests ────────────────────────────────────────────
@@ -253,7 +255,7 @@ class InitialSyncServiceTest {
 
         InitialSyncService freshService = new InitialSyncService(
                 executor, nvdSyncService, epssIngestionService, kevIngestionService,
-                freshAuditService, freshRepo);
+                freshAuditService, freshRepo, mock(io.castellum.risk.RiskCacheEvictor.class));
 
         assertEquals(completedTs, freshService.getLastCompletedAt(),
                 "getLastCompletedAt must reconstruct from audit row after restart");
@@ -286,7 +288,7 @@ class InitialSyncServiceTest {
 
         InitialSyncService freshService = new InitialSyncService(
                 executor, nvdSyncService, epssIngestionService, kevIngestionService,
-                freshAuditService, freshRepo);
+                freshAuditService, freshRepo, mock(io.castellum.risk.RiskCacheEvictor.class));
 
         assertNotNull(freshService.getLastError());
         assertTrue(freshService.getLastError().contains("NVD down"),
@@ -319,7 +321,7 @@ class InitialSyncServiceTest {
 
         InitialSyncService freshService = new InitialSyncService(
                 executor, nvdSyncService, epssIngestionService, kevIngestionService,
-                freshAuditService, freshRepo);
+                freshAuditService, freshRepo, mock(io.castellum.risk.RiskCacheEvictor.class));
 
         assertEquals("interrupted", freshService.getLastError(),
                 "lastError must be 'interrupted' when triggered but no completion exists");

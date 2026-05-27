@@ -4,6 +4,7 @@ import io.castellum.audit.AuditService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.risk.Criticality;
+import io.castellum.risk.RiskCacheEvictor;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -25,10 +26,13 @@ public class DeviceController {
 
     private final DeviceRepository deviceRepository;
     private final AuditService auditService;
+    private final RiskCacheEvictor riskCacheEvictor;
 
-    public DeviceController(DeviceRepository deviceRepository, AuditService auditService) {
+    public DeviceController(DeviceRepository deviceRepository, AuditService auditService,
+                            RiskCacheEvictor riskCacheEvictor) {
         this.deviceRepository = deviceRepository;
         this.auditService = auditService;
+        this.riskCacheEvictor = riskCacheEvictor;
     }
 
     @GetMapping
@@ -73,6 +77,9 @@ public class DeviceController {
         device.setId(id);
         Device saved = deviceRepository.save(device);
         auditService.recordEvent("system", "DEVICE_UPDATE", "device", String.valueOf(saved.getId()), saved);
+        // Criticality is a composite-score input — invalidate this device's cached risk
+        // (and the top-N ranking, since its rank may have moved).
+        riskCacheEvictor.onCriticalityChange(id);
         return saved;
     }
 
@@ -82,6 +89,8 @@ public class DeviceController {
         Device existing = deviceRepository.findById(id).orElseThrow(NoSuchElementException::new);
         deviceRepository.deleteById(id);
         auditService.recordEvent("system", "DEVICE_DELETE", "device", String.valueOf(id), existing);
+        // Drop the deleted device's cached risk and the top-N ranking it may have appeared in.
+        riskCacheEvictor.onCriticalityChange(id);
         return ResponseEntity.noContent().build();
     }
 }

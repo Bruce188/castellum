@@ -9,11 +9,13 @@ import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.config.CacheNames;
 import io.castellum.graph.CpeMapper;
 import io.castellum.risk.Criticality;
 import io.castellum.risk.KevEntryRepository;
 import io.castellum.web.dto.CveDetailDto;
 import io.castellum.web.dto.CveSummaryDto;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -116,6 +118,8 @@ public class CveController {
      */
     @GetMapping("/fleet")
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
+    @Cacheable(cacheNames = CacheNames.CVE_FLEET,
+        key = "T(java.util.Objects).hash(#page, #size, #minScore, #deviceId, #kevOnly, #sort)")
     public Page<CveSummaryDto> fleet(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,

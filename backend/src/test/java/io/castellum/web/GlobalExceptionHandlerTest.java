@@ -46,6 +46,9 @@ class GlobalExceptionHandlerTest {
     private AuditService auditService;
 
     @MockBean
+    private io.castellum.risk.RiskCacheEvictor riskCacheEvictor;
+
+    @MockBean
     private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;

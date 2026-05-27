@@ -63,13 +63,7 @@ export function TopologyPage() {
     try {
       const page = await api.listDevices();
       setDevices(page.content);
-      const results = await Promise.allSettled(
-        page.content.map(d => api.deviceRisk(d.id))
-      );
-      const map = new Map<number, DeviceRiskDto>();
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
-      });
+      const map = await api.deviceRisksBatch(page.content.map(d => d.id));
       setRisksById(map);
       setLoadError(null);
     } catch (err) {
@@ -89,14 +83,8 @@ export function TopologyPage() {
         const page = await api.listDevices();
         if (cancelled) return;
         setDevices(page.content);
-        const results = await Promise.allSettled(
-          page.content.map(d => api.deviceRisk(d.id))
-        );
+        const map = await api.deviceRisksBatch(page.content.map(d => d.id));
         if (cancelled) return;
-        const map = new Map<number, DeviceRiskDto>();
-        results.forEach((r, i) => {
-          if (r.status === 'fulfilled') map.set(page.content[i].id, r.value);
-        });
         setRisksById(map);
         setLoadError(null);
       } catch (err) {

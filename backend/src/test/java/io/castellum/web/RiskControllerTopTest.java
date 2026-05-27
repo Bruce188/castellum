@@ -45,7 +45,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(controllers = RiskController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class,
-    RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+    RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class,
+    io.castellum.risk.DeviceRiskService.class})
 @WithMockUser(roles = "VIEWER")
 class RiskControllerTopTest {
 
