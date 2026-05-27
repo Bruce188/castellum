@@ -22,10 +22,18 @@ public final class CpeMapper {
     /**
      * Derive a CPE 2.3 string from a {@link NetworkService}.
      *
+     * <p>When the service carries a stored CPE (captured from nmap's XML output), it is
+     * already a CPE 2.3 formatted string and is returned verbatim. Otherwise the legacy
+     * name-based derivation below applies.
+     *
      * @return CPE string, or {@code null} if the service name is null/blank or sanitizes to empty.
      */
     public static String toCpe23(NetworkService service) {
-        if (service == null || service.getName() == null) return null;
+        if (service == null) return null;
+        if (service.getCpe() != null && !service.getCpe().isBlank()) {
+            return service.getCpe();
+        }
+        if (service.getName() == null) return null;
         String slug = service.getName().toLowerCase().replaceAll("[^a-z0-9_-]", "");
         if (slug.isEmpty()) return null;
         String version = (service.getVersion() == null || service.getVersion().isBlank())

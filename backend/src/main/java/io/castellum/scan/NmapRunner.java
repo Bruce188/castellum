@@ -56,6 +56,10 @@ public class NmapRunner {
     List<String> buildArgv(String validatedCidr, ScanType type) {
         List<String> argv = new ArrayList<>();
         argv.add("nmap");
+        // Emit machine-readable XML to stdout for all scan types. The parser consumes this
+        // XML to extract products and CPEs (text output lacks both). "-" = stdout.
+        argv.add("-oX");
+        argv.add("-");
         // Aggressive timing template; per-host timeout is scan-type-aware.
         argv.add("-T4");
         // Port-enumerating scan types (SERVICE_DETECT, OS_FINGERPRINT) use -Pn so hosts

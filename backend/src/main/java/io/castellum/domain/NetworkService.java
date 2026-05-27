@@ -45,6 +45,9 @@ public class NetworkService {
     @Column(name = "protocol_family")
     private String protocolFamily;
 
+    @Column(name = "cpe")
+    private String cpe;
+
     public NetworkService() {}
 
     public NetworkService(Long id, Long deviceId, Integer port, String protocol, String name, String version, Instant observedAt) {
@@ -86,4 +89,7 @@ public class NetworkService {
 
     public String getProtocolFamily() { return protocolFamily; }
     public void setProtocolFamily(String protocolFamily) { this.protocolFamily = protocolFamily; }
+
+    public String getCpe() { return cpe; }
+    public void setCpe(String cpe) { this.cpe = cpe; }
 }

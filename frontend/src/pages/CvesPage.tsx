@@ -193,7 +193,11 @@ export function CvesPage() {
       <div className="flex items-baseline justify-between mb-4">
         <h1 className="text-xl font-semibold text-gray-800">CVEs</h1>
         <div className="text-sm text-gray-500">
-          {page ? `${page.totalElements} CVEs, page ${page.number + 1}/${Math.max(page.totalPages, 1)}` : ''}
+          {page
+            ? `${page.totalElements} CVEs, page ${page.number + 1}/${Math.max(page.totalPages, 1)}`
+            : loading
+              ? 'Loading…'
+              : ''}
         </div>
       </div>
 
@@ -320,6 +324,19 @@ export function CvesPage() {
               </td>
             </tr>
           ))}
+          {loading && (!page || page.content.length === 0) && (
+            <tr>
+              <td colSpan={7} className="px-2 py-6 text-center text-gray-500">
+                <span className="inline-flex items-center gap-2">
+                  <span
+                    data-testid="cves-loading-spinner"
+                    className="inline-block h-4 w-4 rounded-full border-2 border-gray-300 border-t-gray-600 animate-spin"
+                  />
+                  Loading CVEs…
+                </span>
+              </td>
+            </tr>
+          )}
           {!loading && page && page.content.length === 0 && (
             <tr>
               <td colSpan={7} className="px-2 py-4 text-center text-gray-500 italic">

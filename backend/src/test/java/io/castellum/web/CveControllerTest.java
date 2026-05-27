@@ -414,21 +414,33 @@ class CveControllerTest {
     }
 
     /**
-     * Test 2 — {@code ?kevOnly=true} narrows the result set to KEV-listed CVEs.
-     * Verifies the controller pulls the KEV cveId set once and dispatches the
-     * {@code findByCveIdInAndCvssV31ScoreIsNotNull} derived query.
+     * Test 2 — {@code ?kevOnly=true} narrows the result set to CVEs that are BOTH in the
+     * CISA KEV catalog AND matched to a fleet service. A KEV CVE that no fleet service
+     * matches must be excluded; the controller intersects the fleet-matched FK set with
+     * the KEV catalog via {@code findByIdInAndCveIdInAndCvssV31ScoreIsNotNull}.
      */
     @Test
-    void fleetKevOnlyFilterNarrowsResultSet() throws Exception {
-        // review-v44 perf-tuner B3 — controller now uses the projected findAllCveIds()
-        // to avoid loading every column of every KEV row. Stub the projection directly.
-        when(kevEntryRepository.findAllCveIds()).thenReturn(List.of("CVE-A", "CVE-B"));
+    void fleetKevOnlyFilterNarrowsToFleetMatchedKevCves() throws Exception {
+        // KEV catalog has three entries; only CVE-A and CVE-B are matched on the network.
+        // CVE-OFFNET is in the catalog but matches no fleet service → must be excluded.
+        when(kevEntryRepository.findAllCveIds()).thenReturn(List.of("CVE-A", "CVE-B", "CVE-OFFNET"));
 
         Cve cveA = buildCve("CVE-A");
+        cveA.setId(1L);
         cveA.setCvssV31Score(new BigDecimal("9.0"));
         Cve cveB = buildCve("CVE-B");
+        cveB.setId(2L);
         cveB.setCvssV31Score(new BigDecimal("8.0"));
-        when(cveRepository.findByCveIdInAndCvssV31ScoreIsNotNull(eq(Set.of("CVE-A", "CVE-B")), any(Pageable.class)))
+
+        // Fleet has a single service matching CVE-A and CVE-B (FKs 1, 2). CVE-OFFNET (no FK)
+        // is in the catalog but is not part of the fleet-matched set.
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(cveA, cveB));
+
+        // Intersection query: FKs {1,2} ∩ KEV catalog → the two on-network KEV CVEs only.
+        when(cveRepository.findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(
+                eq(Set.of(1L, 2L)), eq(Set.of("CVE-A", "CVE-B", "CVE-OFFNET")), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cveA, cveB)));
 
         Map<String, Enrichment> enrichMap = new HashMap<>();
@@ -440,10 +452,82 @@ class CveControllerTest {
                 .accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content", hasSize(2)))
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-A"))
+            .andExpect(jsonPath("$.content[1].cveId").value("CVE-B"))
             .andExpect(jsonPath("$.content[0].kev").value(true))
             .andExpect(jsonPath("$.content[1].kev").value(true));
 
-        verify(cveRepository).findByCveIdInAndCvssV31ScoreIsNotNull(eq(Set.of("CVE-A", "CVE-B")), any(Pageable.class));
+        // The intersection query is dispatched with the fleet FKs AND the KEV catalog.
+        verify(cveRepository).findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(
+                eq(Set.of(1L, 2L)), eq(Set.of("CVE-A", "CVE-B", "CVE-OFFNET")), any(Pageable.class));
+        // The old unscoped catalog-only query must never run for the kevOnly path.
+        org.mockito.Mockito.verify(cveRepository, org.mockito.Mockito.never())
+            .findByCveIdInAndCvssV31ScoreIsNotNull(any(), any(Pageable.class));
+    }
+
+    /**
+     * Regression — reproduces the original bug where {@code kevOnly=true} returned the
+     * ENTIRE KEV catalog (e.g. ~1599 rows) even though the fleet matched far fewer CVEs.
+     * With the intersection fix the result set is a subset of the fleet-matched set, so
+     * its size can never exceed the number of fleet-matched CVEs.
+     */
+    @Test
+    void fleetKevOnly_resultNeverExceedsFleetMatchedCount() throws Exception {
+        // A large KEV catalog (stand-in for the live ~1599-entry catalog).
+        List<String> hugeCatalog = new java.util.ArrayList<>();
+        for (int i = 0; i < 1599; i++) {
+            hugeCatalog.add(String.format("CVE-9999-%04d", i));
+        }
+        when(kevEntryRepository.findAllCveIds()).thenReturn(hugeCatalog);
+
+        // The fleet matches exactly ONE CVE, and that CVE happens to be in the catalog.
+        Cve onNet = buildCve("CVE-9999-0000");
+        onNet.setId(1L);
+        onNet.setCvssV31Score(new BigDecimal("7.5"));
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(onNet));
+
+        // The intersection query is constrained by the single fleet FK, so the DB returns
+        // at most the fleet-matched rows — never the whole catalog.
+        when(cveRepository.findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(
+                eq(Set.of(1L)), anyCollection(), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(onNet)));
+        stubEnrichmentEmpty();
+
+        mockMvc.perform(get("/api/cve/fleet").param("kevOnly", "true")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            // Result size (1) is ≤ fleet-matched count (1), not the 1599-row catalog.
+            .andExpect(jsonPath("$.content", hasSize(1)))
+            .andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-9999-0000"));
+
+        verify(cveRepository).findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(
+                eq(Set.of(1L)), anyCollection(), any(Pageable.class));
+    }
+
+    /**
+     * kevOnly with an empty fleet (no matched services) returns an empty page — never the
+     * catalog. Guards the short-circuit when {@code fleetMatchedFks} is empty.
+     */
+    @Test
+    void fleetKevOnly_emptyFleet_returnsEmptyPage() throws Exception {
+        when(kevEntryRepository.findAllCveIds()).thenReturn(List.of("CVE-A", "CVE-B"));
+        when(networkServiceRepository.findAll()).thenReturn(List.of());
+        stubEnrichmentEmpty();
+
+        mockMvc.perform(get("/api/cve/fleet").param("kevOnly", "true")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content.length()").value(0))
+            .andExpect(jsonPath("$.totalElements").value(0));
+
+        // No CVE query of any kind should run when the fleet matches nothing.
+        org.mockito.Mockito.verify(cveRepository, org.mockito.Mockito.never())
+            .findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(any(), any(), any(Pageable.class));
+        org.mockito.Mockito.verify(cveRepository, org.mockito.Mockito.never())
+            .findByCveIdInAndCvssV31ScoreIsNotNull(any(), any(Pageable.class));
     }
 
     /**
@@ -586,8 +670,18 @@ class CveControllerTest {
         when(kevEntryRepository.findAllCveIds()).thenReturn(List.of("CVE-A"));
 
         Cve cveA = buildCve("CVE-A");
+        cveA.setId(7L);
         cveA.setCvssV31Score(new BigDecimal("9.0"));
-        when(cveRepository.findByCveIdInAndCvssV31ScoreIsNotNull(eq(Set.of("CVE-A")), any(Pageable.class)))
+
+        // Device 42 has a service that matches CVE-A (FK 7). The kevOnly branch must scope
+        // to THIS device's services (findByDeviceId), not the whole fleet.
+        NetworkService svc = buildService(70L, 42L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        when(networkServiceRepository.findByDeviceId(42L)).thenReturn(List.of(svc));
+        when(cveMatcher.findVulnerable("cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*"))
+            .thenReturn(List.of(cveA));
+        when(cveRepository.findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(
+                eq(Set.of(7L)), eq(Set.of("CVE-A")), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cveA)));
 
         when(enrichment.enrich(anyCollection(), eq(Criticality.CRITICAL)))
@@ -602,6 +696,10 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[0].cveId").value("CVE-A"))
             .andExpect(jsonPath("$.content[0].kev").value(true));
 
+        // deviceId narrows scope to that device's services only.
+        verify(networkServiceRepository).findByDeviceId(42L);
+        verify(cveRepository).findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(
+                eq(Set.of(7L)), eq(Set.of("CVE-A")), any(Pageable.class));
         // Critical assertion — enrichment was invoked with the device's CRITICAL
         // criticality, NOT the MEDIUM default. Proves the kevOnly branch honours
         // the deviceId criticality lookup (analysis Decision 4).

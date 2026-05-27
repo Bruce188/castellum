@@ -47,7 +47,10 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
   return (
     <aside
       data-testid="device-detail-panel"
-      className="fixed right-0 top-0 h-screen w-96 bg-white shadow-lg overflow-y-auto p-4 border-l border-gray-200"
+      // z-20 lifts the panel above the TopologyLegend (z-10), which is pinned to
+      // the same right edge; without it the legend floats on top of the panel
+      // header when a node is selected.
+      className="fixed right-0 top-0 z-20 h-screen w-96 bg-white shadow-lg overflow-y-auto p-4 border-l border-gray-200"
     >
       <header className="flex items-center justify-between mb-4">
         <div>

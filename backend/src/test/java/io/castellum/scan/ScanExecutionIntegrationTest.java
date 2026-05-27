@@ -100,13 +100,20 @@ class ScanExecutionIntegrationTest {
 
     @Test
     void postScan_completesAsync_persistsDevicesAndServices() throws Exception {
-        // One host, two services in the mock stdout.
+        // One host, two services in the mock stdout (nmap -oX - XML).
         String mockStdout = """
-                Nmap scan report for 10.10.10.5
-                Host is up (0.0010s latency).
-                PORT   STATE SERVICE VERSION
-                22/tcp open  ssh     OpenSSH 8.4p1
-                80/tcp open  http    nginx 1.20.1
+                <?xml version="1.0"?>
+                <nmaprun>
+                <host><status state="up" reason="syn-ack"/>
+                <address addr="10.10.10.5" addrtype="ipv4"/>
+                <hostnames></hostnames>
+                <ports>
+                <port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="OpenSSH" version="8.4p1"><cpe>cpe:/a:openbsd:openssh:8.4p1</cpe></service></port>
+                <port protocol="tcp" portid="80"><state state="open"/><service name="http" product="nginx" version="1.20.1"><cpe>cpe:/a:igor_sysoev:nginx:1.20.1</cpe></service></port>
+                </ports>
+                </host>
+                <runstats><finished/></runstats>
+                </nmaprun>
                 """;
         when(nmapRunner.run(anyString(), any(ScanType.class)))
             .thenReturn(new NmapResult(0, mockStdout, ""));
@@ -151,23 +158,28 @@ class ScanExecutionIntegrationTest {
         assertEquals(2, services.size(),
             "exactly 2 NetworkService rows must be persisted for device 10.10.10.5; got " + services.size());
 
-        // Assert 22/tcp ssh row with OpenSSH version.
+        // Assert 22/tcp ssh row with OpenSSH product + CPE 2.3 string.
         NetworkService sshRow = services.stream()
             .filter(s -> s.getPort() == 22 && "tcp".equals(s.getProtocol()))
             .findFirst()
             .orElseThrow(() -> new AssertionError("22/tcp row not found in " + services));
         assertEquals("ssh", sshRow.getName(), "22/tcp service name must be 'ssh'");
-        assertNotNull(sshRow.getVersion(), "22/tcp version must be non-null");
-        assertTrue(sshRow.getVersion().contains("OpenSSH"),
-            "22/tcp version must contain 'OpenSSH'; got: " + sshRow.getVersion());
+        assertEquals("OpenSSH", sshRow.getProduct(),
+            "22/tcp product must be 'OpenSSH'; got: " + sshRow.getProduct());
+        assertEquals("8.4p1", sshRow.getVersion(),
+            "22/tcp version must be nmap's verbatim string; got: " + sshRow.getVersion());
+        assertEquals("cpe:2.3:a:openbsd:openssh:8.4p1:*:*:*:*:*:*:*", sshRow.getCpe(),
+            "22/tcp cpe must be the converted CPE 2.3 string; got: " + sshRow.getCpe());
 
-        // Assert 80/tcp http row with non-null version.
+        // Assert 80/tcp http row with nginx product + CPE.
         NetworkService httpRow = services.stream()
             .filter(s -> s.getPort() == 80 && "tcp".equals(s.getProtocol()))
             .findFirst()
             .orElseThrow(() -> new AssertionError("80/tcp row not found in " + services));
         assertEquals("http", httpRow.getName(), "80/tcp service name must be 'http'");
-        assertNotNull(httpRow.getVersion(), "80/tcp version must be non-null");
+        assertEquals("nginx", httpRow.getProduct(), "80/tcp product must be 'nginx'");
+        assertEquals("cpe:2.3:a:igor_sysoev:nginx:1.20.1:*:*:*:*:*:*:*", httpRow.getCpe(),
+            "80/tcp cpe must be the converted CPE 2.3 string; got: " + httpRow.getCpe());
 
         // Audit events: SCAN_SUBMIT + SCAN_EXECUTE + SCAN_COMPLETE = 3 new rows.
         List<AuditLog> auditAfter = auditLogRepository.findAll();

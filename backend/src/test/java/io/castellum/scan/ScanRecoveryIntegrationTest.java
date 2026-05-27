@@ -85,11 +85,18 @@ class ScanRecoveryIntegrationTest {
     }
 
     private static final String MOCK_STDOUT = """
-            Nmap scan report for 10.10.10.5
-            Host is up (0.0010s latency).
-            PORT   STATE SERVICE VERSION
-            22/tcp open  ssh     OpenSSH 8.4p1
-            80/tcp open  http    nginx 1.20.1
+            <?xml version="1.0"?>
+            <nmaprun>
+            <host><status state="up" reason="syn-ack"/>
+            <address addr="10.10.10.5" addrtype="ipv4"/>
+            <hostnames></hostnames>
+            <ports>
+            <port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="OpenSSH" version="8.4p1"><cpe>cpe:/a:openbsd:openssh:8.4p1</cpe></service></port>
+            <port protocol="tcp" portid="80"><state state="open"/><service name="http" product="nginx" version="1.20.1"><cpe>cpe:/a:igor_sysoev:nginx:1.20.1</cpe></service></port>
+            </ports>
+            </host>
+            <runstats><finished/></runstats>
+            </nmaprun>
             """;
 
     @Test

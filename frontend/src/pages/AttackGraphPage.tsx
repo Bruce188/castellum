@@ -31,6 +31,7 @@ interface Props {
 export function AttackGraphPage({ isAdmin }: Props) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
+  const [risksLoading, setRisksLoading] = useState<boolean>(false);
   const [fromId, setFromId] = useState<number | null>(null);
   const [toId, setToId] = useState<number | null>(null);
   const [response, setResponse] = useState<ShortestPathResponse | null>(null);
@@ -41,6 +42,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
     if (!isAdmin) return;
     let cancelled = false;
     (async () => {
+      setRisksLoading(true);
       try {
         const page = await api.listDevices();
         if (cancelled) return;
@@ -56,6 +58,8 @@ export function AttackGraphPage({ isAdmin }: Props) {
         setRisksById(map);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'load failed');
+      } finally {
+        if (!cancelled) setRisksLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -219,6 +223,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
         <TopologyView
           devices={devices}
           risksById={risksById}
+          risksLoading={risksLoading}
           onNodeClick={() => {
             // Read-only overlay — clicks are intentionally ignored on this page.
           }}

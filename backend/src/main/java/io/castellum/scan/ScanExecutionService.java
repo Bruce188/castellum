@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -112,39 +114,49 @@ public class ScanExecutionService {
             // 6. Persist discovered hosts → devices
             Instant now = Instant.now();
             for (NmapOutputParser.DiscoveredHost host : parsed.hosts()) {
+                // Collect this host's open services up-front.
+                List<NmapOutputParser.DiscoveredService> hostServices = new ArrayList<>();
+                for (NmapOutputParser.DiscoveredService svc : parsed.services()) {
+                    if (svc.ipAddress().equals(host.ipAddress())) {
+                        hostServices.add(svc);
+                    }
+                }
+
+                // Phantom suppression: SERVICE_DETECT runs nmap with -Pn, which marks every
+                // address in the CIDR "up" regardless of whether anything is listening. A host
+                // with zero open services under -Pn is a phantom (e.g. the network/broadcast
+                // address) — skip it entirely. PING_SWEEP and OS_FINGERPRINT are unaffected.
+                if (type == ScanType.SERVICE_DETECT && hostServices.isEmpty()) {
+                    continue;
+                }
+
                 Discovery discovery = new Discovery(
                     host.ipAddress(),
-                    null,           // MAC not available from nmap text output
+                    null,           // MAC not available from nmap XML output
                     host.hostname(),
                     DiscoverySource.NMAP_SCAN,
                     now,
-                    null            // iface not available from nmap text output
+                    null            // iface not available from nmap XML output
                 );
                 Device device = deviceUpsertService.upsert(discovery);
 
                 // 7. Persist discovered services linked to the device
-                for (NmapOutputParser.DiscoveredService svc : parsed.services()) {
-                    if (svc.ipAddress().equals(host.ipAddress())) {
-                        Optional<NetworkService> existing =
-                            networkServiceRepository.findByDeviceIdAndPortAndProtocol(
-                                device.getId(), svc.port(), svc.protocol());
-                        if (existing.isPresent()) {
-                            NetworkService ns = existing.get();
-                            ns.setName(svc.name());
-                            ns.setVersion(svc.version());
-                            ns.setObservedAt(now);
-                            networkServiceRepository.save(ns);
-                        } else {
-                            NetworkService ns = new NetworkService();
-                            ns.setDeviceId(device.getId());
-                            ns.setPort(svc.port());
-                            ns.setProtocol(svc.protocol());
-                            ns.setName(svc.name());
-                            ns.setVersion(svc.version());
-                            ns.setObservedAt(now);
-                            networkServiceRepository.save(ns);
-                        }
+                for (NmapOutputParser.DiscoveredService svc : hostServices) {
+                    Optional<NetworkService> existing =
+                        networkServiceRepository.findByDeviceIdAndPortAndProtocol(
+                            device.getId(), svc.port(), svc.protocol());
+                    NetworkService ns = existing.orElseGet(NetworkService::new);
+                    if (existing.isEmpty()) {
+                        ns.setDeviceId(device.getId());
+                        ns.setPort(svc.port());
+                        ns.setProtocol(svc.protocol());
                     }
+                    ns.setName(svc.name());
+                    ns.setVersion(svc.version());
+                    ns.setProduct(svc.product());
+                    ns.setCpe(svc.cpe23());
+                    ns.setObservedAt(now);
+                    networkServiceRepository.save(ns);
                 }
             }
 

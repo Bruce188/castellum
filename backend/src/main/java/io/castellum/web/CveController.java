@@ -100,10 +100,12 @@ public class CveController {
      *
      * <p><b>v3-F1 params:</b>
      * <ul>
-     *   <li>{@code kevOnly=true} narrows the result set to CVEs that appear in the
-     *       CISA KEV catalog. Implementation: pull the KEV {@code cve_id} set once
-     *       (catalog typically &lt; 2k rows) then use the
-     *       {@code findByCveIdInAndCvssV31ScoreIsNotNull} derived query.</li>
+     *   <li>{@code kevOnly=true} narrows the result set to fleet-matched CVEs that also
+     *       appear in the CISA KEV catalog (respecting {@code deviceId} when present).
+     *       Implementation: pull the KEV {@code cve_id} set once (catalog typically
+     *       &lt; 2k rows) and the fleet-matched FK set, then intersect via the
+     *       {@code findByIdInAndCveIdInAndCvssV31ScoreIsNotNull} derived query so paging
+     *       stays DB-side.</li>
      *   <li>{@code sort=composite} | {@code sort=epss} | {@code sort=kev} — enrichment
      *       window sort: fetch a wider candidate set (capped at 500), enrich
      *       in-memory, sort by the requested key, slice to the requested page. This
@@ -132,14 +134,18 @@ public class CveController {
                 : Criticality.MEDIUM;
 
         if (Boolean.TRUE.equals(kevOnly)) {
-            // Projected query — only the cve_id column. Avoids loading every column of
-            // every KEV row (the catalog is ~1.2k rows today and growing). See
-            // review-v44 perf-tuner B3.
+            // Intersect the CISA KEV catalog with the fleet's matched-services CVE set so
+            // kevOnly returns a true subset of the fleet (respecting deviceId when present),
+            // not the entire catalog. Projected query for the catalog (only cve_id column;
+            // ~1.2k rows and growing — see review-v44 perf-tuner B3); fleet FKs come from the
+            // same matchedCveFks path the non-kevOnly branches use. Paging stays DB-side.
             Set<String> kevIds = new HashSet<>(kevEntryRepository.findAllCveIds());
-            if (kevIds.isEmpty()) {
+            Set<Long> fleetFks = fleetMatchedFks(deviceId);
+            if (kevIds.isEmpty() || fleetFks.isEmpty()) {
                 return Page.empty(pageable);
             }
-            Page<Cve> rawPage = cveRepository.findByCveIdInAndCvssV31ScoreIsNotNull(kevIds, pageable);
+            Page<Cve> rawPage = cveRepository
+                    .findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(fleetFks, kevIds, pageable);
             Map<String, Enrichment> enrich = enrichmentService.enrich(rawPage.getContent(), criticality);
             return rawPage.map(c -> toSummary(c, enrich.get(c.getCveId())));
         }
@@ -189,6 +195,20 @@ public class CveController {
         return (minScore == null)
                 ? cveRepository.findByIdInAndCvssV31ScoreIsNotNull(cveFks, pageable)
                 : cveRepository.findByIdInAndCvssV31ScoreGreaterThanEqual(cveFks, minScore, pageable);
+    }
+
+    /**
+     * Fleet-matched CVE foreign keys for the kevOnly intersection. Scopes to a single
+     * device's services when {@code deviceId} is supplied, else the whole fleet —
+     * mirroring {@link #fleetByDevice}/{@link #applyExistingFleetFilters}. Returns an
+     * empty set (never the full corpus) when no services match, so the caller short-circuits
+     * to an empty page.
+     */
+    private Set<Long> fleetMatchedFks(Long deviceId) {
+        List<NetworkService> services = (deviceId != null)
+                ? networkServiceRepository.findByDeviceId(deviceId)
+                : networkServiceRepository.findAll();
+        return services.isEmpty() ? Set.of() : matchedCveFks(services);
     }
 
     /**
