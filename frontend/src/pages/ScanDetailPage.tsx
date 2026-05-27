@@ -17,18 +17,26 @@ export function ScanDetailPage() {
     scanId === null ? { kind: 'not-found' } : null,
   );
 
-  // Fetch the scan detail
+  // Fetch the scan detail, then poll while the scan is still in flight so the
+  // status transitions PENDING/RUNNING → COMPLETE/FAILED without a manual reload.
   useEffect(() => {
     if (scanId === null) return;
     let cancelled = false;
-    (async () => {
-      if (cancelled) return;
-      setLoading(true);
-      setError(null);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchScan = async (first: boolean) => {
+      if (first) {
+        setLoading(true);
+        setError(null);
+      }
       try {
         const data = await api.getScanDetail(scanId);
         if (cancelled) return;
         setScan(data);
+        setError(null);
+        if (data.status === 'PENDING' || data.status === 'RUNNING') {
+          timer = setTimeout(() => void fetchScan(false), 1500);
+        }
       } catch (err) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : '';
@@ -36,8 +44,13 @@ export function ScanDetailPage() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
-    return () => { cancelled = true; };
+    };
+
+    void fetchScan(true);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [scanId]);
 
   // Resolve discovered devices to (hostname, IP) rows.
@@ -104,7 +117,7 @@ export function ScanDetailPage() {
       </div>
 
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm mb-6">
-        <dt className="text-gray-500">Status</dt><dd>{scan.status}</dd>
+        <dt className="text-gray-500">Status</dt><dd data-testid="scan-status">{scan.status}</dd>
         <dt className="text-gray-500">CIDR</dt><dd className="font-mono">{scan.cidr}</dd>
         <dt className="text-gray-500">Type</dt><dd>{scan.scanType}</dd>
         <dt className="text-gray-500">Requested at</dt><dd>{scan.requestedAt}</dd>

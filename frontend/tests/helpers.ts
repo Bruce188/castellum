@@ -12,6 +12,12 @@ export const CREDS = {
   password: process.env.E2E_ADMIN_PASSWORD ?? 'admin12345',
 };
 
+/** Bootstrap viewer credentials (overridable via env for CI). */
+export const VIEWER_CREDS = {
+  username: process.env.E2E_VIEWER_USERNAME ?? 'viewer',
+  password: process.env.E2E_VIEWER_PASSWORD ?? 'admin12345',
+};
+
 /** Where auth.setup persists the admin storage state. */
 export const STORAGE_STATE = 'playwright/.auth/admin.json';
 
@@ -83,15 +89,20 @@ export async function seedDevice(
   return (await res.json()) as SeededDevice;
 }
 
-/** POST /api/scan (ADMIN) and return the created scan id. */
+/**
+ * POST /api/scan (ADMIN) and return the created scan id. The backend requires
+ * a non-null ScanType; PING_SWEEP (-sn) is the fastest. Defaults to a single
+ * localhost target so the scan reaches a terminal state quickly under test.
+ */
 export async function triggerScan(
   request: APIRequestContext,
   token: string,
-  cidr = '192.168.1.0/24',
+  cidr = '127.0.0.1/32',
+  type: 'PING_SWEEP' | 'SERVICE_DETECT' | 'OS_FINGERPRINT' = 'PING_SWEEP',
 ): Promise<string> {
   const res = await request.post(`${API_URL}/api/scan`, {
     headers: { Authorization: `Bearer ${token}` },
-    data: { cidr },
+    data: { cidr, type },
   });
   if (!res.ok()) {
     throw new Error(`triggerScan failed: ${res.status()} ${await res.text()}`);

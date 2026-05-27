@@ -19,11 +19,21 @@ export default defineConfig({
   // The dev server is the frontend only. The backend (:8081) is assumed to be
   // already running locally; CI boots it as a separate step. VITE_API_BASE_URL
   // is injected because Login.tsx defaults to :8080, which is not the real port.
+  //
+  // --host 127.0.0.1 pins Vite to the IPv4 literal so it matches `url`/baseURL
+  // exactly. Without it, Vite binds the resolved `localhost`, which on CI
+  // runners (dual-stack /etc/hosts) can be IPv6 ::1 while Playwright polls the
+  // IPv4 127.0.0.1 — the probe never connects and webServer startup times out.
+  // --strictPort fails loudly on a port clash instead of silently drifting to
+  // 5174 (which would also strand the :5173 probe). stdout/stderr piping
+  // surfaces Vite's banner or any boot error in the CI log.
   webServer: {
-    command: 'npm run dev',
+    command: 'npm run dev -- --host 127.0.0.1 --port 5173 --strictPort',
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
+    stdout: 'pipe',
+    stderr: 'pipe',
     env: { VITE_API_BASE_URL: API_URL },
   },
   projects: [

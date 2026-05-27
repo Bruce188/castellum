@@ -1,11 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
+import { CREDS, VIEWER_CREDS, BASE_URL, API_URL, apiLogin } from './helpers';
 
-const APP = 'http://127.0.0.1:5173';
-const API = 'http://127.0.0.1:8080';
-const ADMIN = { username: 'admin', password: 'admin' };
-const VIEWER = { username: 'viewer', password: 'admin' };
+const APP = BASE_URL;
+const API = API_URL;
+const ADMIN = CREDS;
+const VIEWER = VIEWER_CREDS;
 
 async function signIn(page: Page, who: { username: string; password: string }) {
+  // Warm-up login flips lastLoginAt server-side so the UI login below lands in
+  // the app shell rather than the first-login password-rotation gate.
+  await apiLogin(page.request, who).catch(() => {});
   await page.goto(APP);
   await page.fill('input[autocomplete="username"]', who.username);
   await page.fill('input[autocomplete="current-password"]', who.password);
@@ -39,7 +43,7 @@ test.describe('Castellum QA sweep', () => {
 
   test('3. admin signs in and lands on main app', async ({ page }) => {
     await signIn(page, ADMIN);
-    await expect(page.getByText('admin', { exact: true })).toBeVisible();
+    await expect(page.getByText(ADMIN.username, { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /sign out/i })).toBeVisible();
   });
 
@@ -77,7 +81,7 @@ test.describe('Castellum QA sweep', () => {
 
   test('7. viewer sign-in works', async ({ page }) => {
     await signIn(page, VIEWER);
-    await expect(page.getByText('viewer', { exact: true })).toBeVisible();
+    await expect(page.getByText(VIEWER.username, { exact: true })).toBeVisible();
   });
 
   test('8. sign-out returns to login screen', async ({ page }) => {
@@ -116,7 +120,7 @@ test.describe('Castellum QA sweep', () => {
     await signIn(page, ADMIN);
     await page.reload();
     await page.waitForTimeout(500);
-    await expect(page.getByText('admin', { exact: true })).toBeVisible();
+    await expect(page.getByText(ADMIN.username, { exact: true })).toBeVisible();
   });
 
   test('12. topology renders some content with seed devices in DB', async ({ page }) => {
@@ -148,6 +152,8 @@ test.describe('Castellum QA sweep', () => {
 
   test('13. recent scans panel shows newly submitted scan within 2s', async ({ page }) => {
     await signIn(page, ADMIN);
+    // RecentScansPanel lives on /scans (TopologyPage has the form but no panel).
+    await page.goto(`${APP}/scans`);
     // submit a scan via the form, then watch panel
     const cidr = page.locator('input').filter({ hasNot: page.locator('[type="password"]') }).first();
     await cidr.fill('127.0.0.1/32');
