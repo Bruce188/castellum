@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AttackGraphPage } from '../pages/AttackGraphPage';
 import { api } from '../api/client';
+import { EDGE_STYLES } from '../components/topologyConstants';
 
 vi.mock('../api/client', () => ({
   api: {
@@ -164,6 +165,35 @@ describe('<AttackGraphPage />', () => {
     // Same device on both sides — still disabled, warning shown
     await waitFor(() => expect(screen.getByTestId('attack-graph-same-device')).toBeInTheDocument());
     expect(btn.disabled).toBe(true);
+  });
+
+  it('attackGraph_admin_rendersRiskTierKey', async () => {
+    render(<AttackGraphPage isAdmin={true} />);
+    await waitFor(() => expect(listDevices).toHaveBeenCalled());
+    expect(screen.getByTestId('risk-tier-key')).toBeInTheDocument();
+    const tiers = ['low', 'med', 'high', 'crit', 'unknown'] as const;
+    for (const t of tiers) {
+      expect(screen.getByTestId(`tier-swatch-${t}`)).toBeInTheDocument();
+    }
+  });
+
+  it('attackGraph_admin_rendersEdgeKeyForDrawnStrokes', async () => {
+    render(<AttackGraphPage isAdmin={true} />);
+    await waitFor(() => expect(listDevices).toHaveBeenCalled());
+    expect(screen.getByTestId('attack-graph-edge-key')).toBeInTheDocument();
+    expect(screen.getByText(/Subnet link/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gateway hub/i)).toBeInTheDocument();
+    expect(screen.getByText(/Docker bridge/i)).toBeInTheDocument();
+    expect(screen.getByText(/Attack path/i)).toBeInTheDocument();
+    const attackSwatch = screen.getByTestId('edge-swatch-attackPath');
+    expect(attackSwatch).toHaveStyle({ backgroundColor: EDGE_STYLES.attackPath.color });
+  });
+
+  it('attackGraph_viewer_hidesLegend', () => {
+    render(<AttackGraphPage isAdmin={false} />);
+    expect(screen.getByTestId('attack-graph-admin-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('risk-tier-key')).toBeNull();
+    expect(screen.queryByTestId('attack-graph-edge-key')).toBeNull();
   });
 
   it('surfaces API errors inline', async () => {
