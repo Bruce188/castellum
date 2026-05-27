@@ -46,7 +46,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 3,
       deviceIds: [1, 2, 3],
-      perSourceCount: { ARP: 2, MDNS: 1 } as Record<'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP', number>,
+      perSourceCount: { ARP: 2, MDNS: 1, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0 },
       sweepId: 9,
     });
 
@@ -86,7 +86,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: {} as Record<'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP', number>,
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0 },
       sweepId: null,
     });
 

@@ -39,6 +39,7 @@ vi.mock('../api/client', () => ({
     listServicesForDevice: vi.fn(),
     feedsStatus: vi.fn(),
     syncStatus: vi.fn(),
+    getActiveCidr: vi.fn(),
   },
 }));
 
@@ -52,12 +53,13 @@ const mockApi = api as unknown as {
   listServicesForDevice: ReturnType<typeof vi.fn>;
   feedsStatus: ReturnType<typeof vi.fn>;
   syncStatus: ReturnType<typeof vi.fn>;
+  getActiveCidr: ReturnType<typeof vi.fn>;
 };
 
 const DEVICES: Device[] = [
-  { id: 1, ipAddress: '10.0.0.1', hostname: 'a', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME' },
-  { id: 2, ipAddress: '10.0.0.2', hostname: 'b', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME' },
-  { id: 3, ipAddress: '10.0.0.3', hostname: 'c', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME' },
+  { id: 1, ipAddress: '10.0.0.1', hostname: 'a', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0 },
+  { id: 2, ipAddress: '10.0.0.2', hostname: 'b', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0 },
+  { id: 3, ipAddress: '10.0.0.3', hostname: 'c', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0 },
 ];
 
 const DEVICES_PAGE: Page<Device> = {
@@ -92,6 +94,8 @@ describe('<TopologyPage /> mount fanout', () => {
       nvd: { lastModified: '2025-01-01T00:00:00Z', rowCount: 200000 },
     });
     mockApi.syncStatus.mockResolvedValue({ running: false, startedAt: null });
+    // ScanTriggerForm (mounted inside TopologyPage) calls getActiveCidr on mount.
+    mockApi.getActiveCidr.mockResolvedValue({ iface: null, cidr: null, ipAddress: null, prefix: 0, note: null });
   });
 
   afterEach(() => {

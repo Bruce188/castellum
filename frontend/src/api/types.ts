@@ -28,6 +28,8 @@ export interface Device {
    * Null for devices seeded before V19 migration.
    */
   discoverySource: DiscoverySource | null;
+  /** Count of network services observed on this device (from GET /api/devices serviceCount). */
+  serviceCount: number;
 }
 
 export interface NetworkService {

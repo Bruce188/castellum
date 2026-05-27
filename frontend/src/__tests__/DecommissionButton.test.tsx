@@ -12,6 +12,9 @@ const device: Device = {
   lastSeen: null,
   criticality: 'HIGH',
   discoveryScope: 'HOME',
+  lastSeenIface: null,
+  discoverySource: null,
+  serviceCount: 0,
 };
 
 describe('<DecommissionButton />', () => {

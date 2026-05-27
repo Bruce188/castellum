@@ -44,6 +44,15 @@ public class Device {
     @Column(name = "discovery_source")
     private DiscoverySource discoverySource;
 
+    /**
+     * Count of network services observed on this device. Computed at entity-load
+     * time via the Hibernate formula; not persisted (no Flyway migration needed).
+     * Uses the physical table name {@code service} and column {@code device_id}
+     * (verified in V2__create_service.sql across both Postgres and H2 profiles).
+     */
+    @org.hibernate.annotations.Formula("(select count(*) from service s where s.device_id = id)")
+    private long serviceCount;
+
     public Device() {}
 
     public Device(Long id, String ipAddress, String hostname, String macAddress, Instant firstSeen, Instant lastSeen) {
@@ -94,4 +103,9 @@ public class Device {
 
     public DiscoverySource getDiscoverySource() { return discoverySource; }
     public void setDiscoverySource(DiscoverySource discoverySource) { this.discoverySource = discoverySource; }
+
+    public long getServiceCount() { return serviceCount; }
+
+    /** Test-support setter — allows controller tests to stub a non-zero count on a mocked Device. */
+    public void setServiceCount(long serviceCount) { this.serviceCount = serviceCount; }
 }

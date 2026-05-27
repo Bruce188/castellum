@@ -18,6 +18,8 @@ function makeDevice(
     criticality: 'MEDIUM',
     discoveryScope: scope,
     lastSeenIface: null,
+    discoverySource: null,
+    serviceCount: 0,
   };
 }
 
@@ -92,6 +94,32 @@ describe('buildGatewayEdges', () => {
     expect(dockerEdges).toHaveLength(0);
     // DOCKER_BRIDGE devices still cluster by /24: 1 gateway-kind edge expected.
     expect(edges).toHaveLength(1);
+  });
+
+  it('lone_link_local_device_yields_isolated_affordance_not_zero_edges', () => {
+    const devices = [
+      makeDevice(1, '192.168.68.1', 'HOME'),
+      makeDevice(2, '192.168.68.50', 'HOME'),
+      makeDevice(3, '169.254.73.152', 'LINK_LOCAL'),
+    ];
+    const edges = buildGatewayEdges(devices);
+    const isolated = edges.filter(e => e.data.kind === 'isolated');
+    expect(isolated).toHaveLength(1);
+    expect(isolated[0].data.source).toBe('3');
+    expect(isolated[0].data.target).toBe('3'); // self-anchor
+    // existing gateway edges for the .68 /24 still present
+    expect(edges.some(e => e.data.kind === 'gateway')).toBe(true);
+  });
+
+  it('docker_bridge_singleton_does_not_double_emit_isolated', () => {
+    const devices = [
+      makeDevice(1, '192.168.68.51', 'HOME', 'host.docker.internal'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+    ];
+    const edges = buildGatewayEdges(devices);
+    // DOCKER_BRIDGE device (id=2) gets a db- edge from the docker host, must NOT also get isolated
+    const isolated = edges.filter(e => e.data.kind === 'isolated');
+    expect(isolated.map(e => e.data.source)).not.toContain('2');
   });
 
   describe('localStorage_override_routes_from_overridden_ip', () => {

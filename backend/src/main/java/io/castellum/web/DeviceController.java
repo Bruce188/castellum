@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.NoSuchElementException;
 
 @RestController
@@ -47,6 +48,15 @@ public class DeviceController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Device> create(@Valid @RequestBody Device device) {
         if (device.getCriticality() == null) device.setCriticality(Criticality.MEDIUM);
+        // first_seen / last_seen are NOT NULL in the schema (V1, DEFAULT now()), but
+        // Hibernate emits an explicit NULL for these mapped fields when unset, which
+        // overrides the column default and trips the constraint. Manually-created
+        // devices (POST /api/devices) carry no scan timestamp, so default both to now
+        // — mirroring the criticality default above. The discovery pipeline sets them
+        // explicitly, so this only fills the manual-create gap.
+        Instant now = Instant.now();
+        if (device.getFirstSeen() == null) device.setFirstSeen(now);
+        if (device.getLastSeen() == null) device.setLastSeen(now);
         Device saved = deviceRepository.save(device);
         auditService.recordEvent("system", "DEVICE_CREATE", "device", String.valueOf(saved.getId()), saved);
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()

@@ -21,7 +21,11 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.List;
 import java.util.Optional;
+
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -174,6 +178,21 @@ class DeviceControllerTest {
     void delete_viewer_returns403() throws Exception {
         mockMvc.perform(delete("/api/devices/9"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_includesServiceCountKey() throws Exception {
+        Device d = new Device();
+        d.setId(10L);
+        d.setIpAddress("10.0.0.10");
+        d.setCriticality(Criticality.MEDIUM);
+        d.setServiceCount(3L);
+        when(deviceRepository.findAll(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(d)));
+
+        mockMvc.perform(get("/api/devices"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].serviceCount").value(3));
     }
 
     @Test

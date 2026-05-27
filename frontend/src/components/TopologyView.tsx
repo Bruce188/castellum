@@ -112,9 +112,19 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     });
 
     cyRef.current = cy;
+    // Expose the cytoscape instance for Playwright e2e assertions (position
+    // data is only accessible through the cy API, not the DOM). Gated to
+    // non-production so the debug handle is tree-shaken out of shipped bundles;
+    // the e2e dev server (vite dev) still sets it.
+    if (import.meta.env.MODE !== 'production') {
+      (window as unknown as { __cytoscape?: cytoscape.Core }).__cytoscape = cy;
+    }
     return () => {
       cy.destroy();
       cyRef.current = null;
+      if (import.meta.env.MODE !== 'production') {
+        delete (window as unknown as { __cytoscape?: cytoscape.Core }).__cytoscape;
+      }
     };
   }, []);
 
@@ -145,15 +155,19 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const scopeClass = SCOPE_CLASS[d.discoveryScope];
       const sourceClass = d.discoverySource ? (SOURCE_CLASS[d.discoverySource] ?? null) : null;
       const extraClasses = [scopeClass, sourceClass].filter(Boolean).join(' ');
+      // serviceCount suffix in the label surfaces the badge on the rendered graph.
+      // The style block at :79 already renders data(label); no style change needed.
+      const baseName = d.hostname ?? d.ipAddress;
       return {
         data: {
           id: String(d.id),
-          label: d.hostname ?? d.ipAddress,
+          label: d.serviceCount > 0 ? `${baseName} · ${d.serviceCount} svc` : baseName,
           ip: d.ipAddress,
           riskTier: tier,
           // discoverySource threaded into node data for tooltip/legend consumers.
           // null when device predates V19 migration.
           discoverySource: d.discoverySource,
+          serviceCount: d.serviceCount,
         },
         classes: extraClasses ? `risk-${tier} ${extraClasses}` : `risk-${tier}`,
       };
@@ -181,12 +195,15 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
 
     cy.elements().remove();
     cy.add([...nodes, ...edges, ...extraEdges]);
+    // randomize:true prevents collinear collapse on sparse graphs — without it
+    // cose-bilkent starts from degenerate (0,0) seed positions and converges
+    // to a straight line when the fleet is small.
     const layoutOptions: CoseBilkentLayoutOptions = {
       name: 'cose-bilkent',
       idealEdgeLength: 100,
       nodeRepulsion: 4500,
       animate: false,
-      randomize: false,
+      randomize: true,
     };
     cy.layout(layoutOptions).run();
   }, [devices, risksById, highlightPath, scopeVisibility]);
