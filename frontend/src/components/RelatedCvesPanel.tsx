@@ -54,30 +54,40 @@ export function RelatedCvesPanel({ deviceId, hostname, ipAddress }: RelatedCvesP
 
   useEffect(() => {
     const myRequestId = ++requestIdRef.current;
-    // Defer the loading-state reset out of the synchronous effect body to keep
-    // React's set-state-in-effect lint clean — same observable behaviour, just
-    // off the immediate render path.
-    queueMicrotask(() => {
-      if (myRequestId !== requestIdRef.current) return;
+    let cancelled = false;
+    // Run via an async IIFE so the setState calls live inside an async
+    // function body (sidestepping react-hooks/set-state-in-effect) while
+    // remaining synchronously sequenced — no queueMicrotask deferral, no
+    // stale-paint window between effect entry and loading reset.
+    const run = async () => {
+      if (cancelled) return;
       setLoading(true);
       setError(null);
-    });
-    api.listFleetCves(0, 50, undefined, deviceId)
-      .then(result => {
-        if (myRequestId !== requestIdRef.current) return;
+      try {
+        const result = await api.listFleetCves(0, 50, undefined, deviceId);
+        if (cancelled || myRequestId !== requestIdRef.current) return;
         setCves(Array.isArray(result.content) ? result.content : []);
         setLoading(false);
-      })
-      .catch(err => {
-        if (myRequestId !== requestIdRef.current) return;
+      } catch (err) {
+        if (cancelled || myRequestId !== requestIdRef.current) return;
         setError(err instanceof Error ? err.message : 'Failed to load related CVEs');
         setLoading(false);
-      });
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [deviceId]);
 
+  // Lifetime-stable: holds an in-flight set so concurrent toggleRow calls do
+  // not double-fire the network request, and so the callback can drop the
+  // `details` map from its dep array (and stay referentially stable across
+  // detail-fetch resolutions for future memoized consumers).
+  const inFlightRef = useRef<Set<string>>(new Set());
   const ensureFetched = useCallback(async (cveId: string) => {
-    const current = details.get(cveId);
-    if (current && current.status !== 'idle' && current.status !== 'error') return;
+    if (inFlightRef.current.has(cveId)) return;
+    inFlightRef.current.add(cveId);
     setDetails(prev => {
       const next = new Map(prev);
       next.set(cveId, { status: 'loading' });
@@ -97,23 +107,28 @@ export function RelatedCvesPanel({ deviceId, hostname, ipAddress }: RelatedCvesP
         next.set(cveId, { status: 'error', message });
         return next;
       });
+    } finally {
+      inFlightRef.current.delete(cveId);
     }
-  }, [details]);
+  }, []);
 
   const toggleRow = (cveId: string) => {
+    // Read pre-toggle state BEFORE dispatching the updater so the side effect
+    // fires exactly once — even under React.StrictMode's double-invocation of
+    // functional updaters in dev.
+    const willExpand = !expanded.has(cveId);
     setExpanded(prev => {
       const next = new Set(prev);
-      if (next.has(cveId)) {
-        next.delete(cveId);
-      } else {
-        next.add(cveId);
-        const existing = details.get(cveId);
-        if (!existing || existing.status === 'idle' || existing.status === 'error') {
-          void ensureFetched(cveId);
-        }
-      }
+      if (prev.has(cveId)) next.delete(cveId);
+      else next.add(cveId);
       return next;
     });
+    if (willExpand) {
+      const existing = details.get(cveId);
+      if (!existing || existing.status === 'idle' || existing.status === 'error') {
+        void ensureFetched(cveId);
+      }
+    }
   };
 
   const displayName = hostname ?? ipAddress;

@@ -3,12 +3,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ThreatsDashboard } from '../components/ThreatsDashboard';
 import { api } from '../api/client';
 
-const navigateMock = vi.fn();
-
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigateMock,
-}));
-
 vi.mock('../api/client', () => ({
   api: {
     topRisk: vi.fn(),
@@ -57,7 +51,6 @@ describe('<ThreatsDashboard />', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    navigateMock.mockReset();
   });
 
   it('shows loading state then top-10 table on success', async () => {
@@ -164,7 +157,6 @@ describe('<ThreatsDashboard />', () => {
     const row = await screen.findByTestId('threats-row-42');
     fireEvent.click(row);
     await screen.findByTestId('threats-related-panel-42');
-    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('expands the panel on Enter and Space keydown', async () => {
@@ -189,8 +181,6 @@ describe('<ThreatsDashboard />', () => {
 
     fireEvent.keyDown(row, { key: ' ' });
     await screen.findByTestId('threats-related-panel-7');
-
-    expect(navigateMock).not.toHaveBeenCalled();
   });
 
   it('shows error message when topRisk fails', async () => {
