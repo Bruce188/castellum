@@ -145,6 +145,23 @@ describe('<RelatedCvesPanel />', () => {
     expect(api.cveDetail).toHaveBeenCalledTimes(1);
   });
 
+  it('keyboard space on a cold row triggers detail lazy fetch', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeDetail('CVE-2024-0001', 'Test description'),
+    );
+    render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-0001');
+    // Space is the very first interaction — exercises the cold-cache path
+    // without an Enter warming it first.
+    fireEvent.keyDown(row, { key: ' ' });
+    await waitFor(() => expect(api.cveDetail).toHaveBeenCalledTimes(1));
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(api.cveDetail).toHaveBeenCalledWith('CVE-2024-0001');
+  });
+
   it('renders error sub-row when cveDetail rejects', async () => {
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
       makePage([makeSummary('CVE-2024-0001', '8.5', false)]),
@@ -162,7 +179,8 @@ describe('<RelatedCvesPanel />', () => {
   it('renders error message when list fleet cves rejects', async () => {
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'));
     render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
-    await screen.findByText(/boom/);
+    const errorEl = await screen.findByText(/boom/);
+    expect(errorEl).toHaveClass('text-red-600');
   });
 
   it('strictmode_doesNotDoubleFireCveDetail_onFirstExpand', async () => {
