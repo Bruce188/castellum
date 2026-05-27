@@ -3,6 +3,7 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.discovery.*;
+import io.castellum.discovery.ActiveNetworkDetector;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
@@ -50,6 +51,8 @@ class PassiveDiscoveryControllerTest {
     UserRepository userRepository;
     @MockBean
     DiscoverySweepRepository sweepRepository;
+    @MockBean
+    ActiveNetworkDetector activeNetworkDetector;
 
     @org.springframework.boot.test.context.TestConfiguration
     static class FixedClockConfig {

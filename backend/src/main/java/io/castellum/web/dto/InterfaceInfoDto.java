@@ -7,9 +7,17 @@ package io.castellum.web.dto;
  *
  * <p>Sourced from {@link java.net.NetworkInterface#getNetworkInterfaces()};
  * filtered to {@code isUp() && !isLoopback()}.
+ *
+ * <p>{@code ipAddress} is the first IPv4 address bound to the interface, or
+ * {@code null} when none is found. {@code prefix} is the network prefix length
+ * of that address (e.g. 22 for a /22), or {@code 0} when unknown.
  */
 public record InterfaceInfoDto(
     String name,
     String displayName,
-    int mtu
+    int mtu,
+    /** First IPv4 address on this interface, or {@code null} when none is assigned. */
+    String ipAddress,
+    /** Network prefix length of {@code ipAddress}, or {@code 0} when unknown. */
+    int prefix
 ) {}
