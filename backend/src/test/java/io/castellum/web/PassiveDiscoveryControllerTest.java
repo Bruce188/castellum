@@ -3,7 +3,6 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.discovery.*;
-import io.castellum.discovery.ActiveNetworkDetector;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.JwtService;
