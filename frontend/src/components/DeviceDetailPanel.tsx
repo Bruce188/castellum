@@ -125,6 +125,8 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
               <dd>{device.lastSeenIface}</dd>
             </>
           )}
+          <dt className="text-gray-500">discovered via</dt>
+          <dd>{device.discoverySource ?? 'Unknown'}</dd>
         </dl>
         {isAdmin && (
           <div className="mt-3">

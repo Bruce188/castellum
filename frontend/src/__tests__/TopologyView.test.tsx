@@ -45,11 +45,15 @@ type MockBag = {
 const factoryMock = cytoscape as unknown as ReturnType<typeof vi.fn> & { __mocks: MockBag };
 const mocks = factoryMock.__mocks;
 
-function makeDevice(id: number, ip: string, scope: DiscoveryScope): Device {
+import type { DiscoverySource } from '../api/types';
+
+function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySource?: DiscoverySource | null): Device {
   return {
     id, ipAddress: ip, hostname: `h${id}`, macAddress: null,
     firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z',
     criticality: 'MEDIUM', discoveryScope: scope,
+    lastSeenIface: null,
+    discoverySource: discoverySource ?? null,
   };
 }
 
@@ -86,6 +90,25 @@ describe('<TopologyView /> scope rendering', () => {
     expect(byId('3')?.classes).toContain('scope-link-local');
     expect(byId('4')?.classes).toContain('scope-loopback');
     expect(byId('5')?.classes).toContain('scope-public');
+  });
+
+  it('topologyView_nodeData_includesDiscoverySource', () => {
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.50', 'HOME', 'ARP'),
+      makeDevice(2, '10.0.0.1', 'HOME', null),
+    ];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls[mocks.add.mock.calls.length - 1][0] as Array<{ data: { id: string; discoverySource?: string | null } }>;
+    const byId = (id: string) => addArgs.find(e => e.data.id === id);
+
+    // Device with ARP source — data.discoverySource must be 'ARP'
+    expect(byId('1')?.data.discoverySource).toBe('ARP');
+    // Device with null source — data.discoverySource must be null (not undefined)
+    expect(byId('2')?.data.discoverySource).toBeNull();
   });
 
   it('topologyView_hidesNodesWhenScopeVisibilityFalse', () => {

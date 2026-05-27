@@ -13,6 +13,7 @@ const device: Device = {
   criticality: 'HIGH',
   discoveryScope: 'DOCKER_BRIDGE',
   lastSeenIface: null,
+  discoverySource: null,
 };
 
 const risk: DeviceRiskDto = {
@@ -192,5 +193,29 @@ describe('<DeviceDetailPanel />', () => {
     );
     expect(screen.queryByTestId('kev-exposure-chip')).toBeNull();
     unmount();
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // AC3/AC4 — discoverySource "discovered via" row
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('discoverySource_renders_discoveredViaRow_whenPresent', () => {
+    const d: Device = { ...device, discoverySource: 'NMAP_SCAN' };
+    render(
+      <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />
+    );
+    const dt = screen.getByText('discovered via');
+    expect(dt).toBeInTheDocument();
+    expect(dt.nextElementSibling).toHaveTextContent('NMAP_SCAN');
+  });
+
+  it('discoverySource_rendersUnknown_whenNull', () => {
+    // device fixture has discoverySource: null
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[]} onClose={() => {}} />
+    );
+    const dt = screen.getByText('discovered via');
+    expect(dt).toBeInTheDocument();
+    expect(dt.nextElementSibling).toHaveTextContent('Unknown');
   });
 });

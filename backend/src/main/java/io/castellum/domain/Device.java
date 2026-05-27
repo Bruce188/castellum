@@ -1,6 +1,7 @@
 package io.castellum.domain;
 
 import io.castellum.discovery.DiscoveryScope;
+import io.castellum.discovery.DiscoverySource;
 import io.castellum.risk.Criticality;
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -37,6 +38,11 @@ public class Device {
 
     @Column(name = "last_seen_iface")
     private String lastSeenIface;
+
+    /** Most recent discovery source that observed this device. Last-writer-wins (mirrors lastSeen). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "discovery_source")
+    private DiscoverySource discoverySource;
 
     public Device() {}
 
@@ -85,4 +91,7 @@ public class Device {
 
     public String getLastSeenIface() { return lastSeenIface; }
     public void setLastSeenIface(String lastSeenIface) { this.lastSeenIface = lastSeenIface; }
+
+    public DiscoverySource getDiscoverySource() { return discoverySource; }
+    public void setDiscoverySource(DiscoverySource discoverySource) { this.discoverySource = discoverySource; }
 }

@@ -22,6 +22,12 @@ export interface Device {
    * physical or virtual network bound the device.
    */
   lastSeenIface: string | null;
+  /**
+   * Most recent discovery source that observed this device.
+   * Last-writer-wins on every upsert (mirrors {@code lastSeen}).
+   * Null for devices seeded before V19 migration.
+   */
+  discoverySource: DiscoverySource | null;
 }
 
 export interface NetworkService {
@@ -238,8 +244,14 @@ export interface AuditFilters {
 
 // ----- Discovery (passive) -----
 
-/** Passive-discovery sources understood by the backend enum {@code DiscoverySource}. */
-export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP';
+/**
+ * Passive and active discovery sources — mirrors the backend {@code DiscoverySource} enum.
+ *
+ * @remarks Full 7-value set: ARP | MDNS | PCAP | LLDP | CDP | OT_PROBE | NMAP_SCAN.
+ * Previously this type omitted OT_PROBE and NMAP_SCAN; widened here so
+ * {@link Device.discoverySource} is correctly typed for all backend values.
+ */
+export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'OT_PROBE' | 'NMAP_SCAN';
 
 export interface PassiveDiscoveryRequest {
   iface: string;

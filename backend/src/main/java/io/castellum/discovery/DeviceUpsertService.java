@@ -64,6 +64,12 @@ public class DeviceUpsertService {
             if (d.iface() != null) {
                 e.setLastSeenIface(d.iface());
             }
+            // discoverySource: overwrite always (last-writer-wins, mirrors lastSeen).
+            // Every upsert — regardless of insert/update — records the most recent
+            // method by which this device was observed. There is no "preserve prior"
+            // semantic: a device re-discovered by NMAP_SCAN after ARP should reflect
+            // NMAP_SCAN as the latest signal.
+            e.setDiscoverySource(d.source());
             return repo.save(e);
         } else {
             Instant now = d.observedAt();
@@ -78,6 +84,8 @@ public class DeviceUpsertService {
             );
             fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
             fresh.setLastSeenIface(d.iface());
+            // discoverySource: last-writer-wins (mirrors lastSeen; see update branch above).
+            fresh.setDiscoverySource(d.source());
             return repo.save(fresh);
         }
     }
@@ -175,6 +183,8 @@ public class DeviceUpsertService {
                 if (d.iface() != null) {
                     existing.setLastSeenIface(d.iface());
                 }
+                // discoverySource: last-writer-wins (mirrors lastSeen; see upsert single-path).
+                existing.setDiscoverySource(d.source());
                 slots.add(new Slot(true, updates.size()));
                 updates.add(existing);
             } else {
@@ -183,6 +193,8 @@ public class DeviceUpsertService {
                     now, now, Criticality.MEDIUM);
                 fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
                 fresh.setLastSeenIface(d.iface());
+                // discoverySource: last-writer-wins (mirrors lastSeen; see upsert single-path).
+                fresh.setDiscoverySource(d.source());
                 slots.add(new Slot(false, inserts.size()));
                 inserts.add(fresh);
             }
