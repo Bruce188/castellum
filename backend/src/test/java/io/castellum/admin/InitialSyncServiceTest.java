@@ -1,5 +1,10 @@
 package io.castellum.admin;
 
+import io.castellum.audit.AuditFilter;
+import io.castellum.audit.AuditLog;
+import io.castellum.audit.AuditLogRepository;
+import io.castellum.audit.AuditQuerySpecifications;
+import io.castellum.audit.AuditService;
 import io.castellum.cve.NvdSyncService;
 import io.castellum.risk.EpssIngestionService;
 import io.castellum.risk.KevIngestionService;
@@ -7,12 +12,20 @@ import io.castellum.web.dto.InitialSyncRequest;
 import io.castellum.web.dto.InitialSyncResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class InitialSyncServiceTest {
@@ -20,6 +33,8 @@ class InitialSyncServiceTest {
     private NvdSyncService nvdSyncService;
     private EpssIngestionService epssIngestionService;
     private KevIngestionService kevIngestionService;
+    private AuditService auditService;
+    private AuditLogRepository auditLogRepository;
     private InitialSyncService service;
 
     /**
@@ -42,6 +57,8 @@ class InitialSyncServiceTest {
         nvdSyncService = mock(NvdSyncService.class);
         epssIngestionService = mock(EpssIngestionService.class);
         kevIngestionService = mock(KevIngestionService.class);
+        auditService = mock(AuditService.class);
+        auditLogRepository = mock(AuditLogRepository.class);
 
         // Use a ThreadPoolTaskExecutor that executes synchronously
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -51,8 +68,12 @@ class InitialSyncServiceTest {
         executor.setThreadNamePrefix("test-");
         executor.initialize();
 
+        // Default: audit repo returns empty pages (no completed events, no triggered events)
+        when(auditLogRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
         service = new InitialSyncService(executor, nvdSyncService, epssIngestionService,
-            kevIngestionService);
+            kevIngestionService, auditService, auditLogRepository);
     }
 
     // ── Task A.3 CAS contract tests ────────────────────────────────────────────
@@ -138,5 +159,171 @@ class InitialSyncServiceTest {
         Thread.sleep(200);
 
         verify(nvdSyncService).bulkPull(eq(since), eq(until));
+    }
+
+    // ── Task 1 new tests: terminal audit event + durable reconstruction ───────
+
+    @Test
+    void runSync_onSuccess_emitsInitialSyncCompletedEvent_withOkTrue() throws Exception {
+        service.trigger(InitialSyncRequest.defaults(), "admin");
+        Thread.sleep(200);
+
+        verify(auditService).recordEvent(
+                anyString(),
+                eq("INITIAL_SYNC_COMPLETED"),
+                eq("initial-sync"),
+                eq("global"),
+                argThat(payload -> {
+                    if (!(payload instanceof Map)) return false;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> m = (Map<String, Object>) payload;
+                    return Boolean.TRUE.equals(m.get("ok"))
+                            && m.get("failedFeeds") instanceof List
+                            && ((List<?>) m.get("failedFeeds")).isEmpty()
+                            && m.get("lastError") == null;
+                })
+        );
+    }
+
+    @Test
+    void runSync_onSuccess_setsLastCompletedAt_clearsLastError() throws Exception {
+        service.trigger(InitialSyncRequest.defaults(), "admin");
+        Thread.sleep(200);
+
+        assertNotNull(service.getLastCompletedAt(), "lastCompletedAt must be set after successful run");
+        assertNull(service.getLastError(), "lastError must be null after successful run");
+    }
+
+    @Test
+    void runSync_whenKevFails_emitsCompletedEvent_okFalse_withKevInFailedFeeds_andLastError()
+            throws Exception {
+        doThrow(new IOException("KEV down")).when(kevIngestionService).ingest();
+
+        service.trigger(InitialSyncRequest.defaults(), "admin");
+        Thread.sleep(200);
+
+        // per-feed isolation: EPSS still ran
+        verify(epssIngestionService).ingest();
+
+        verify(auditService).recordEvent(
+                anyString(),
+                eq("INITIAL_SYNC_COMPLETED"),
+                eq("initial-sync"),
+                eq("global"),
+                argThat(payload -> {
+                    if (!(payload instanceof Map)) return false;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> m = (Map<String, Object>) payload;
+                    if (Boolean.TRUE.equals(m.get("ok"))) return false;
+                    List<?> failed = (List<?>) m.get("failedFeeds");
+                    if (failed == null || failed.isEmpty()) return false;
+                    String lastErr = (String) m.get("lastError");
+                    return lastErr != null && lastErr.contains("KEV down");
+                })
+        );
+
+        assertNotNull(service.getLastError());
+        assertTrue(service.getLastError().contains("KEV down"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncStatus_afterRestart_reconstructsLastCompletedFromAudit() throws Exception {
+        // Simulate restart: fresh service instance with empty in-memory state
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("test-restart-");
+        executor.initialize();
+
+        AuditLogRepository freshRepo = mock(AuditLogRepository.class);
+        AuditService freshAuditService = mock(AuditService.class);
+
+        Instant completedTs = Instant.parse("2026-05-20T10:00:00Z");
+        AuditLog completedRow = new AuditLog(
+                completedTs, "system", "INITIAL_SYNC_COMPLETED",
+                "initial-sync", "global",
+                "{\"ok\":true,\"failedFeeds\":[],\"lastError\":null}");
+
+        Page<AuditLog> completedPage = new PageImpl<>(List.of(completedRow));
+        // First call (COMPLETED query) returns the completed row
+        when(freshRepo.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(completedPage);
+
+        InitialSyncService freshService = new InitialSyncService(
+                executor, nvdSyncService, epssIngestionService, kevIngestionService,
+                freshAuditService, freshRepo);
+
+        assertEquals(completedTs, freshService.getLastCompletedAt(),
+                "getLastCompletedAt must reconstruct from audit row after restart");
+        assertNull(freshService.getLastError(),
+                "getLastError must be null when audit payload says ok=true");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncStatus_afterRestart_reconstructsFailedRun() throws Exception {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("test-restart2-");
+        executor.initialize();
+
+        AuditLogRepository freshRepo = mock(AuditLogRepository.class);
+        AuditService freshAuditService = mock(AuditService.class);
+
+        Instant completedTs = Instant.parse("2026-05-19T08:00:00Z");
+        AuditLog failedRow = new AuditLog(
+                completedTs, "system", "INITIAL_SYNC_COMPLETED",
+                "initial-sync", "global",
+                "{\"ok\":false,\"failedFeeds\":[\"NVD\"],\"lastError\":\"NVD down\"}");
+
+        Page<AuditLog> failedPage = new PageImpl<>(List.of(failedRow));
+        when(freshRepo.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(failedPage);
+
+        InitialSyncService freshService = new InitialSyncService(
+                executor, nvdSyncService, epssIngestionService, kevIngestionService,
+                freshAuditService, freshRepo);
+
+        assertNotNull(freshService.getLastError());
+        assertTrue(freshService.getLastError().contains("NVD down"),
+                "getLastError must reconstruct from failed audit payload");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncStatus_afterRestart_triggeredButNoCompletion_reportsInterrupted() throws Exception {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("test-interrupted-");
+        executor.initialize();
+
+        AuditLogRepository freshRepo = mock(AuditLogRepository.class);
+        AuditService freshAuditService = mock(AuditService.class);
+
+        // COMPLETED query returns empty; TRIGGERED query returns a row
+        AuditLog triggeredRow = new AuditLog(
+                Instant.parse("2026-05-18T06:00:00Z"), "admin", "INITIAL_SYNC_TRIGGERED",
+                "initial-sync", "global", "{\"since\":\"1970-01-01T00:00:00Z\"}");
+        Page<AuditLog> emptyPage = new PageImpl<>(Collections.emptyList());
+        Page<AuditLog> triggeredPage = new PageImpl<>(List.of(triggeredRow));
+
+        when(freshRepo.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(emptyPage)    // first call: COMPLETED query → empty
+                .thenReturn(triggeredPage); // second call: TRIGGERED query → has a row
+
+        InitialSyncService freshService = new InitialSyncService(
+                executor, nvdSyncService, epssIngestionService, kevIngestionService,
+                freshAuditService, freshRepo);
+
+        assertEquals("interrupted", freshService.getLastError(),
+                "lastError must be 'interrupted' when triggered but no completion exists");
+        assertNull(freshService.getLastCompletedAt(),
+                "lastCompletedAt must be null when sync was interrupted");
     }
 }

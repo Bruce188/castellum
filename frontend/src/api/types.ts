@@ -220,6 +220,8 @@ export interface InitialSyncResponse {
 export interface SyncStatusResponse {
   running: boolean;
   startedAt: string | null;
+  lastCompletedAt: string | null;
+  lastError: string | null;
 }
 
 export interface AuditEntry {
