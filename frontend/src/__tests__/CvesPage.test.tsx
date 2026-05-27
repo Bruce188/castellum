@@ -355,4 +355,46 @@ describe('<CvesPage />', () => {
       expect(lastCall[4]).toBe(true);
     });
   });
+
+  it('cvesPage_rendersEmDash_whenEpssAbsent', async () => {
+    listFleetCves.mockResolvedValueOnce({
+      content: [{ ...baseCve, epssScore: undefined as any }],
+      totalElements: 1,
+      totalPages: 1,
+      number: 0,
+      size: 25,
+    });
+
+    renderWith();
+
+    await waitFor(() => {
+      expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument();
+    });
+
+    // The EPSS cell must render an em-dash and must NOT contain NaN or NaN%.
+    const allDashes = screen.getAllByText('—');
+    expect(allDashes.length).toBeGreaterThan(0);
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
+
+  it('cvesPage_rendersEmDash_whenCompositeAbsent', async () => {
+    listFleetCves.mockResolvedValueOnce({
+      content: [{ ...baseCve, compositeScore: undefined as any }],
+      totalElements: 1,
+      totalPages: 1,
+      number: 0,
+      size: 25,
+    });
+
+    renderWith();
+
+    await waitFor(() => {
+      expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument();
+    });
+
+    // The Composite cell must render an em-dash and must NOT contain NaN.
+    const allDashes = screen.getAllByText('—');
+    expect(allDashes.length).toBeGreaterThan(0);
+    expect(screen.queryByText(/NaN/)).toBeNull();
+  });
 });
