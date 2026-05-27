@@ -89,8 +89,9 @@ public class NmapRunner {
             Future<byte[]> stderrFuture = drainer.submit(() -> readCapped(process.getErrorStream(), MAX_OUTPUT_BYTES));
             drainer.shutdown();
 
-            // 5-minute outer cap. With --host-timeout 30s on the nmap side, a /24 of mostly
-            // dead hosts caps near ceil(256/parallel_probes) × 30s; -T4 keeps responsive hosts fast.
+            // 5-minute outer cap. With the per-type --host-timeout on the nmap side (30s for
+            // sweeps, 180s for port-enumerating scans), a /24 of mostly dead hosts caps near
+            // ceil(256/parallel_probes) × host-timeout; -T4 keeps responsive hosts fast.
             boolean finished = process.waitFor(300, TimeUnit.SECONDS);
             if (!finished) {
                 throw new IOException("nmap timed out");
