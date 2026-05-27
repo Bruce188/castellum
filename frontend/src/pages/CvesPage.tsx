@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { CveFleetSort, CveSummaryDto, Page } from '../api/types';
@@ -53,8 +53,15 @@ export function CvesPage() {
   const pageNumber = Math.max(0, Number(searchParams.get('page') ?? '0') | 0);
   const kevOnly = searchParams.get('kevOnly') === 'true';
   const sortParam = searchParams.get('sort');
-  const sort: CveFleetSort | undefined =
-    sortParam !== null && isSort(sortParam) ? sortParam : undefined;
+  // Default to 'composite' so a no-param load (a fresh /cves visit or a shared
+  // link without ?sort=) requests composite-DESC. Clicking any column header
+  // writes an explicit ?sort=<key> via onSortToggle, so the active ordering is
+  // always reflected in the URL. An explicit ?sort= always wins (parsed first).
+  const sort: CveFleetSort =
+    sortParam !== null && isSort(sortParam) ? sortParam : 'composite';
+
+  const rawQ = searchParams.get('q') ?? '';
+  const searchQuery = rawQ;
 
   const [page, setPage] = useState<Page<CveSummaryDto> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -152,18 +159,19 @@ export function CvesPage() {
   };
 
   /**
-   * Toggle sort: clicking the active sort key clears it; otherwise sets to that
-   * key. Always resets {@code page} back to 0 because changing the order
-   * key under a stale page index would surface a confusing slice of the new
-   * ordering (e.g. lingering on page 4 of CVSS-DESC while sorting flipped to
-   * composite-DESC). Matches the page-reset convention of severity and KEV
-   * toggles. (code-reviewer NB-2)
+   * Set sort to the clicked column. A header click always writes an explicit
+   * {@code ?sort=<key>} — including for the composite default — so the active
+   * ordering is deep-linkable/shareable and a column-header click is always
+   * observable in the URL (conventional table-sort UX). Always resets
+   * {@code page} back to 0 because changing the order key under a stale page
+   * index would surface a confusing slice of the new ordering (e.g. lingering
+   * on page 4 of CVSS-DESC while sorting flipped to composite-DESC). Matches
+   * the page-reset convention of severity and KEV toggles. (code-reviewer NB-2)
    */
   const onSortToggle = (key: CveFleetSort) => {
     setSearchParams(prev => {
       const params = new URLSearchParams(prev);
-      if (sort === key) params.delete('sort');
-      else params.set('sort', key);
+      params.set('sort', key);
       params.delete('page');
       return params;
     });
@@ -179,6 +187,16 @@ export function CvesPage() {
     });
   };
 
+  const onSearchChange = (next: string) => {
+    setSearchParams(prev => {
+      const params = new URLSearchParams(prev);
+      if (next === '') params.delete('q');
+      else params.set('q', next);
+      params.delete('page');
+      return params;
+    });
+  };
+
   const setPageNumber = (next: number) => {
     setSearchParams(prev => {
       const params = new URLSearchParams(prev);
@@ -187,6 +205,39 @@ export function CvesPage() {
       return params;
     });
   };
+
+  // visibleRows: filter page.content by cveId substring (client-side search),
+  // then apply composite stable tiebreak when sort is 'composite' (incl. default).
+  // For non-composite sorts the server order is preserved.
+  const visibleRows = useMemo<CveSummaryDto[]>(() => {
+    const content = page?.content ?? [];
+
+    // Filter first (case-insensitive cveId substring)
+    const filtered = searchQuery
+      ? content.filter(cve =>
+          cve.cveId.toLowerCase().includes(searchQuery.toLowerCase()),
+        )
+      : content;
+
+    if (sort !== 'composite') return filtered;
+
+    // Stable composite tiebreak: compositeScore DESC → kev DESC → epssScore DESC → cveId ASC
+    return [...filtered].sort((a, b) => {
+      const aComposite = a.compositeScore !== null ? Number(a.compositeScore) : -Infinity;
+      const bComposite = b.compositeScore !== null ? Number(b.compositeScore) : -Infinity;
+      if (bComposite !== aComposite) return bComposite - aComposite;
+
+      // kev true first (DESC)
+      if (a.kev !== b.kev) return a.kev ? -1 : 1;
+
+      const aEpss = a.epssScore !== null ? Number(a.epssScore) : -Infinity;
+      const bEpss = b.epssScore !== null ? Number(b.epssScore) : -Infinity;
+      if (bEpss !== aEpss) return bEpss - aEpss;
+
+      // cveId ASC
+      return a.cveId < b.cveId ? -1 : a.cveId > b.cveId ? 1 : 0;
+    });
+  }, [page, sort, searchQuery]);
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -240,6 +291,15 @@ export function CvesPage() {
         >
           KEV only
         </button>
+        <input
+          type="search"
+          data-testid="cves-search-input"
+          aria-label="Search CVE id"
+          placeholder="Search CVE id…"
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          className="text-sm border rounded px-2 py-1 w-40"
+        />
         <button
           type="button"
           onClick={fetchPage}
@@ -255,32 +315,52 @@ export function CvesPage() {
         <thead>
           <tr className="bg-gray-100 text-left">
             <th className="px-2 py-1 border">CVE ID</th>
-            <th className="px-2 py-1 border w-20">CVSS v3.1</th>
-            <th className="px-2 py-1 border w-16">
+            <th
+              className="px-2 py-1 border w-20"
+              aria-sort={sort === 'cvss' ? 'descending' : 'none'}
+            >
+              <button
+                type="button"
+                onClick={() => onSortToggle('cvss')}
+                className="font-semibold hover:underline"
+              >
+                CVSS v3.1{sort === 'cvss' ? ' ↓' : ' ↕'}
+              </button>
+            </th>
+            <th
+              className="px-2 py-1 border w-16"
+              aria-sort={sort === 'kev' ? 'descending' : 'none'}
+            >
               <button
                 type="button"
                 onClick={() => onSortToggle('kev')}
                 className="font-semibold hover:underline"
               >
-                KEV{sort === 'kev' ? ' ↓' : ''}
+                KEV{sort === 'kev' ? ' ↓' : ' ↕'}
               </button>
             </th>
-            <th className="px-2 py-1 border w-20">
+            <th
+              className="px-2 py-1 border w-20"
+              aria-sort={sort === 'epss' ? 'descending' : 'none'}
+            >
               <button
                 type="button"
                 onClick={() => onSortToggle('epss')}
                 className="font-semibold hover:underline"
               >
-                EPSS{sort === 'epss' ? ' ↓' : ''}
+                EPSS{sort === 'epss' ? ' ↓' : ' ↕'}
               </button>
             </th>
-            <th className="px-2 py-1 border w-24">
+            <th
+              className="px-2 py-1 border w-24"
+              aria-sort={sort === 'composite' ? 'descending' : 'none'}
+            >
               <button
                 type="button"
                 onClick={() => onSortToggle('composite')}
                 className="font-semibold hover:underline"
               >
-                Composite{sort === 'composite' ? ' ↓' : ''}
+                Composite{sort === 'composite' ? ' ↓' : ' ↕'}
               </button>
             </th>
             <th className="px-2 py-1 border">Description</th>
@@ -288,7 +368,7 @@ export function CvesPage() {
           </tr>
         </thead>
         <tbody>
-          {page?.content.map((cve) => (
+          {visibleRows.map((cve) => (
             <tr key={cve.cveId} className="border-b hover:bg-gray-50 select-none">
               <td className="px-2 py-1 border font-mono text-xs select-text">{cve.cveId}</td>
               <td className={`px-2 py-1 border tabular-nums ${severityClassFromString(cve.cvssV31Score)}`}>
@@ -337,7 +417,7 @@ export function CvesPage() {
               </td>
             </tr>
           )}
-          {!loading && page && page.content.length === 0 && (
+          {!loading && page && visibleRows.length === 0 && (
             <tr>
               <td colSpan={7} className="px-2 py-4 text-center text-gray-500 italic">
                 No CVEs match this filter.
