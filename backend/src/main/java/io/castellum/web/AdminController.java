@@ -39,7 +39,9 @@ public class AdminController {
     public ResponseEntity<SyncStatusResponse> syncStatus() {
         return ResponseEntity.ok(new SyncStatusResponse(
                 initialSyncService.isInFlight(),
-                initialSyncService.getStartedAt()));
+                initialSyncService.getStartedAt(),
+                initialSyncService.getLastCompletedAt(),
+                initialSyncService.getLastError()));
     }
 
     /**

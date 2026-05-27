@@ -143,4 +143,31 @@ class AdminControllerTest {
         mvc.perform(get("/api/admin/sync/status").with(anonymous()))
             .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void admin_getSyncStatus_includesLastCompletedAtAndLastError() throws Exception {
+        Instant completedTs = Instant.parse("2026-05-20T10:00:00Z");
+        when(initialSyncService.isInFlight()).thenReturn(false);
+        when(initialSyncService.getStartedAt()).thenReturn(null);
+        when(initialSyncService.getLastCompletedAt()).thenReturn(completedTs);
+        when(initialSyncService.getLastError()).thenReturn("boom");
+
+        mvc.perform(get("/api/admin/sync/status"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.lastCompletedAt").value("2026-05-20T10:00:00Z"))
+            .andExpect(jsonPath("$.lastError").value("boom"));
+    }
+
+    @Test
+    void admin_getSyncStatus_nullCompletion_fieldsAreNull() throws Exception {
+        when(initialSyncService.isInFlight()).thenReturn(false);
+        when(initialSyncService.getStartedAt()).thenReturn(null);
+        when(initialSyncService.getLastCompletedAt()).thenReturn(null);
+        when(initialSyncService.getLastError()).thenReturn(null);
+
+        mvc.perform(get("/api/admin/sync/status"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.lastCompletedAt").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.lastError").value(org.hamcrest.Matchers.nullValue()));
+    }
 }
