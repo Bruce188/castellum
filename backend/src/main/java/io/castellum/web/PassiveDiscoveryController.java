@@ -1,6 +1,7 @@
 package io.castellum.web;
 
 import io.castellum.discovery.*;
+import io.castellum.web.dto.ActiveCidrDto;
 import io.castellum.web.dto.DiscoverySourceDto;
 import io.castellum.web.dto.DiscoverySweepDto;
 import io.castellum.web.dto.InterfaceInfoDto;
@@ -11,6 +12,8 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.Inet4Address;
+import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.time.Clock;
@@ -34,19 +37,22 @@ public class PassiveDiscoveryController {
     private final boolean pcapEnabled;
     private final boolean lldpEnabled;
     private final boolean cdpEnabled;
+    private final ActiveNetworkDetector activeNetworkDetector;
 
     public PassiveDiscoveryController(PassiveDiscoveryService service,
                                  DiscoverySweepRepository sweepRepo,
                                  Clock clock,
                                  @Value("${castellum.discovery.pcap.enabled:false}") boolean pcapEnabled,
                                  @Value("${castellum.discovery.lldp.enabled:false}") boolean lldpEnabled,
-                                 @Value("${castellum.discovery.cdp.enabled:false}") boolean cdpEnabled) {
+                                 @Value("${castellum.discovery.cdp.enabled:false}") boolean cdpEnabled,
+                                 ActiveNetworkDetector activeNetworkDetector) {
         this.service = service;
         this.sweepRepo = sweepRepo;
         this.clock = clock;
         this.pcapEnabled = pcapEnabled;
         this.lldpEnabled = lldpEnabled;
         this.cdpEnabled = cdpEnabled;
+        this.activeNetworkDetector = activeNetworkDetector;
     }
 
     @PostMapping("/passive")
@@ -101,7 +107,17 @@ public class PassiveDiscoveryController {
             for (NetworkInterface nic : Collections.list(nics)) {
                 try {
                     if (!nic.isUp() || nic.isLoopback()) continue;
-                    out.add(new InterfaceInfoDto(nic.getName(), nic.getDisplayName(), nic.getMTU()));
+                    String ipAddress = null;
+                    int prefix = 0;
+                    for (InterfaceAddress ia : nic.getInterfaceAddresses()) {
+                        if (ia.getAddress() instanceof Inet4Address) {
+                            ipAddress = ia.getAddress().getHostAddress();
+                            prefix = ia.getNetworkPrefixLength();
+                            break;
+                        }
+                    }
+                    out.add(new InterfaceInfoDto(nic.getName(), nic.getDisplayName(), nic.getMTU(),
+                        ipAddress, prefix));
                 } catch (SocketException ignored) {
                     // Skip this interface — it disappeared between enumeration and inspection.
                 }
@@ -110,6 +126,23 @@ public class PassiveDiscoveryController {
             // Best-effort enumeration; return what we have so far.
         }
         return out;
+    }
+
+    /**
+     * Returns the host's primary-interface CIDR derived from {@code /proc/net/route}.
+     *
+     * <p>VIEWER and ADMIN — read-only introspection; needed to pre-fill the scan form
+     * for any authenticated user. The scan POST is separately RBAC-guarded.
+     *
+     * <p>Returns the documented empty shape ({@code prefix=0}, all strings null) when
+     * the host is non-Linux or has no default route. Never returns 204.
+     */
+    @GetMapping("/active-cidr")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
+    public ActiveCidrDto activeCidr() {
+        return activeNetworkDetector.detect()
+            .map(n -> new ActiveCidrDto(n.iface(), n.cidr(), n.ipAddress(), n.prefix(), n.note()))
+            .orElse(new ActiveCidrDto(null, null, null, 0, null));
     }
 
     /**

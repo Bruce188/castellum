@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import type { ScanType } from '../api/types';
 import { useScanStatus } from '../hooks/useScanStatus';
@@ -14,7 +14,21 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
   const [type, setType] = useState<ScanType>('PING_SWEEP');
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cidrNote, setCidrNote] = useState<string | null>(null);
   const scan = useScanStatus(activeScanId);
+
+  // Fetch the host's primary-interface CIDR on mount and pre-fill the input.
+  // Uses a cancelled-guard (mirror of DiscoveryControlPanel) to prevent
+  // set-state-in-effect after unmount. Falls back silently on any error.
+  useEffect(() => {
+    let cancelled = false;
+    api.getActiveCidr().then(r => {
+      if (cancelled) return;
+      if (r?.cidr) setCidr(r.cidr);
+      if (r?.note) setCidrNote(r.note);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,6 +61,9 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
           required
           title="CIDR notation, e.g. 192.168.1.0/24 — the subnet the scanner will sweep."
         />
+        {cidrNote && (
+          <span className="ml-2 text-xs text-gray-500" data-testid="cidr-note">{cidrNote}</span>
+        )}
       </label>
       <label className="text-sm font-medium">Type
         <select

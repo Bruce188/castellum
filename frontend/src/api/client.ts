@@ -1,4 +1,5 @@
 import type {
+  ActiveCidr,
   AuditEntry, AuditFilters,
   ChangePasswordRequest,
   CreateUserRequest,
@@ -234,6 +235,20 @@ export const api = {
       // can fall back to a hardcoded interface list.
       if (err instanceof Error && err.message.startsWith('403')) return [];
       throw err;
+    }
+  },
+
+  /**
+   * GET /api/discovery/active-cidr — VIEWER and ADMIN.
+   *
+   * <p>Returns the documented empty shape on any error so the scan form
+   * always has a usable fallback and never blocks submit.
+   */
+  getActiveCidr: async (): Promise<ActiveCidr> => {
+    try {
+      return await request<ActiveCidr>('/api/discovery/active-cidr');
+    } catch {
+      return { iface: null, cidr: null, ipAddress: null, prefix: 0 };
     }
   },
 

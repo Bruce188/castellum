@@ -261,6 +261,23 @@ export interface InterfaceInfo {
   name: string;
   displayName: string;
   mtu: number;
+  /** First IPv4 address on this interface; null when none is assigned. Added in feat/active-network-cidr-autodetect. */
+  ipAddress?: string | null;
+  /** Network prefix length of {@code ipAddress}; 0 when unknown. */
+  prefix?: number;
+}
+
+/**
+ * Response from GET /api/discovery/active-cidr.
+ * All string fields are null when no default route is detected (e.g. non-Linux / CI).
+ * Empty shape: { iface: null, cidr: null, ipAddress: null, prefix: 0, note: null }.
+ */
+export interface ActiveCidr {
+  iface: string | null;
+  cidr: string | null;
+  ipAddress: string | null;
+  prefix: number;
+  note?: string | null;
 }
 
 // ----- OT probe -----

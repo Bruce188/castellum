@@ -2,6 +2,7 @@ package io.castellum.web;
 
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
+import io.castellum.discovery.ActiveNetworkDetector;
 import io.castellum.discovery.DiscoverySweep;
 import io.castellum.discovery.DiscoverySweepRepository;
 import io.castellum.discovery.PassiveDiscoveryService;
@@ -56,6 +57,7 @@ class PassiveDiscoveryControllerSweepsTest {
     @MockBean private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean private JwtService jwtService;
     @MockBean private UserRepository userRepository;
+    @MockBean private ActiveNetworkDetector activeNetworkDetector;
 
     @Test
     void getSweeps_anon_returns401() throws Exception {
