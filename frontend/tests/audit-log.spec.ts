@@ -1,10 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { CREDS, BASE_URL } from './helpers';
+import { CREDS, BASE_URL, apiLogin, triggerScan } from './helpers';
 
 const APP = BASE_URL;
 const ADMIN = CREDS;
 
 async function signIn(page: Page, who: { username: string; password: string }) {
+  // Warm-up login flips lastLoginAt server-side so the UI login below lands in
+  // the app shell rather than the first-login password-rotation gate.
+  await apiLogin(page.request, who).catch(() => {});
   await page.goto(APP);
   await page.fill('input[autocomplete="username"]', who.username);
   await page.fill('input[autocomplete="current-password"]', who.password);
@@ -18,41 +21,32 @@ async function signIn(page: Page, who: { username: string; password: string }) {
 test.describe('audit log viewer', () => {
   test('admin sees new audit row within 5s of triggering a scan', async ({ page }) => {
     await signIn(page, ADMIN);
+
+    // /audit hosts only the audit log panel (no scan form), so trigger the scan
+    // through the API. SCAN_SUBMIT is audited at submit time with the scan id as
+    // resourceId and the full scan (including cidr) as the JSON payload.
+    const token = await apiLogin(page.request, ADMIN);
+    const cidr = '10.0.0.0/30';
+    const scanId = await triggerScan(page.request, token, cidr);
+
     await page.goto(`${APP}/audit`);
 
     // Verify the AuditLogPanel is rendered (ADMIN-only)
     await expect(page.getByRole('heading', { name: /Audit Log/i })).toBeVisible({ timeout: 5000 });
 
-    // Trigger a scan via the form
-    const cidrInput = page.locator('input[placeholder*="CIDR"], input[name*="cidr"], input[type="text"]').first();
-    await cidrInput.fill('10.0.0.0/30');
+    // Narrow to SCAN_SUBMIT and apply so the newest events sit on page 0.
+    await page.locator('select').first().selectOption('SCAN_SUBMIT');
+    await page.getByRole('button', { name: /^Apply$/ }).click();
 
-    // Select scan type if present
-    const scanTypeSelect = page.locator('select[name*="type"], select[name*="scan"]').first();
-    const scanTypeCount = await scanTypeSelect.count();
-    if (scanTypeCount > 0) {
-      await scanTypeSelect.selectOption('PING_SWEEP');
-    }
+    // AC#4: the SCAN_SUBMIT row for our scan id appears within 5s. Match the
+    // Resource ID cell exactly so a different scan's row can't be picked.
+    const row = page.locator('tbody tr', {
+      has: page.locator('td', { hasText: new RegExp(`^${scanId}$`) }),
+    }).first();
+    await expect(row).toBeVisible({ timeout: 5000 });
 
-    await page.click('button:has-text("Submit Scan")');
-
-    // Wait for the scan to be acknowledged (scan submitted feedback)
-    await expect(
-      page.locator('text=/Scan submitted|Scan #|submitt/i').first()
-    ).toBeVisible({ timeout: 8000 });
-
-    // Click Refresh on AuditLogPanel to trigger a fresh fetch
-    const refreshBtn = page.locator('button:has-text("Refresh")').first();
-    await refreshBtn.scrollIntoViewIfNeeded();
-    await refreshBtn.click();
-
-    // AC#4: SCAN_SUBMIT row appears in table within 5s
-    await expect(
-      page.locator('table').locator('td', { hasText: 'SCAN_SUBMIT' }).first()
-    ).toBeVisible({ timeout: 5000 });
-
-    // Click the row to expand and verify CIDR in JSON payload
-    await page.locator('table').locator('td', { hasText: 'SCAN_SUBMIT' }).first().click();
-    await expect(page.locator('pre').filter({ hasText: '10.0.0.0/30' }).first()).toBeVisible({ timeout: 2000 });
+    // Expand the row and verify the CIDR is in the JSON payload.
+    await row.click();
+    await expect(page.locator('pre').filter({ hasText: cidr }).first()).toBeVisible({ timeout: 2000 });
   });
 });

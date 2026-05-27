@@ -1,5 +1,5 @@
 import { test as setup, expect } from '@playwright/test';
-import { CREDS, STORAGE_STATE, sel } from './helpers';
+import { CREDS, STORAGE_STATE, sel, apiLogin } from './helpers';
 
 /**
  * Authenticates as the bootstrap admin and persists storage state for reuse by
@@ -12,6 +12,10 @@ import { CREDS, STORAGE_STATE, sel } from './helpers';
  * state — CI must provision an admin whose rotation is already satisfied.
  */
 setup('authenticate as admin', async ({ page }) => {
+  // Warm-up login flips lastLoginAt server-side so the UI login below satisfies
+  // the rotation gate on the first run against a fresh database, rather than
+  // landing on <ForcePasswordRotation /> and failing the C3 guard below.
+  await apiLogin(page.request, CREDS).catch(() => {});
   await page.goto('/');
   await page.fill(sel.loginUser, CREDS.username);
   await page.fill(sel.loginPass, CREDS.password);

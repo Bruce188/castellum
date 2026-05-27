@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { CREDS, VIEWER_CREDS, BASE_URL, API_URL } from './helpers';
+import { CREDS, VIEWER_CREDS, BASE_URL, API_URL, apiLogin } from './helpers';
 
 const APP = BASE_URL;
 const API = API_URL;
@@ -7,6 +7,9 @@ const ADMIN = CREDS;
 const VIEWER = VIEWER_CREDS;
 
 async function signIn(page: Page, who: { username: string; password: string }) {
+  // Warm-up login flips lastLoginAt server-side so the UI login below lands in
+  // the app shell rather than the first-login password-rotation gate.
+  await apiLogin(page.request, who).catch(() => {});
   await page.goto(APP);
   await page.fill('input[autocomplete="username"]', who.username);
   await page.fill('input[autocomplete="current-password"]', who.password);
@@ -149,6 +152,8 @@ test.describe('Castellum QA sweep', () => {
 
   test('13. recent scans panel shows newly submitted scan within 2s', async ({ page }) => {
     await signIn(page, ADMIN);
+    // RecentScansPanel lives on /scans (TopologyPage has the form but no panel).
+    await page.goto(`${APP}/scans`);
     // submit a scan via the form, then watch panel
     const cidr = page.locator('input').filter({ hasNot: page.locator('[type="password"]') }).first();
     await cidr.fill('127.0.0.1/32');

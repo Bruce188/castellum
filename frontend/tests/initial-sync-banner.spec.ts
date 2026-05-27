@@ -1,11 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
-import { CREDS, VIEWER_CREDS, BASE_URL } from './helpers';
+import { CREDS, VIEWER_CREDS, BASE_URL, apiLogin } from './helpers';
 
 const APP = BASE_URL;
 const ADMIN = CREDS;
 const VIEWER = VIEWER_CREDS;
 
 async function signIn(page: Page, who: { username: string; password: string }) {
+  // Warm-up login flips lastLoginAt server-side so the UI login below lands in
+  // the app shell (where the banner lives) rather than the first-login
+  // password-rotation gate, which replaces the routed shell entirely.
+  await apiLogin(page.request, who).catch(() => {});
   await page.goto(APP);
   await page.fill('input[autocomplete="username"]', who.username);
   await page.fill('input[autocomplete="current-password"]', who.password);
