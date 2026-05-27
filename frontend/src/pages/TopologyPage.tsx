@@ -41,6 +41,7 @@ export function TopologyPage() {
   const auth = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
   const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
+  const [risksLoading, setRisksLoading] = useState<boolean>(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [selectedRisk, setSelectedRisk] = useState<DeviceRiskDto | null>(null);
   const [selectedServices, setSelectedServices] = useState<NetworkService[]>([]);
@@ -58,6 +59,7 @@ export function TopologyPage() {
   // initial-sync window. Collapsed to a single mount effect.
   const refetchDevices = useCallback(async () => {
     if (!auth.token) return;
+    setRisksLoading(true);
     try {
       const page = await api.listDevices();
       setDevices(page.content);
@@ -72,6 +74,8 @@ export function TopologyPage() {
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'load failed');
+    } finally {
+      setRisksLoading(false);
     }
   }, [auth.token]);
 
@@ -80,6 +84,7 @@ export function TopologyPage() {
     let cancelled = false;
     const run = async () => {
       if (cancelled) return;
+      setRisksLoading(true);
       try {
         const page = await api.listDevices();
         if (cancelled) return;
@@ -97,6 +102,8 @@ export function TopologyPage() {
       } catch (err) {
         if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : 'load failed');
+      } finally {
+        if (!cancelled) setRisksLoading(false);
       }
     };
     void run();
@@ -144,15 +151,23 @@ export function TopologyPage() {
   const isAdmin = auth.roles?.includes('ADMIN') ?? false;
 
   return (
-    <div className="grid grid-rows-[auto_auto_1fr] h-full">
-      <EmptyCorpusBanner isAdmin={isAdmin} />
-      <header className="flex items-center justify-between gap-4">
-        <ScanTriggerForm />
-      </header>
+    <div className="grid grid-rows-[auto_1fr] h-full">
+      {/* Banner + scan controls share ONE auto-sized row so <main> always lands
+          in the 1fr track. Previously each was its own grid child against
+          grid-rows-[auto_auto_1fr]; when EmptyCorpusBanner returns null (feeds
+          populated) only two items remained, so <main> fell into an auto track
+          that collapsed to 0 height and the Cytoscape canvas rendered blank. */}
+      <div>
+        <EmptyCorpusBanner isAdmin={isAdmin} />
+        <header className="flex items-center justify-between gap-4">
+          <ScanTriggerForm />
+        </header>
+      </div>
       <main className="relative">
         <TopologyView
           devices={devices}
           risksById={risksById}
+          risksLoading={risksLoading}
           onNodeClick={handleNodeClick}
           onBackgroundClick={handleBackgroundClick}
           scopeVisibility={scopeVisibility}

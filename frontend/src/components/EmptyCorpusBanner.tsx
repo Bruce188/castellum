@@ -115,8 +115,14 @@ export function EmptyCorpusBanner({ isAdmin }: Props) {
     return () => { cancelled = true; clearInterval(id); };
   }, [syncInFlight]);
 
-  // Once all three counts are non-zero the banner is not needed
-  if (status !== null && !isEmpty(status)) {
+  // Suppress the banner unless the corpus is confirmed empty. Two cases:
+  //  1. Status loaded and all feeds non-zero — corpus is populated, nothing to nag.
+  //  2. Status not yet loaded AND no sync in flight — avoids the mount flash that
+  //     rendered the banner for ~50ms on every page load (initial status===null
+  //     counts as "empty") before the first /feeds/status resolved. When a sync IS
+  //     in flight (localStorage fast-path) we still render immediately so the
+  //     "Syncing…" state is visible on mount.
+  if (!isEmpty(status) || (status === null && !syncInFlight)) {
     return null;
   }
 

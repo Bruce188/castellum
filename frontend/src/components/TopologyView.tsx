@@ -37,6 +37,13 @@ interface Props {
    * subnet edges are structurally impossible.
    */
   scopeVisibility?: Record<DiscoveryScope, boolean>;
+  /**
+   * True while the parent is still resolving per-device risk scores (the N+1
+   * {@code deviceRisk} fanout). Drives a dashed-blue "computing" node style and
+   * a corner badge so the operator can tell "scores still loading" apart from
+   * "score is genuinely unknown" — both otherwise render as a grey node.
+   */
+  risksLoading?: boolean;
 }
 
 const SCOPE_CLASS: Record<DiscoveryScope, string | null> = {
@@ -47,7 +54,7 @@ const SCOPE_CLASS: Record<DiscoveryScope, string | null> = {
   PUBLIC: 'scope-public',
 };
 
-export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath, scopeVisibility }: Props) {
+export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath, scopeVisibility, risksLoading }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   /**
@@ -100,6 +107,12 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         // Attack-path overlay — bright red ring on nodes, dashed red stroke on edges.
         { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': '#dc2626' } },
         { selector: 'edge.path-highlight', style: { 'line-color': '#dc2626', 'line-style': 'dashed' as const, opacity: 1, width: 3 } },
+        // Risk-still-loading overlay — dashed blue ring + dimmed fill. Appended
+        // last so it wins border resolution while the parent's deviceRisk fanout
+        // is in flight. The instant scores resolve the class is dropped and the
+        // node snaps to its real tier color, making the grey→green transition a
+        // deliberate "now computed" cue rather than an unexplained flicker.
+        { selector: 'node.risk-loading', style: { 'border-width': 2, 'border-color': '#3b82f6', 'border-style': 'dashed' as const, opacity: 0.5 } },
       ],
     });
 
@@ -169,7 +182,9 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           discoverySource: d.discoverySource,
           serviceCount: d.serviceCount,
         },
-        classes: extraClasses ? `risk-${tier} ${extraClasses}` : `risk-${tier}`,
+        classes: [`risk-${tier}`, extraClasses, risksLoading ? 'risk-loading' : '']
+          .filter(Boolean)
+          .join(' '),
       };
     });
 
@@ -206,7 +221,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       randomize: true,
     };
     cy.layout(layoutOptions).run();
-  }, [devices, risksById, highlightPath, scopeVisibility]);
+  }, [devices, risksById, highlightPath, scopeVisibility, risksLoading]);
 
   // Apply path-highlight classes — kept in its own effect so re-highlighting
   // does not re-run the layout. Reads the latest highlightPath each render.
@@ -235,11 +250,26 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
   }, [highlightPath, devices]);
 
   return (
-    <div
-      ref={containerRef}
-      data-testid="topology-canvas"
-      className="w-full h-full"
-      title="Node color reflects composite risk tier (CVE severity × KEV × EPSS × criticality). Update operator-set criticality on the device detail panel."
-    />
+    <div className="relative w-full h-full">
+      <div
+        ref={containerRef}
+        data-testid="topology-canvas"
+        className="w-full h-full"
+        title="Node color reflects composite risk tier (CVE severity × KEV × EPSS × criticality). Update operator-set criticality on the device detail panel."
+      />
+      {risksLoading && (
+        // Pinned top-LEFT, not top-right: the TopologyLegend owns the top-right
+        // corner at z-10 and would otherwise cover this badge. Left corner is
+        // clear (the detail panel is right-pinned; the empty/error states are
+        // centered) so the "computing" cue stays visible during the fanout.
+        <div
+          data-testid="topology-risk-loading"
+          className="absolute top-2 left-2 flex items-center gap-2 rounded border border-blue-200 bg-blue-50/90 px-2.5 py-1 text-xs text-blue-700 shadow-sm pointer-events-none"
+        >
+          <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+          Computing risk scores…
+        </div>
+      )}
+    </div>
   );
 }
