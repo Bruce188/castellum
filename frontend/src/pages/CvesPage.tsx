@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { CveFleetSort, CveSummaryDto, Page } from '../api/types';
@@ -74,12 +74,12 @@ export function CvesPage() {
     [setSearchParams],
   );
 
-  // Manual refresh path (Refresh button). Closure-scoped `cancelled` guard
-  // discards results from any prior in-flight invocation when the user clicks
-  // Refresh repeatedly faster than the network resolves, preventing stale
-  // page state from clobbering the most recent click (perf-tuner NB4).
+  // Manual refresh path (Refresh button). Ref-based request-id versioning
+  // discards results from any superseded in-flight invocation when the user
+  // clicks Refresh faster than the network resolves.
+  const requestIdRef = useRef(0);
   const fetchPage = useCallback(async () => {
-    let cancelled = false;
+    const myRequestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -92,16 +92,15 @@ export function CvesPage() {
         kevOnly || undefined,
         sort,
       );
-      if (cancelled) return;
+      if (myRequestId !== requestIdRef.current) return;
       setPage(result);
     } catch (err) {
-      if (cancelled) return;
+      if (myRequestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load CVEs');
       setPage(null);
     } finally {
-      if (!cancelled) setLoading(false);
+      if (myRequestId === requestIdRef.current) setLoading(false);
     }
-    return () => { cancelled = true; };
   }, [pageNumber, severity, deviceId, kevOnly, sort]);
 
   useEffect(() => {
