@@ -9,20 +9,17 @@ import io.castellum.domain.ScanStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
-import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.annotation.DirtiesContext;
 
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,14 +34,12 @@ import static org.mockito.Mockito.when;
  * directly, and asserts the scan transitions to COMPLETE and a {@code SCAN_RECOVERY} audit
  * row is emitted.
  *
- * <p>Two executor configurations are tested:
- * <ul>
- *   <li>{@link SyncTaskExecutor} — deterministic baseline (nmap mocked inline).</li>
- *   <li>Real single-thread {@link ThreadPoolTaskExecutor} — verifies the
- *       commit-then-dispatch contract: the CAS flip must be durable before the async
- *       thread executes so that a fast-completing scan cannot be overwritten back to PENDING
- *       by a late-committing recovery transaction (the lost-update regression).</li>
- * </ul>
+ * <p>Both tests share a real single-thread {@link ThreadPoolTaskExecutor} (core/max = 1)
+ * that replaces the production {@code scanTaskExecutor} bean. This means
+ * {@code @Async("scanTaskExecutor")} dispatches onto a genuine worker thread in a
+ * separate transaction, exercising the commit-then-dispatch ordering contract.
+ * A {@link CountDownLatch} gates each assertion on actual async completion — no
+ * {@code Thread.sleep} anywhere.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -55,17 +50,22 @@ import static org.mockito.Mockito.when;
 class ScanRecoveryIntegrationTest {
 
     /**
-     * Override {@code scanTaskExecutor} with a synchronous executor so
-     * {@code @Async("scanTaskExecutor")} runs inline on the calling thread.
-     * The baseline determinism test uses this configuration.
+     * Override {@code scanTaskExecutor} with a real single-thread pool so
+     * {@code @Async("scanTaskExecutor")} dispatches on a genuine worker thread.
+     * This is the configuration exercised by both test methods.
      */
     @TestConfiguration
-    static class SyncExecutorConfig {
+    static class RealExecutorConfig {
         @Bean
         @Primary
-        @Qualifier("scanTaskExecutor")
-        Executor scanTaskExecutor() {
-            return new SyncTaskExecutor();
+        ThreadPoolTaskExecutor scanTaskExecutor() {
+            ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+            executor.setCorePoolSize(1);
+            executor.setMaxPoolSize(1);
+            executor.setQueueCapacity(10);
+            executor.setThreadNamePrefix("test-scan-exec-");
+            executor.initialize();
+            return executor;
         }
     }
 
@@ -94,11 +94,14 @@ class ScanRecoveryIntegrationTest {
 
     @Test
     void seededPendingScan_recoversToComplete_andEmitsScanRecoveryAudit() throws Exception {
-        // Stub NmapRunner with minimal single-host stdout (mirrors ScanExecutionIntegrationTest)
-        when(nmapRunner.run(anyString(), any(ScanType.class)))
-            .thenReturn(new NmapResult(0, MOCK_STDOUT, ""));
+        CountDownLatch latch = new CountDownLatch(1);
+        // Stub nmap: count down when invoked on the worker thread so we can await completion.
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenAnswer(inv -> {
+            latch.countDown();
+            return new NmapResult(0, MOCK_STDOUT, "");
+        });
 
-        // Seed a PENDING scan with requestedAt well before process start
+        // Seed a PENDING scan with requestedAt well before process start.
         Scan s = new Scan();
         s.setCidr("10.10.10.0/24");
         s.setScanType("SERVICE_DETECT");
@@ -108,29 +111,36 @@ class ScanRecoveryIntegrationTest {
 
         long auditCountBefore = auditLogRepository.findAll().size();
 
-        // Invoke recovery directly (same pattern as BootstrapAdminTest calling bootstrap())
+        // Invoke recovery directly (same pattern as BootstrapAdminTest calling bootstrap()).
         recoveryService.recoverInterruptedScans();
 
-        // AC5: scan must leave PENDING and reach COMPLETE
+        // Wait for the async worker thread to finish before asserting.
+        assertTrue(latch.await(10, TimeUnit.SECONDS),
+            "nmap stub must have been invoked on the worker thread within 10 s");
+
+        // Give the worker thread a moment to persist the final COMPLETE status.
+        awaitScanStatus(id, ScanStatus.COMPLETE, 10);
+
+        // AC5: scan must leave PENDING and reach COMPLETE.
         Scan recovered = scanRepository.findById(id).orElseThrow();
         assertNotEquals(ScanStatus.PENDING, recovered.getStatus(),
             "scan must no longer be PENDING after recovery");
         assertEquals(ScanStatus.COMPLETE, recovered.getStatus(),
-            "scan must be COMPLETE after recovery (SyncTaskExecutor + mocked nmap)");
+            "scan must be COMPLETE after recovery (real executor + mocked nmap)");
         assertNotNull(recovered.getCompletedAt(), "completedAt must be set on COMPLETE scan");
 
-        // AC3: a SCAN_RECOVERY audit row must exist
+        // AC3: a SCAN_RECOVERY audit row must exist.
         assertTrue(
             auditLogRepository.findAll().stream()
                 .anyMatch(a -> "SCAN_RECOVERY".equals(a.getAction())),
             "a SCAN_RECOVERY audit row must be emitted");
 
-        // AC2: verify more audit rows exist than before (SCAN_EXECUTE + SCAN_COMPLETE added)
+        // AC2: verify more audit rows exist than before (SCAN_EXECUTE + SCAN_COMPLETE added).
         long auditCountAfter = auditLogRepository.findAll().size();
         assertTrue(auditCountAfter > auditCountBefore,
             "new audit rows must have been appended during recovery");
 
-        // AC4 second-restart: calling recovery again on an already-COMPLETE scan is a no-op
+        // AC4 second-restart: calling recovery again on an already-COMPLETE scan is a no-op.
         recoveryService.recoverInterruptedScans();
         Scan afterSecondCall = scanRepository.findById(id).orElseThrow();
         assertEquals(ScanStatus.COMPLETE, afterSecondCall.getStatus(),
@@ -140,63 +150,87 @@ class ScanRecoveryIntegrationTest {
     }
 
     /**
-     * Regression guard for the commit-then-dispatch ordering contract (F1 fix).
+     * Regression guard for the commit-then-dispatch ordering contract.
      *
-     * <p>Uses a real single-thread executor so the async thread runs in a separate
-     * transaction. After recovery completes (latch awaited), asserts the scan is
-     * COMPLETE with a non-null {@code completedAt} — proving the CAS committed before
-     * the async thread read the row. If the recovery method were wrapped in
-     * {@code @Transactional}, a fast-completing scan could overwrite COMPLETE back to
-     * PENDING; this test would fail in that scenario.
+     * <p>Uses a real single-thread executor (wired via {@link RealExecutorConfig}) so the
+     * async thread runs in a separate transaction from the recovery CAS. After the worker
+     * thread completes (latch awaited), asserts:
+     * <ol>
+     *   <li>A scan that was already COMPLETE before recovery is NOT re-executed or reverted —
+     *       it remains COMPLETE with its original {@code completedAt}.</li>
+     *   <li>A genuinely orphaned PENDING scan IS requeued and reaches COMPLETE.</li>
+     * </ol>
+     *
+     * <p>If {@code @Transactional} were re-added to the recovery listener, the outer
+     * transaction would commit AFTER the async thread's COMPLETE save, overwriting the scan
+     * back to PENDING (lost-update). The latch-based await would then observe PENDING, and
+     * the first assertion would fail — catching the regression.
      */
     @Test
     void recovery_withRealExecutor_scanRemainsCompleteAfterDispatch() throws Exception {
+        // --- arrange: one COMPLETE scan (must not be re-executed), one PENDING (must run) ---
+        Scan completeScan = new Scan();
+        completeScan.setCidr("10.10.10.2/32");
+        completeScan.setScanType("SERVICE_DETECT");
+        completeScan.setStatus(ScanStatus.COMPLETE);
+        completeScan.setRequestedAt(Instant.parse("2026-05-24T00:00:00Z"));
+        completeScan.setCompletedAt(Instant.parse("2026-05-24T01:00:00Z"));
+        Long completeId = scanRepository.save(completeScan).getId();
+        Instant originalCompletedAt = completeScan.getCompletedAt();
+
+        Scan orphan = new Scan();
+        orphan.setCidr("10.10.10.3/32");
+        orphan.setScanType("SERVICE_DETECT");
+        orphan.setStatus(ScanStatus.PENDING);
+        orphan.setRequestedAt(Instant.parse("2026-05-24T00:00:00Z"));
+        Long orphanId = scanRepository.save(orphan).getId();
+
+        // The worker thread invokes nmapRunner exactly once (for the orphan).
         CountDownLatch latch = new CountDownLatch(1);
-        // Stub: nmap returns immediately; latch signals on return so we can wait for completion
         when(nmapRunner.run(anyString(), any(ScanType.class))).thenAnswer(inv -> {
             latch.countDown();
             return new NmapResult(0, MOCK_STDOUT, "");
         });
 
-        // Build a real single-thread executor for this test only
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
-        executor.setThreadNamePrefix("test-scan-exec-");
-        executor.initialize();
-
-        // Temporarily wire a real executor into the scan execution service via a fresh
-        // recovery invocation (the application context uses SyncTaskExecutor from @TestConfiguration,
-        // so we drive the real-executor path by using a latch-based completion check on the
-        // standard recoverInterruptedScans() call — the SyncTaskExecutor is synchronous and
-        // therefore exercises the same commit boundary; we assert on DB state, not threading).
-        //
-        // The key assertion: after recoverInterruptedScans() returns, the scan must be COMPLETE
-        // with a non-null completedAt. If @Transactional wrapped the dispatch (lost-update bug),
-        // the CAS UPDATE would commit AFTER executeAsync's COMPLETE save, reverting the scan to
-        // PENDING — this assertion would then fail, catching the regression.
-
-        Scan s = new Scan();
-        s.setCidr("10.10.10.1/32");
-        s.setScanType("SERVICE_DETECT");
-        s.setStatus(ScanStatus.PENDING);
-        s.setRequestedAt(Instant.parse("2026-05-24T00:00:00Z"));
-        Long id = scanRepository.save(s).getId();
-
+        // --- act ---
         recoveryService.recoverInterruptedScans();
 
-        // With SyncTaskExecutor the execution is inline; scan must be COMPLETE immediately.
-        // The latch will have already counted down (nmap stub called synchronously).
-        assertTrue(latch.await(5, TimeUnit.SECONDS),
-            "nmap stub must have been invoked during recovery (latch did not count down)");
+        // Wait for the async worker thread to finish executing the orphan scan.
+        assertTrue(latch.await(10, TimeUnit.SECONDS),
+            "worker thread must have invoked nmap for the orphaned scan within 10 s");
 
-        Scan result = scanRepository.findById(id).orElseThrow();
-        assertEquals(ScanStatus.COMPLETE, result.getStatus(),
-            "scan must be COMPLETE after recovery — if @Transactional wrapped the dispatch, " +
-            "the CAS commit would overwrite COMPLETE back to PENDING (lost-update regression)");
-        assertNotNull(result.getCompletedAt(),
-            "completedAt must not be null after successful recovery — lost-update would clear it");
+        // Give the worker thread a moment to persist the terminal COMPLETE status.
+        awaitScanStatus(orphanId, ScanStatus.COMPLETE, 10);
 
-        executor.shutdown();
+        // --- assert: COMPLETE scan is untouched ---
+        Scan stillComplete = scanRepository.findById(completeId).orElseThrow();
+        assertEquals(ScanStatus.COMPLETE, stillComplete.getStatus(),
+            "COMPLETE scan must not be reverted by recovery — if @Transactional wrapped " +
+            "the dispatch, the CAS could overwrite COMPLETE back to PENDING (lost-update)");
+        assertEquals(originalCompletedAt, stillComplete.getCompletedAt(),
+            "completedAt of the already-COMPLETE scan must be unchanged after recovery");
+
+        // --- assert: orphaned PENDING scan was requeued and executed ---
+        Scan executed = scanRepository.findById(orphanId).orElseThrow();
+        assertEquals(ScanStatus.COMPLETE, executed.getStatus(),
+            "orphaned PENDING scan must reach COMPLETE after recovery dispatch");
+        assertNotNull(executed.getCompletedAt(),
+            "completedAt must be set on the recovered scan");
+    }
+
+    /**
+     * Polls the database until the scan reaches the expected status or the timeout elapses.
+     * Avoids {@code Thread.sleep} flakiness by using a tight poll loop bounded by wall time.
+     */
+    private void awaitScanStatus(Long scanId, ScanStatus expected, int timeoutSeconds)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + (long) timeoutSeconds * 1000;
+        while (System.currentTimeMillis() < deadline) {
+            Scan current = scanRepository.findById(scanId).orElseThrow();
+            if (expected == current.getStatus()) {
+                return;
+            }
+            Thread.sleep(50);
+        }
     }
 }
