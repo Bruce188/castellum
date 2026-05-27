@@ -65,10 +65,6 @@ test.describe('Threat intel + linked CVEs', () => {
         // order — panel render order need not match row click order.
         const rowTestId = await row.getAttribute('data-testid');
         const deviceId = rowTestId?.replace('threats-row-', '');
-        if (!deviceId) {
-          await row.click().catch(() => undefined);
-          continue;
-        }
         const panel = page.locator(`[data-testid="related-cves-panel-${deviceId}"]`);
         const appeared = await panel.waitFor({ state: 'visible', timeout: 2000 }).then(() => true).catch(() => false);
         if (!appeared) {
