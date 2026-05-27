@@ -54,6 +54,9 @@ jobs:
       # Default E2E_ADMIN_PASSWORD is admin12345; generate a matching hash with:
       #   htpasswd -bnBC 12 "" admin12345 | tr -d ':\n' | sed 's/$2y/$2a/'
       # or any bcrypt tool at cost factor 10-12.
+      - name: Build backend
+        run: cd backend && ./mvnw -q -B -DskipTests package
+
       - name: Start backend
         env:
           SERVER_PORT: 8081
@@ -68,15 +71,17 @@ jobs:
           CASTELLUM_SECURITY_JWT_SECRET: e2e-test-jwt-secret-not-used-in-production-32ch
         run: |
           cd backend
-          ../mvnw -q spring-boot:run &
+          java -jar target/*.jar > /tmp/backend.log 2>&1 &
 
       - name: Wait for backend health
         run: |
           echo "Waiting for backend on :8081..."
-          DEADLINE=$(( $(date +%s) + 120 ))
+          DEADLINE=$(( $(date +%s) + 180 ))
           until curl -sf http://localhost:8081/actuator/health | grep -q '"status":"UP"'; do
             if [ $(date +%s) -ge $DEADLINE ]; then
-              echo "Backend did not become healthy within 120 s" >&2
+              echo "Backend did not become healthy within 180 s" >&2
+              echo "----- backend.log (tail 120) -----" >&2
+              tail -n 120 /tmp/backend.log >&2 || true
               exit 1
             fi
             sleep 3
