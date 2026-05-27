@@ -55,4 +55,32 @@ class CpeMapperTest {
         String cpe = CpeMapper.toCpe23(svc("My Service!", "1.0"));
         assertThat(cpe).isEqualTo("cpe:2.3:a:myservice:myservice:1.0:*:*:*:*:*:*:*");
     }
+
+    @Test
+    void storedCpeIsReturnedVerbatim() {
+        // When the service carries a CPE captured from nmap XML, it is returned as-is,
+        // bypassing the lossy name-based derivation entirely.
+        NetworkService service = svc("ssh", "9.6p1 Ubuntu 3ubuntu13.16");
+        service.setCpe("cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*");
+        assertThat(CpeMapper.toCpe23(service))
+            .isEqualTo("cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void blankStoredCpeFallsBackToNameDerivation() {
+        // A blank stored CPE must not short-circuit; the name-based fallback applies.
+        NetworkService service = svc("OpenSSH", "8.2");
+        service.setCpe("   ");
+        assertThat(CpeMapper.toCpe23(service))
+            .isEqualTo("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void withoutStoredCpeUsesNameDerivation() {
+        // No stored CPE (null) → existing name-based fallback unchanged.
+        NetworkService service = svc("OpenSSH", "8.2");
+        assertThat(service.getCpe()).isNull();
+        assertThat(CpeMapper.toCpe23(service))
+            .isEqualTo("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*");
+    }
 }

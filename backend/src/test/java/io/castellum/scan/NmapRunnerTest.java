@@ -68,6 +68,18 @@ class NmapRunnerTest {
     }
 
     @Test
+    void buildArgv_emitsXmlToStdout() {
+        // "-oX -" makes nmap write XML to stdout; the parser depends on XML for product/CPE.
+        for (ScanType type : ScanType.values()) {
+            List<String> argv = runner.buildArgv(VALID_CIDR, type);
+            int oxIdx = argv.indexOf("-oX");
+            assertTrue(oxIdx >= 0, type + " argv must contain -oX; got: " + argv);
+            assertEquals("-", argv.get(oxIdx + 1),
+                type + " -oX target must be '-' (stdout); got: " + argv);
+        }
+    }
+
+    @Test
     void buildArgv_injectsConfiguredTimeout() {
         // Construct NmapRunner with custom NmapScanProperties (AC2 config wiring proof).
         NmapScanProperties customProps = new NmapScanProperties();

@@ -190,4 +190,72 @@ class ScanExecutionServiceTest {
             "10.0.1.5".equals(d.ipAddress()) && "myhost".equals(d.hostname())));
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
     }
+
+    // -----------------------------------------------------------------------
+    // (f) Phantom suppression: SERVICE_DETECT host with 0 open services is NOT persisted
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_hostWithNoOpenServices_isNotUpserted() throws Exception {
+        Scan scan = stubScan(5L, "10.0.2.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(5L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        // Under -Pn this address is reported "up" but exposes no open ports — a phantom.
+        NmapOutputParser.DiscoveredHost phantom =
+            new NmapOutputParser.DiscoveredHost("10.0.2.0", null);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(phantom), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        service.executeAsync(5L);
+
+        // No device upsert, no service persistence for the phantom host.
+        verify(deviceUpsertService, never()).upsert(any());
+        verify(networkServiceRepository, never()).save(any());
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus(),
+            "scan still completes successfully even when all hosts are phantoms");
+    }
+
+    // -----------------------------------------------------------------------
+    // (g) SERVICE_DETECT host WITH >=1 open service IS persisted, with product + cpe
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_hostWithOpenService_isUpsertedWithProductAndCpe() throws Exception {
+        Scan scan = stubScan(6L, "10.0.3.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(6L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.DiscoveredHost realHost =
+            new NmapOutputParser.DiscoveredHost("10.0.3.7", "real");
+        NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
+            "10.0.3.7", 22, "tcp", "ssh", "9.6p1", "OpenSSH",
+            "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*");
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(realHost), List.of(svc));
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(20L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(20L, 22, "tcp"))
+            .thenReturn(Optional.empty());
+
+        service.executeAsync(6L);
+
+        verify(deviceUpsertService).upsert(argThat(d -> "10.0.3.7".equals(d.ipAddress())));
+        verify(networkServiceRepository).save(argThat(ns ->
+            ns.getPort() == 22
+                && "OpenSSH".equals(ns.getProduct())
+                && "9.6p1".equals(ns.getVersion())
+                && "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*".equals(ns.getCpe())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
 }

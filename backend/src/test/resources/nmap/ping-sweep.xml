@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -sn -oX - 192.168.1.0/24" start="1779904459" version="7.94SVN" xmloutputversion="1.05">
+<host><status state="up" reason="conn-refused" reason_ttl="0"/>
+<address addr="192.168.1.10" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<times srtt="646" rttvar="5000" to="100000"/>
+</host>
+<host><status state="up" reason="syn-ack" reason_ttl="64"/>
+<address addr="192.168.1.1" addrtype="ipv4"/>
+<hostnames>
+<hostname name="myrouter" type="PTR"/>
+</hostnames>
+</host>
+<host><status state="down" reason="no-response" reason_ttl="0"/>
+<address addr="192.168.1.42" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+</host>
+<runstats><finished time="1779904462" timestr="Wed May 27 19:54:22 2026" summary="Nmap done" elapsed="3.01" exit="success"/><hosts up="2" down="1" total="3"/>
+</runstats>
+</nmaprun>
