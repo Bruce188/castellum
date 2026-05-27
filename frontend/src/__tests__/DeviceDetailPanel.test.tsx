@@ -14,6 +14,7 @@ const device: Device = {
   discoveryScope: 'DOCKER_BRIDGE',
   lastSeenIface: null,
   discoverySource: null,
+  serviceCount: 0,
 };
 
 const risk: DeviceRiskDto = {

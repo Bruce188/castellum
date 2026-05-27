@@ -61,19 +61,6 @@ export function CvesPage() {
   const [error, setError] = useState<string | null>(null);
   const [deviceLabel, setDeviceLabel] = useState<string | null>(null);
 
-  /** Single-key URL param update; null clears the key. Page is reset by callers. */
-  const updateParam = useCallback(
-    (key: string, value: string | null) => {
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        if (value === null || value === '') next.delete(key);
-        else next.set(key, value);
-        return next;
-      });
-    },
-    [setSearchParams],
-  );
-
   // Manual refresh path (Refresh button). Ref-based request-id versioning
   // discards results from any superseded in-flight invocation when the user
   // clicks Refresh faster than the network resolves.

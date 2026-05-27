@@ -87,6 +87,8 @@ const sampleDevice: Device = {
   criticality: 'MEDIUM',
   discoveryScope: 'HOME',
   lastSeenIface: null,
+  discoverySource: null,
+  serviceCount: 0,
 };
 
 function renderWith(initialPath = '/cves') {
