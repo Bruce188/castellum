@@ -10,7 +10,6 @@ import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.risk.Criticality;
-import io.castellum.risk.KevEntry;
 import io.castellum.risk.KevEntryRepository;
 import io.castellum.web.dto.CveDetailDto;
 import io.castellum.web.dto.CveSummaryDto;
@@ -29,11 +28,30 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/cve")
 public class CveController {
+
+    /**
+     * Hard ceiling on the candidate set size used by the enrichment-window sort path
+     * ({@code sort=composite|kev|epss}). Bounds per-request work so an attacker (or a
+     * benign caller asking for a huge page) cannot trigger an unbounded scan +
+     * in-memory sort. Sized to comfortably cover 5 full pages at the largest
+     * {@code size=100} request (5 × 100 = 500). Promoted from magic-number per
+     * review-v44 code-reviewer NB-4.
+     */
+    private static final int ENRICHMENT_WINDOW_CAP = 500;
+
+    /**
+     * Per-page-size multiplier used to derive the enrichment-window candidate
+     * count before capping at {@link #ENRICHMENT_WINDOW_CAP}. Wider than the
+     * requested page so the in-memory sort has enough candidates to surface the
+     * true top-N for composite/kev/epss ordering even when many rows have null
+     * enrichment values. Promoted from magic-number per review-v44 code-reviewer
+     * NB-4.
+     */
+    private static final int ENRICHMENT_WINDOW_MULTIPLIER = 20;
 
     private final CveRepository cveRepository;
     private final CveMatcher cveMatcher;
@@ -113,9 +131,10 @@ public class CveController {
                 : Criticality.MEDIUM;
 
         if (Boolean.TRUE.equals(kevOnly)) {
-            Set<String> kevIds = kevEntryRepository.findAll().stream()
-                    .map(KevEntry::getCveId)
-                    .collect(Collectors.toSet());
+            // Projected query — only the cve_id column. Avoids loading every column of
+            // every KEV row (the catalog is ~1.2k rows today and growing). See
+            // review-v44 perf-tuner B3.
+            Set<String> kevIds = new HashSet<>(kevEntryRepository.findAllCveIds());
             if (kevIds.isEmpty()) {
                 return Page.empty(pageable);
             }
@@ -126,9 +145,9 @@ public class CveController {
 
         if ("composite".equals(sort) || "kev".equals(sort) || "epss".equals(sort)) {
             // Enrichment-window path — fetch a wider candidate set, enrich, sort
-            // in memory, slice. Caps at 500 rows pre-enrichment to bound per-request
-            // work (analysis Risk HIGH composite scaling).
-            int windowSize = Math.min(500, clampedSize * 20);
+            // in memory, slice. Capped at ENRICHMENT_WINDOW_CAP rows pre-enrichment to
+            // bound per-request work (analysis Risk HIGH composite scaling).
+            int windowSize = Math.min(ENRICHMENT_WINDOW_CAP, clampedSize * ENRICHMENT_WINDOW_MULTIPLIER);
             Pageable windowPageable = PageRequest.of(0, windowSize, sortSpec);
             Page<Cve> window = applyExistingFleetFilters(minScore, deviceId, windowPageable);
             Map<String, Enrichment> enrichMap = enrichmentService.enrich(window.getContent(), criticality);

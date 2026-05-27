@@ -17,10 +17,10 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -117,7 +117,11 @@ class CveEnrichmentServiceTest {
     void enrich_emptyCollection_returnsEmptyMap_withNoRepoCalls() {
         Map<String, Enrichment> result = service.enrich(List.of(), Criticality.MEDIUM);
         assertThat(result).isEmpty();
-        // No repo calls because of guard
+        // review-v44 test-engineer NB4 — explicit proof that the empty-collection guard
+        // short-circuits BEFORE touching either repository. Without this verification
+        // the test would also pass if the guard were removed and the repos returned
+        // empty Lists, masking the short-circuit behaviour.
+        verifyNoInteractions(kevRepo, epssRepo);
     }
 
     private KevEntry makeKev(String cveId) {
@@ -143,8 +147,4 @@ class CveEnrichmentServiceTest {
         // ensure unused fields are deterministic-null
         return c;
     }
-
-    // Suppress 'unused' warning for Set import — Set used in earlier draft, kept for clarity.
-    @SuppressWarnings("unused")
-    private Set<String> _setOf(String s) { return Set.of(s); }
 }

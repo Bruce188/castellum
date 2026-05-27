@@ -22,8 +22,13 @@ import java.time.Instant;
  *       rounding. In fleet-mode (no {@code deviceId} filter), the composite is
  *       computed against {@code Criticality.MEDIUM} (project default); when a
  *       {@code deviceId} is supplied, the device's actual criticality is used.</li>
- *   <li>{@code BigDecimal} fields serialise to JSON strings (Jackson default); the
- *       frontend coerces via {@code Number(...)}.</li>
+ *   <li>{@code BigDecimal} fields serialise to JSON <i>numbers</i> with Spring Boot's
+ *       default Jackson configuration (no {@code WRITE_NUMBERS_AS_STRINGS} or
+ *       {@code WRITE_BIGDECIMAL_AS_PLAIN} override). The frontend types-side
+ *       declares them as {@code string | null} purely as a defensive contract;
+ *       its {@code Number(x)} coercion is a no-op on the number-typed wire value.
+ *       {@code @WebMvcTest} assertions therefore use numeric {@code jsonPath(...).value(0.5)},
+ *       not string {@code .value("0.5")}.</li>
  * </ul>
  *
  * @param cveId         NVD CVE identifier (e.g. {@code CVE-2020-15778}).

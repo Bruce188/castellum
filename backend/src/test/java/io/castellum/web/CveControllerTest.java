@@ -12,7 +12,6 @@ import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.risk.Criticality;
-import io.castellum.risk.KevEntry;
 import io.castellum.risk.KevEntryRepository;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
@@ -40,10 +39,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import org.hamcrest.Matchers;
-
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -254,7 +254,7 @@ class CveControllerTest {
                 .accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.cveId").value("CVE-2020-15778"))
-            .andExpect(jsonPath("$.rawJson").value(Matchers.containsString("sentinel")));
+            .andExpect(jsonPath("$.rawJson").value(containsString("sentinel")));
     }
 
     private NetworkService buildService(Long id, Long deviceId, String vendor, String product, String version) {
@@ -361,11 +361,9 @@ class CveControllerTest {
      */
     @Test
     void fleetKevOnlyFilterNarrowsResultSet() throws Exception {
-        KevEntry kevA = new KevEntry();
-        kevA.setCveId("CVE-A");
-        KevEntry kevB = new KevEntry();
-        kevB.setCveId("CVE-B");
-        when(kevEntryRepository.findAll()).thenReturn(List.of(kevA, kevB));
+        // review-v44 perf-tuner B3 — controller now uses the projected findAllCveIds()
+        // to avoid loading every column of every KEV row. Stub the projection directly.
+        when(kevEntryRepository.findAllCveIds()).thenReturn(List.of("CVE-A", "CVE-B"));
 
         Cve cveA = buildCve("CVE-A");
         cveA.setCvssV31Score(new BigDecimal("9.0"));
@@ -417,6 +415,14 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[0].cveId").value("CVE-B"))
             .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
             .andExpect(jsonPath("$.content[2].cveId").value("CVE-A"));
+
+        // review-v44 test-engineer NB1 — the enrichment-window path MUST request a wider
+        // candidate set than the page size so the in-memory sort has enough rows to
+        // surface the true top-N. Default request uses size=20; the controller expands
+        // to size * ENRICHMENT_WINDOW_MULTIPLIER (= 400) capped at ENRICHMENT_WINDOW_CAP
+        // (= 500). Without this assertion the test would also pass on the default branch
+        // (`any(Pageable.class)` matches both branches).
+        verify(cveRepository).findByCvssV31ScoreIsNotNull(argThat(p -> p.getPageSize() > 20));
     }
 
     /**
@@ -486,5 +492,75 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[0].cveId").value("CVE-A"))
             .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
             .andExpect(jsonPath("$.content[2].cveId").value("CVE-B"));
+    }
+
+    /**
+     * review-v44 test-engineer B1 — when {@code kevOnly=true} AND {@code deviceId} is
+     * supplied, the controller MUST resolve criticality from the device record (not
+     * fall back to the {@code Criticality.MEDIUM} default). Asserts the enrichment
+     * service is invoked with the device's actual criticality.
+     */
+    @Test
+    void fleetKevOnly_withDeviceId_resolvesCriticalityFromDevice() throws Exception {
+        Device hardenedHost = new Device();
+        hardenedHost.setId(42L);
+        hardenedHost.setIpAddress("10.0.0.42");
+        hardenedHost.setCriticality(Criticality.CRITICAL);
+        when(deviceRepository.findById(42L)).thenReturn(Optional.of(hardenedHost));
+
+        when(kevEntryRepository.findAllCveIds()).thenReturn(List.of("CVE-A"));
+
+        Cve cveA = buildCve("CVE-A");
+        cveA.setCvssV31Score(new BigDecimal("9.0"));
+        when(cveRepository.findByCveIdInAndCvssV31ScoreIsNotNull(eq(Set.of("CVE-A")), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(cveA)));
+
+        when(enrichment.enrich(anyCollection(), eq(Criticality.CRITICAL)))
+            .thenReturn(Map.of("CVE-A",
+                new Enrichment(Boolean.TRUE, new BigDecimal("0.40"), new BigDecimal("9.00"))));
+
+        mockMvc.perform(get("/api/cve/fleet")
+                .param("kevOnly", "true")
+                .param("deviceId", "42")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-A"))
+            .andExpect(jsonPath("$.content[0].kev").value(true));
+
+        // Critical assertion — enrichment was invoked with the device's CRITICAL
+        // criticality, NOT the MEDIUM default. Proves the kevOnly branch honours
+        // the deviceId criticality lookup (analysis Decision 4).
+        verify(enrichment).enrich(anyCollection(), eq(Criticality.CRITICAL));
+    }
+
+    /**
+     * review-v44 test-engineer B2 — explicit null-enrichment guard. The
+     * {@code toSummary} fallback ({@code safe = enrichment != null ? ... : new
+     * Enrichment(FALSE, null, null)}) must surface a row that has no entry in the
+     * enrichment map as {@code kev=false, epssScore=null, compositeScore=null}.
+     * Other tests cover this indirectly via {@code stubEnrichmentEmpty()}; this
+     * one asserts the wire shape directly.
+     */
+    @Test
+    void fleetWithoutEnrichmentRowsMarshalAsKevFalseEpssNullCompositeNull() throws Exception {
+        Cve unenriched = buildCve("CVE-2024-NOENRICH");
+        unenriched.setCvssV31Score(new BigDecimal("7.5"));
+        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(unenriched)));
+        // Enrichment service returns an empty map — no entry for CVE-2024-NOENRICH.
+        // The controller's safe-fallback must produce kev=false, epssScore=null,
+        // compositeScore=null on the wire.
+        when(enrichment.enrich(anyCollection(), any(Criticality.class)))
+            .thenReturn(Map.of());
+
+        mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].cveId").value("CVE-2024-NOENRICH"))
+            .andExpect(jsonPath("$.content[0].kev").value(false))
+            // No global @JsonInclude(NON_NULL) on the controller mapper, so absent
+            // enrichment serialises as JSON null (not field-omission). Assert via
+            // Hamcrest nullValue() rather than doesNotExist().
+            .andExpect(jsonPath("$.content[0].epssScore").value(nullValue()))
+            .andExpect(jsonPath("$.content[0].compositeScore").value(nullValue()));
     }
 }
