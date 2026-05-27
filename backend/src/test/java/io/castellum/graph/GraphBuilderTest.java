@@ -5,6 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
+import io.castellum.discovery.DiscoveryScope;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -13,6 +14,7 @@ import io.castellum.risk.Criticality;
 import io.castellum.risk.EpssScoreRepository;
 import io.castellum.risk.KevEntryRepository;
 import org.jgrapht.Graph;
+import org.jgrapht.GraphPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -63,6 +65,18 @@ class GraphBuilderTest {
         return new Device(id, ip, null, null, Instant.EPOCH, Instant.EPOCH, Criticality.MEDIUM);
     }
 
+    private Device dockerDevice(long id, String ip) {
+        Device d = device(id, ip);
+        d.setDiscoveryScope(DiscoveryScope.DOCKER_BRIDGE);
+        return d;
+    }
+
+    private Device homeDeviceWithHostname(long id, String ip, String hostname) {
+        Device d = device(id, ip);
+        d.setHostname(hostname);
+        return d;
+    }
+
     @Test
     void sameSubnetEdgesAreBidirectional() {
         Device a = device(1L, "10.0.0.10");
@@ -83,6 +97,10 @@ class GraphBuilderTest {
 
     @Test
     void crossSubnetDevicesAreNotConnected() {
+        // Two HOME-scope devices in different /24 subnets with no docker-host pivot present.
+        // Neither matches the dockerHostIp (10.0.x.x != 192.168.68.51) and neither is
+        // DOCKER_BRIDGE, so no GATEWAY_PIVOT edge is emitted. The no-pivot isolation is
+        // intentional, not a CIDR accident.
         Device a = device(1L, "10.0.0.10");
         Device b = device(2L, "10.0.1.10");
         when(deviceRepo.findAll()).thenReturn(List.of(a, b));
@@ -275,6 +293,89 @@ class GraphBuilderTest {
         assertThatThrownBy(() -> builder.build())
             .isInstanceOf(GraphTooLargeException.class)
             .hasMessageContaining("max-devices");
+    }
+
+    @Test
+    void homeAndDockerBridgedViaDockerHostPivot() {
+        // Pivot: HOME device with the configured dockerHostIp
+        Device pivot = device(5L, "192.168.68.51");
+        // Docker member
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(pivot, docker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPivot = new DeviceVertex(5L, "192.168.68.51");
+        DeviceVertex vDocker = new DeviceVertex(4L, "172.17.0.2");
+
+        // Forward and reverse GATEWAY_PIVOT edges exist
+        AttackEdge fwd = g.getEdge(vPivot, vDocker);
+        AttackEdge rev = g.getEdge(vDocker, vPivot);
+        assertThat(fwd).isNotNull();
+        assertThat(rev).isNotNull();
+        assertThat(fwd.getType()).isEqualTo(EdgeType.GATEWAY_PIVOT);
+        assertThat(rev.getType()).isEqualTo(EdgeType.GATEWAY_PIVOT);
+
+        // End-to-end: path is findable
+        Optional<GraphPath<DeviceVertex, AttackEdge>> path =
+            new ShortestPathFinder().findPath(g, vPivot, vDocker);
+        assertThat(path).isPresent();
+        assertThat(path.get().getEdgeList()).isNotEmpty();
+    }
+
+    @Test
+    void crossScopeWithoutPivotHasNoBridge() {
+        // HOME device that is NOT the docker-host pivot (different IP, hostname null)
+        Device home = device(5L, "192.168.68.99");
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(home, docker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        // No GATEWAY_PIVOT edge
+        boolean hasGatewayEdge = g.edgeSet().stream()
+            .anyMatch(e -> e.getType() == EdgeType.GATEWAY_PIVOT);
+        assertThat(hasGatewayEdge).isFalse();
+    }
+
+    @Test
+    void gatewayPivotEdgeHasWeightAndTechnique() {
+        Device pivot = device(5L, "192.168.68.51");
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(pivot, docker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPivot = new DeviceVertex(5L, "192.168.68.51");
+        DeviceVertex vDocker = new DeviceVertex(4L, "172.17.0.2");
+
+        AttackEdge edge = g.getEdge(vPivot, vDocker);
+        assertThat(edge).isNotNull();
+        assertThat(g.getEdgeWeight(edge)).isEqualTo(EdgeWeights.gatewayPivotWeight());
+        assertThat(edge.getTechniqueId()).isEqualTo(
+            AttackTechniqueMapper.forEdgeType(EdgeType.GATEWAY_PIVOT).id());
+        assertThat(edge.getCveId()).isNull();
+        assertThat(edge.getRiskContribution()).isEqualTo(EdgeWeights.gatewayPivotRisk());
+    }
+
+    @Test
+    void linkLocalStaysIsolated() {
+        // Valid pivot exists
+        Device pivot = device(5L, "192.168.68.51");
+        // DOCKER_BRIDGE member
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        // LINK_LOCAL device — must never receive a GATEWAY_PIVOT edge
+        Device linkLocal = device(6L, "169.254.73.152");
+        linkLocal.setDiscoveryScope(DiscoveryScope.LINK_LOCAL);
+        when(deviceRepo.findAll()).thenReturn(List.of(pivot, docker, linkLocal));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vLinkLocal = new DeviceVertex(6L, "169.254.73.152");
+        // No GATEWAY_PIVOT edges touch the LINK_LOCAL vertex
+        boolean linkLocalHasGatewayEdge = g.edgesOf(vLinkLocal).stream()
+            .anyMatch(e -> e.getType() == EdgeType.GATEWAY_PIVOT);
+        assertThat(linkLocalHasGatewayEdge).isFalse();
     }
 
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
