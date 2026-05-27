@@ -17,4 +17,13 @@ public interface KevEntryRepository extends JpaRepository<KevEntry, Long> {
 
     @Query("SELECT MAX(k.ingestedAt) FROM KevEntry k")
     Optional<Instant> findMaxIngestedAt();
+
+    /**
+     * Projects only the {@code cve_id} column for the KEV catalog. Used by the
+     * {@code kevOnly=true} fleet branch to build a {@link java.util.Set} of
+     * KEV-listed cveIds without loading every column of every row (~1.2k today,
+     * growing) — addresses review-v44 perf-tuner B3.
+     */
+    @Query("SELECT k.cveId FROM KevEntry k")
+    List<String> findAllCveIds();
 }

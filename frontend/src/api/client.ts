@@ -2,7 +2,7 @@ import type {
   AuditEntry, AuditFilters,
   ChangePasswordRequest,
   CreateUserRequest,
-  Criticality, CveDetailDto, CveSummaryDto,
+  Criticality, CveDetailDto, CveFleetSort, CveSummaryDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   IntegrationConfigDto, IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
@@ -126,10 +126,26 @@ export const api = {
     request<TopRiskDeviceDto[]>(`/api/risk/top?n=${n}`),
   cveDetail: (cveId: string) =>
     request<CveDetailDto>(`/api/cve/${encodeURIComponent(cveId)}`),
-  listFleetCves: (page: number = 0, size: number = 20, minScore?: number, deviceId?: number) => {
+  /**
+   * GET /api/cve/fleet — paginated CVE list. v3-F1 adds optional {@code kevOnly}
+   * (narrows to KEV-catalog members) and {@code sort} (enrichment-window sort by
+   * composite / kev / epss). When {@code sort} is omitted the backend returns the
+   * stable default ordering of {@code cvssV31Score DESC, cveId ASC} — the frontend
+   * opts into composite-DESC on first render via the UI default (Task 5).
+   */
+  listFleetCves: (
+    page: number = 0,
+    size: number = 20,
+    minScore?: number,
+    deviceId?: number,
+    kevOnly?: boolean,
+    sort?: CveFleetSort,
+  ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (minScore !== undefined) params.set('minScore', String(minScore));
     if (deviceId !== undefined) params.set('deviceId', String(deviceId));
+    if (kevOnly === true) params.set('kevOnly', 'true');
+    if (sort !== undefined) params.set('sort', sort);
     return request<Page<CveSummaryDto>>(`/api/cve/fleet?${params.toString()}`);
   },
   listServicesForDevice: (id: number) =>

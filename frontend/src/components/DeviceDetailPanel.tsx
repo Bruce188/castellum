@@ -81,6 +81,18 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
           <span className="ml-auto text-2xl font-bold">
             {Number.isFinite(score) ? (score as number).toFixed(2) : '—'}
           </span>
+          {risk?.components?.kevPresent && (
+            // v3-F1 — top-of-panel KEV exposure indicator. The "max composite"
+            // half of features-runtime-fixes-v3 AC#4 is already satisfied by the
+            // existing score badge above; this chip is the new prominent KEV signal.
+            // (Decision 8 — chip-only, no DTO change.)
+            <span
+              data-testid="kev-exposure-chip"
+              className="bg-red-100 text-red-700 rounded px-2 py-0.5 text-xs font-semibold ml-2"
+            >
+              KEV exposure
+            </span>
+          )}
         </div>
       </section>
 
