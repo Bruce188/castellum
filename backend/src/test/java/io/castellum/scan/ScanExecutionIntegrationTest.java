@@ -139,9 +139,35 @@ class ScanExecutionIntegrationTest {
         boolean hasExpectedIp = devices.stream().anyMatch(d -> "10.10.10.5".equals(d.getIpAddress()));
         assertTrue(hasExpectedIp, "Device with IP 10.10.10.5 must exist");
 
-        // At least one NetworkService row must exist.
-        List<NetworkService> services = networkServiceRepository.findAll();
-        assertFalse(services.isEmpty(), "at least one NetworkService must be persisted");
+        // Exactly 2 NetworkService rows for device 10.10.10.5 (22/tcp ssh + 80/tcp http).
+        Device device10 = devices.stream()
+            .filter(d -> "10.10.10.5".equals(d.getIpAddress()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("Device 10.10.10.5 not found"));
+        List<NetworkService> allServices = networkServiceRepository.findAll();
+        List<NetworkService> services = allServices.stream()
+            .filter(s -> device10.getId().equals(s.getDeviceId()))
+            .toList();
+        assertEquals(2, services.size(),
+            "exactly 2 NetworkService rows must be persisted for device 10.10.10.5; got " + services.size());
+
+        // Assert 22/tcp ssh row with OpenSSH version.
+        NetworkService sshRow = services.stream()
+            .filter(s -> s.getPort() == 22 && "tcp".equals(s.getProtocol()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("22/tcp row not found in " + services));
+        assertEquals("ssh", sshRow.getName(), "22/tcp service name must be 'ssh'");
+        assertNotNull(sshRow.getVersion(), "22/tcp version must be non-null");
+        assertTrue(sshRow.getVersion().contains("OpenSSH"),
+            "22/tcp version must contain 'OpenSSH'; got: " + sshRow.getVersion());
+
+        // Assert 80/tcp http row with non-null version.
+        NetworkService httpRow = services.stream()
+            .filter(s -> s.getPort() == 80 && "tcp".equals(s.getProtocol()))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("80/tcp row not found in " + services));
+        assertEquals("http", httpRow.getName(), "80/tcp service name must be 'http'");
+        assertNotNull(httpRow.getVersion(), "80/tcp version must be non-null");
 
         // Audit events: SCAN_SUBMIT + SCAN_EXECUTE + SCAN_COMPLETE = 3 new rows.
         List<AuditLog> auditAfter = auditLogRepository.findAll();
