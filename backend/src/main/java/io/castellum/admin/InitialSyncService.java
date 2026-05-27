@@ -215,6 +215,10 @@ public class InitialSyncService {
      */
     private synchronized void ensureReconstructed() {
         if (reconstructed) return;
+        // A sync is currently running: the TRIGGERED-without-COMPLETED row is the
+        // in-flight job, not a past interruption. Skip reconstruction so we don't
+        // cache a false "interrupted" — runSync's finally sets state authoritatively.
+        if (inFlight.get()) return;
         reconstructed = true;
 
         // Query for the latest INITIAL_SYNC_COMPLETED row
