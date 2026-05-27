@@ -176,13 +176,26 @@ class CveControllerTest {
             .andExpect(jsonPath("$[0].rawJson").doesNotExist());
     }
 
+    /** Shared helper — sets up a single fleet service with a canonical name so the
+     *  no-device scoped-union path resolves through {@code findByIdIn…} queries. */
+    private void stubFleetService(NetworkService svc, String canonicalCpe, List<Cve> matched) {
+        when(networkServiceRepository.findAll()).thenReturn(List.of(svc));
+        when(cveMatcher.findVulnerable(canonicalCpe)).thenReturn(matched);
+    }
+
     @Test
     void fleet_default_returnsPageOrderedByScore() throws Exception {
         Cve critical = buildCve("CVE-2024-0001");
+        critical.setId(1L);
         critical.setCvssV31Score(new BigDecimal("9.8"));
         Cve high = buildCve("CVE-2024-0002");
+        high.setId(2L);
         high.setCvssV31Score(new BigDecimal("7.5"));
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(critical, high));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(critical, high)));
         stubEnrichmentEmpty();
 
@@ -192,14 +205,19 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[1].cveId").value("CVE-2024-0002"))
             .andExpect(jsonPath("$.content[0].rawJson").doesNotExist());
 
-        verify(cveRepository).findByCvssV31ScoreIsNotNull(any(Pageable.class));
+        verify(cveRepository).findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L)), any(Pageable.class));
     }
 
     @Test
     void fleet_minScore_filtersBelowFloor() throws Exception {
         Cve high = buildCve("CVE-2024-0010");
+        high.setId(10L);
         high.setCvssV31Score(new BigDecimal("7.5"));
-        when(cveRepository.findByCvssV31ScoreGreaterThanEqual(eq(new BigDecimal("7.0")), any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(high));
+        when(cveRepository.findByIdInAndCvssV31ScoreGreaterThanEqual(eq(Set.of(10L)), eq(new BigDecimal("7.0")), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(high)));
         stubEnrichmentEmpty();
 
@@ -209,12 +227,19 @@ class CveControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].cveId").value("CVE-2024-0010"));
 
-        verify(cveRepository).findByCvssV31ScoreGreaterThanEqual(eq(new BigDecimal("7.0")), any(Pageable.class));
+        verify(cveRepository).findByIdInAndCvssV31ScoreGreaterThanEqual(eq(Set.of(10L)), eq(new BigDecimal("7.0")), any(Pageable.class));
     }
 
     @Test
     void fleet_size_clampedTo100() throws Exception {
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+        Cve cve = buildCve("CVE-2024-CLAMP");
+        cve.setId(99L);
+        cve.setCvssV31Score(new BigDecimal("7.0"));
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(cve));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(any(), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of()));
         stubEnrichmentEmpty();
 
@@ -222,7 +247,7 @@ class CveControllerTest {
             .andExpect(status().isOk());
 
         org.mockito.ArgumentCaptor<Pageable> captor = org.mockito.ArgumentCaptor.forClass(Pageable.class);
-        verify(cveRepository).findByCvssV31ScoreIsNotNull(captor.capture());
+        verify(cveRepository).findByIdInAndCvssV31ScoreIsNotNull(any(), captor.capture());
         org.junit.jupiter.api.Assertions.assertEquals(100, captor.getValue().getPageSize());
     }
 
@@ -235,8 +260,7 @@ class CveControllerTest {
     @Test
     @WithMockUser(roles = "VIEWER")
     void fleet_viewer_canRead() throws Exception {
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
-            .thenReturn(new PageImpl<>(List.of()));
+        when(networkServiceRepository.findAll()).thenReturn(List.of());
         stubEnrichmentEmpty();
         mockMvc.perform(get("/api/cve/fleet"))
             .andExpect(status().isOk());
@@ -304,10 +328,19 @@ class CveControllerTest {
     }
 
     @Test
-    void fleet_deviceIdAbsent_returnsFullFleetPage_regression() throws Exception {
+    void fleet_deviceIdAbsent_returnsFleetScopedUnion() throws Exception {
+        // AC2 — the no-deviceId path returns CVEs scoped to the union of matched
+        // fleet services, NOT the entire v3.1-scored corpus.
+        NetworkService svc = buildService(10L, 1L, "openssh", "openssh", "8.2");
+        svc.setName("openssh");
+        when(networkServiceRepository.findAll()).thenReturn(List.of(svc));
+
         Cve cve = buildCve("CVE-2024-0099");
+        cve.setId(99L);
         cve.setCvssV31Score(new BigDecimal("8.1"));
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
+            .thenReturn(List.of(cve));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(99L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cve)));
         stubEnrichmentEmpty();
 
@@ -315,8 +348,25 @@ class CveControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].cveId").value("CVE-2024-0099"));
 
-        verify(cveRepository).findByCvssV31ScoreIsNotNull(any(Pageable.class));
-        verifyNoInteractions(networkServiceRepository);
+        verify(cveRepository).findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(99L)), any(Pageable.class));
+        // The full-corpus query must never be called for the no-device fleet path.
+        org.mockito.Mockito.verify(cveRepository, org.mockito.Mockito.never())
+            .findByCvssV31ScoreIsNotNull(any(Pageable.class));
+    }
+
+    @Test
+    void fleet_deviceIdAbsent_emptyFleet_returnsEmptyPage() throws Exception {
+        // AC2 — empty service list → empty scoped page, never the corpus.
+        when(networkServiceRepository.findAll()).thenReturn(List.of());
+        stubEnrichmentEmpty();
+
+        mockMvc.perform(get("/api/cve/fleet").accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content.length()").value(0))
+            .andExpect(jsonPath("$.totalElements").value(0));
+
+        org.mockito.Mockito.verify(cveRepository, org.mockito.Mockito.never())
+            .findByCvssV31ScoreIsNotNull(any(Pageable.class));
     }
 
     @Test
@@ -344,8 +394,13 @@ class CveControllerTest {
     @Test
     void fleetResponseContainsKevEpssCompositeFields() throws Exception {
         Cve cve = buildCve("CVE-2024-0001");
+        cve.setId(1L);
         cve.setCvssV31Score(new BigDecimal("8.0"));
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(cve));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cve)));
         when(enrichment.enrich(anyCollection(), eq(Criticality.MEDIUM)))
             .thenReturn(Map.of("CVE-2024-0001",
@@ -394,17 +449,25 @@ class CveControllerTest {
     /**
      * Test 3 — {@code ?sort=composite} orders rows by composite score DESC,
      * exercising the enrichment-window path (fetch wider candidate set, enrich,
-     * sort in-memory, slice).
+     * sort in-memory, slice). The window path now also goes through the scoped
+     * union for the no-deviceId case.
      */
     @Test
     void fleetSortByCompositeReturnsHighestCompositeFirst() throws Exception {
         Cve cveA = buildCve("CVE-A");
+        cveA.setId(1L);
         cveA.setCvssV31Score(new BigDecimal("5.0"));
         Cve cveB = buildCve("CVE-B");
+        cveB.setId(2L);
         cveB.setCvssV31Score(new BigDecimal("6.0"));
         Cve cveC = buildCve("CVE-C");
+        cveC.setId(3L);
         cveC.setCvssV31Score(new BigDecimal("7.0"));
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(cveA, cveB, cveC));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L, 3L)), argThat(p -> p.getPageSize() > 20)))
             .thenReturn(new PageImpl<>(List.of(cveA, cveB, cveC)));
 
         Map<String, Enrichment> enrichMap = new HashMap<>();
@@ -420,13 +483,9 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
             .andExpect(jsonPath("$.content[2].cveId").value("CVE-A"));
 
-        // review-v44 test-engineer NB1 — the enrichment-window path MUST request a wider
-        // candidate set than the page size so the in-memory sort has enough rows to
-        // surface the true top-N. Default request uses size=20; the controller expands
-        // to size * ENRICHMENT_WINDOW_MULTIPLIER (= 400) capped at ENRICHMENT_WINDOW_CAP
-        // (= 500). Without this assertion the test would also pass on the default branch
-        // (`any(Pageable.class)` matches both branches).
-        verify(cveRepository).findByCvssV31ScoreIsNotNull(argThat(p -> p.getPageSize() > 20));
+        // The enrichment-window path MUST request a wider candidate set than the page size.
+        // With the scoped union the wider window is now via findByIdIn... with expanded pageable.
+        verify(cveRepository).findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L, 3L)), argThat(p -> p.getPageSize() > 20));
     }
 
     /**
@@ -437,12 +496,19 @@ class CveControllerTest {
     @Test
     void fleetSortByKevPlacesKevTrueRowsFirst() throws Exception {
         Cve cveA = buildCve("CVE-A");
+        cveA.setId(1L);
         cveA.setCvssV31Score(new BigDecimal("5.0"));
         Cve cveB = buildCve("CVE-B");
+        cveB.setId(2L);
         cveB.setCvssV31Score(new BigDecimal("6.0"));
         Cve cveC = buildCve("CVE-C");
+        cveC.setId(3L);
         cveC.setCvssV31Score(new BigDecimal("7.0"));
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(cveA, cveB, cveC));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L, 3L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cveA, cveB, cveC)));
 
         Map<String, Enrichment> enrichMap = new HashMap<>();
@@ -465,22 +531,27 @@ class CveControllerTest {
     }
 
     /**
-     * Test 5 — backward-compat guard (analysis-v38 Decision 5). With NO
-     * {@code sort} param, the default branch must preserve the existing DB-side
-     * {@code cvssV31Score DESC, cveId ASC} ordering — composite-DESC is opt-in,
-     * not a wire-default change.
+     * Test 5 — backward-compat guard. With NO {@code sort} param, the default
+     * branch must preserve the DB-side {@code cvssV31Score DESC, cveId ASC}
+     * ordering returned by the repository — composite-DESC is opt-in.
      */
     @Test
     void fleetDefaultSortPreservesCvssV31DescBehaviour() throws Exception {
         Cve cveA = buildCve("CVE-A");
+        cveA.setId(1L);
         cveA.setCvssV31Score(new BigDecimal("9.0"));
         Cve cveB = buildCve("CVE-B");
+        cveB.setId(2L);
         cveB.setCvssV31Score(new BigDecimal("5.0"));
         Cve cveC = buildCve("CVE-C");
+        cveC.setId(3L);
         cveC.setCvssV31Score(new BigDecimal("7.0"));
-        // Repo returns rows in CVSS DESC, cveId ASC order (the JPA contract for this finder
-        // when invoked with the default sort spec).
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(cveA, cveB, cveC));
+        // Repo returns rows in CVSS DESC, cveId ASC order (the JPA contract for this finder).
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L, 3L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(cveA, cveC, cveB)));
 
         Map<String, Enrichment> enrichMap = new HashMap<>();
@@ -548,8 +619,13 @@ class CveControllerTest {
     @Test
     void fleetWithoutEnrichmentRowsMarshalAsKevFalseEpssNullCompositeNull() throws Exception {
         Cve unenriched = buildCve("CVE-2024-NOENRICH");
+        unenriched.setId(999L);
         unenriched.setCvssV31Score(new BigDecimal("7.5"));
-        when(cveRepository.findByCvssV31ScoreIsNotNull(any(Pageable.class)))
+
+        NetworkService svc = buildService(10L, 1L, "test", "test", "1.0");
+        svc.setName("testsvc");
+        stubFleetService(svc, "cpe:2.3:a:testsvc:testsvc:1.0:*:*:*:*:*:*:*", List.of(unenriched));
+        when(cveRepository.findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(999L)), any(Pageable.class)))
             .thenReturn(new PageImpl<>(List.of(unenriched)));
         // Enrichment service returns an empty map — no entry for CVE-2024-NOENRICH.
         // The controller's safe-fallback must produce kev=false, epssScore=null,

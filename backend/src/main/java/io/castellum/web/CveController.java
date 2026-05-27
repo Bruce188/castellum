@@ -174,9 +174,21 @@ public class CveController {
         if (deviceId != null) {
             return fleetByDevice(deviceId, minScore, pageable);
         }
+        // No deviceId — scope to the union of CVEs matched across all fleet services.
+        // Empty service list or zero matches → empty page (consistent with the per-device
+        // empty-service path). Perf: service table is small; FK set is deduped in memory;
+        // paging is bounded by the existing findByIdIn… queries.
+        List<NetworkService> allServices = networkServiceRepository.findAll();
+        if (allServices.isEmpty()) {
+            return Page.empty(pageable);
+        }
+        Set<Long> cveFks = matchedCveFks(allServices);
+        if (cveFks.isEmpty()) {
+            return Page.empty(pageable);
+        }
         return (minScore == null)
-                ? cveRepository.findByCvssV31ScoreIsNotNull(pageable)
-                : cveRepository.findByCvssV31ScoreGreaterThanEqual(minScore, pageable);
+                ? cveRepository.findByIdInAndCvssV31ScoreIsNotNull(cveFks, pageable)
+                : cveRepository.findByIdInAndCvssV31ScoreGreaterThanEqual(cveFks, minScore, pageable);
     }
 
     /**
