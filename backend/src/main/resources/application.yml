@@ -99,6 +99,7 @@ castellum:
     subnet-cap: ${GRAPH_SUBNET_CAP:64}
     vulns-per-pair-cap: ${GRAPH_VULNS_PER_PAIR_CAP:5}
     max-devices: ${GRAPH_MAX_DEVICES:1024}
+    docker-host-ip: ${GRAPH_DOCKER_HOST_IP:192.168.68.51}
   ot:
     probe:
       connect-timeout-ms: ${OT_PROBE_CONNECT_TIMEOUT_MS:3000}

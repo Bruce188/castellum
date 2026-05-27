@@ -19,6 +19,8 @@ public class GraphProperties {
     @Min(1)
     private int maxDevices = 1024;
 
+    private String dockerHostIp = "192.168.68.51";
+
     public int getSubnetCap() { return subnetCap; }
     public void setSubnetCap(int subnetCap) { this.subnetCap = subnetCap; }
 
@@ -27,4 +29,7 @@ public class GraphProperties {
 
     public int getMaxDevices() { return maxDevices; }
     public void setMaxDevices(int maxDevices) { this.maxDevices = maxDevices; }
+
+    public String getDockerHostIp() { return dockerHostIp; }
+    public void setDockerHostIp(String dockerHostIp) { this.dockerHostIp = dockerHostIp; }
 }

@@ -26,6 +26,7 @@ public final class AttackTechniqueMapper {
         m.put(EdgeType.SAME_SUBNET, new AttackTechnique("T1021", "Remote Services"));
         m.put(EdgeType.EXPLOITABLE_VULN, new AttackTechnique("T1190", "Exploit Public-Facing Application"));
         m.put(EdgeType.WEAK_CRED_PATH, new AttackTechnique("T1078", "Valid Accounts"));
+        m.put(EdgeType.GATEWAY_PIVOT, new AttackTechnique("T1090", "Proxy"));
         MAPPING = Map.copyOf(m);
     }
 
