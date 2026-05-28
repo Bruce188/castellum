@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Threat-Intelligence Integrations — Operator Runbook — pipelinekit</title>
-<meta name="description" content="TAXII 2.1 and MISP integration configuration, curl recipes, AES-256-GCM credential storage, and troubleshooting for Castellum operators.">
+<meta name="description" content="STIX 2.1 export, TAXII 2.1 and MISP integration configuration, reachability probes, curl recipes, AES-256-GCM credential storage, and troubleshooting for Castellum operators.">
 <meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
 <style>
 /* === Reset + variables === */
@@ -470,6 +470,93 @@ details > *:not(summary) { padding: 0 1rem 0.8rem; }
 .search-hit { background: rgba(255, 230, 0, 0.45); border-radius: 2px; padding: 0 2px; }
 html[data-theme="dark"] .search-hit, :root[data-theme="dark"] .search-hit { background: rgba(255, 200, 0, 0.35); }
 
+/* === Diataxis quadrant chip === */
+.diataxis-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+}
+.diataxis-chip.diataxis-tutorial { color: #047857; border-color: #6ee7b7; background: #ecfdf5; }
+.diataxis-chip.diataxis-how-to { color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; }
+.diataxis-chip.diataxis-reference { color: #6d28d9; border-color: #c4b5fd; background: #f5f3ff; }
+.diataxis-chip.diataxis-explanation { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+html[data-theme="dark"] .diataxis-chip.diataxis-tutorial, :root[data-theme="dark"] .diataxis-chip.diataxis-tutorial { color: #6ee7b7; background: #064e3b33; border-color: #047857; }
+html[data-theme="dark"] .diataxis-chip.diataxis-how-to, :root[data-theme="dark"] .diataxis-chip.diataxis-how-to { color: #93c5fd; background: #1e3a8a33; border-color: #1d4ed8; }
+html[data-theme="dark"] .diataxis-chip.diataxis-reference, :root[data-theme="dark"] .diataxis-chip.diataxis-reference { color: #c4b5fd; background: #4c1d9533; border-color: #6d28d9; }
+html[data-theme="dark"] .diataxis-chip.diataxis-explanation, :root[data-theme="dark"] .diataxis-chip.diataxis-explanation { color: #fcd34d; background: #78350f33; border-color: #b45309; }
+
+/* === Docs index search widget === */
+.docs-search {
+  margin: 1.5rem 0 2rem;
+  padding: 1.2rem 1.4rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.docs-search input[type="search"] {
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  transition: border-color var(--transition);
+}
+.docs-search input[type="search"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.docs-search-results {
+  list-style: none;
+  padding: 0;
+  margin: 0.8rem 0 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.docs-search-results li {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.docs-search-results li:last-child { border-bottom: none; }
+.docs-search-results a {
+  display: block;
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: none;
+}
+.docs-search-results a:hover { color: var(--accent); }
+.docs-search-results .docs-search-excerpt {
+  font-size: 0.83rem;
+  color: var(--fg-muted);
+  margin-top: 0.15rem;
+}
+.docs-search-results .docs-search-quadrant {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-left: 0.5rem;
+  color: var(--fg-subtle);
+}
+.docs-search-hint {
+  font-size: 0.82rem;
+  color: var(--fg-subtle);
+  margin: 0.5rem 0 0;
+}
+
 /* === Footer === */
 footer {
   margin: 4rem auto 0;
@@ -532,39 +619,46 @@ footer {
   <aside class="toc" id="toc">
     <h2 class="toc-heading">On this page</h2>
     <ul>
-      <li class="lvl-2"><a href="#1-encryption-castellum-integration-key">1. Encryption — CASTELLUM_INTEGRATION_KEY</a></li>
-      <li class="lvl-2"><a href="#2-put-api-integrations-type-json-shape">2. PUT /api/integrations/{type} — JSON shape</a></li>
-      <li class="lvl-3"><a href="#2-1-taxii">2.1 TAXII</a></li>
-      <li class="lvl-3"><a href="#2-2-misp">2.2 MISP</a></li>
-      <li class="lvl-3"><a href="#2-3-response-shape">2.3 Response shape</a></li>
-      <li class="lvl-2"><a href="#3-post-api-integrations-type-push-empty-config-behavior">3. POST /api/integrations/{type}/push — empty-config behavior</a></li>
-      <li class="lvl-2"><a href="#4-curl-recipes">4. curl recipes</a></li>
-      <li class="lvl-3"><a href="#4-1-login-to-obtain-token">4.1 Login to obtain $TOKEN</a></li>
-      <li class="lvl-3"><a href="#4-2-save-taxii-config">4.2 Save TAXII config</a></li>
-      <li class="lvl-3"><a href="#4-3-save-misp-config">4.3 Save MISP config</a></li>
-      <li class="lvl-3"><a href="#4-4-inspect-persisted-config-no-secrets-returned">4.4 Inspect persisted config (no secrets returned)</a></li>
-      <li class="lvl-3"><a href="#4-5-push-via-the-persisted-config-endpoint">4.5 Push via the persisted-config endpoint</a></li>
-      <li class="lvl-3"><a href="#4-6-push-via-the-stateless-threatintel-endpoint-no-config-row-needed">4.6 Push via the stateless ThreatIntel endpoint (no config row needed)</a></li>
-      <li class="lvl-3"><a href="#4-7-export-only-returns-the-stix-bundle-inline">4.7 Export-only (returns the STIX bundle inline)</a></li>
-      <li class="lvl-2"><a href="#5-troubleshooting">5. Troubleshooting</a></li>
-      <li class="lvl-2"><a href="#6-probe-evidence-captured-against-local-backend-8081">6. Probe evidence captured against local backend (:8081)</a></li>
-      <li class="lvl-2"><a href="#7-out-of-scope">7. Out of scope</a></li>
+      <li class="lvl-2"><a href="#1-stix-bundle-structure">1. STIX bundle structure</a></li>
+      <li class="lvl-2"><a href="#2-stateless-export-push-endpoints">2. Stateless export &amp; push endpoints</a></li>
+      <li class="lvl-3"><a href="#export-response">Export response</a></li>
+      <li class="lvl-3"><a href="#taxii-push-response">TAXII push response</a></li>
+      <li class="lvl-3"><a href="#misp-push-response">MISP push response</a></li>
+      <li class="lvl-3"><a href="#error-responses">Error responses</a></li>
+      <li class="lvl-3"><a href="#curl-recipes">curl recipes</a></li>
+      <li class="lvl-2"><a href="#3-encryption-castellum-integration-key">3. Encryption — CASTELLUM_INTEGRATION_KEY</a></li>
+      <li class="lvl-2"><a href="#4-put-api-integrations-type-json-shape">4. PUT /api/integrations/{type} — JSON shape</a></li>
+      <li class="lvl-3"><a href="#4-1-taxii">4.1 TAXII</a></li>
+      <li class="lvl-3"><a href="#4-2-misp">4.2 MISP</a></li>
+      <li class="lvl-3"><a href="#4-3-response-shape">4.3 Response shape</a></li>
+      <li class="lvl-3"><a href="#4-4-reachability-probe">4.4 Reachability probe</a></li>
+      <li class="lvl-3"><a href="#4-5-config-presets-and-auto-detect-admin-ui">4.5 Config presets and auto-detect (admin UI)</a></li>
+      <li class="lvl-2"><a href="#5-post-api-integrations-type-push-empty-config-behavior">5. POST /api/integrations/{type}/push — empty-config behavior</a></li>
+      <li class="lvl-2"><a href="#6-configuration-surfaces">6. Configuration surfaces</a></li>
+      <li class="lvl-3"><a href="#environment-variable-form-legacy">Environment-variable form (legacy)</a></li>
+      <li class="lvl-2"><a href="#7-retry-behaviour">7. Retry behaviour</a></li>
+      <li class="lvl-2"><a href="#8-troubleshooting">8. Troubleshooting</a></li>
+      <li class="lvl-2"><a href="#9-audit-push-log">9. Audit / push log</a></li>
+      <li class="lvl-2"><a href="#10-probe-evidence-captured-against-local-backend-8081">10. Probe evidence captured against local backend (:8081)</a></li>
+      <li class="lvl-2"><a href="#11-live-integration-testing">11. Live integration testing</a></li>
+      <li class="lvl-2"><a href="#12-out-of-scope">12. Out of scope</a></li>
     </ul>
   </aside>
 
   <main>
     <header class="page-header">
+      <span class="diataxis-chip diataxis-reference">reference</span>
       <h1>Threat-Intelligence Integrations — Operator Runbook</h1>
-      <p class="description">TAXII 2.1 and MISP integration configuration, curl recipes, AES-256-GCM credential storage, and troubleshooting for Castellum operators.</p>
-      <div class="page-meta"></div>
+      <p class="description">STIX 2.1 export, TAXII 2.1 and MISP integration configuration, reachability probes, curl recipes, AES-256-GCM credential storage, and troubleshooting for Castellum operators.</p>
+      <div class="page-meta"><span class="meta-item"><strong>Section:</strong> integrations</span> · <span class="meta-item"><strong>Audience:</strong> ADMIN operators</span></div>
     </header>
 
     <div id="page-content">
+<p>This runbook documents how to configure, push, and troubleshoot Castellum's STIX 2.1 export and its TAXII 2.1 and MISP integrations. It covers the STIX bundle shape that flows through the endpoints, the two controllers that expose the surface area, AES-256-GCM credential storage, the reachability probe, and the full troubleshooting matrix for operators.</p>
 <blockquote>
-<p>Cross-reference: see <a href="stix-taxii-misp.md"><code>stix-taxii-misp.md</code></a> for the STIX 2.1 bundle shape that flows through these endpoints.</p>
-<p>Self-hosted smoke recipe: see <a href="../docker/README.md"><code>docker/README.md</code></a> for the minimal medallion (TAXII&nbsp;2.1) and coolacid (MISP) compose stacks plus verbatim request/response captures from the 2026-05-26 smoke run.</p>
+<p>[INFO] Self-hosted smoke recipe: see <a href="../docker/README.md"><code>docker/README.md</code></a> for the minimal medallion (TAXII&nbsp;2.1) and coolacid (MISP) compose stacks plus verbatim request/response captures from the 2026-05-26 smoke run. The credential-rotation procedure that backs the persisted-config path lives in <a href="operations.html"><code>operations.html</code></a> §7.</p>
 </blockquote>
-<p>This runbook documents how to configure, push, and troubleshoot Castellum's TAXII 2.1 and MISP integrations. Two controllers expose the surface area:</p>
+<p>Two controllers expose the surface area:</p>
 <table>
 <thead>
 <tr>
@@ -582,13 +676,139 @@ footer {
 <tr>
 <td><code>IntegrationConfigController</code></td>
 <td><code>/api/integrations/**</code></td>
-<td>CRUD over the per-type config row + AES-256-GCM encrypted credentials, plus a <code>POST /{type}/push</code> that decrypts the credential blob and delegates to the same push pipeline.</td>
+<td>CRUD over the per-type config row + AES-256-GCM encrypted credentials, plus a <code>POST /{type}/push</code> that decrypts the credential blob and delegates to the same push pipeline, and a <code>POST /{type}/probe</code> reachability check.</td>
 </tr>
 </tbody>
 </table>
-<p>All endpoints require <strong>ROLE_ADMIN</strong>. The frontend Settings page (TAXII / MISP panel) is just a UI over <code>IntegrationConfigController</code>.</p>
+<p>All endpoints require <strong>ROLE_ADMIN</strong>. The frontend Settings page (TAXII / MISP / STIX panel) is just a UI over these controllers.</p>
 <hr>
-<h2 id="1-encryption-castellum-integration-key">1. Encryption — <code>CASTELLUM_INTEGRATION_KEY</code></h2>
+<h2 id="1-stix-bundle-structure">1. STIX bundle structure</h2>
+<p>Each export produces one <code>bundle</code> containing:</p>
+<table>
+<thead>
+<tr>
+<th>Object type</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>identity</code> (singleton)</td>
+<td>Castellum system identity</td>
+</tr>
+<tr>
+<td><code>infrastructure</code></td>
+<td>Each discovered device (one per IP)</td>
+</tr>
+<tr>
+<td><code>vulnerability</code></td>
+<td>Each CVE associated with a network service</td>
+</tr>
+<tr>
+<td><code>relationship</code> (<code>affects</code>)</td>
+<td>CVE → device pair</td>
+</tr>
+<tr>
+<td><code>indicator</code> + <code>relationship</code> (<code>targets</code>)</td>
+<td>Emitted when KEV flag is set OR composite risk score ≥ 7.0</td>
+</tr>
+</tbody>
+</table>
+<p>Object IDs are deterministic (UUIDv3 / MD5 namespace) so repeated exports produce identical IDs for the same logical objects. Timestamps use the STIX §3.4 format: <code>yyyy-MM-ddTHH:mm:ss.SSSZ</code>.</p>
+<hr>
+<h2 id="2-stateless-export-push-endpoints">2. Stateless export &amp; push endpoints</h2>
+<p><code>ThreatIntelController</code> exposes a stateless surface that uses the server-side default configuration. All three endpoints require <code>ROLE_ADMIN</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/threat-intel/export</code></td>
+<td>Return bundle as <code>application/json</code></td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/threat-intel/push/taxii?collection=&lt;id&gt;</code></td>
+<td>Push bundle to configured TAXII collection (optional override)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/threat-intel/push/misp</code></td>
+<td>Push bundle attributes to a MISP event</td>
+</tr>
+</tbody>
+</table>
+<h3 id="export-response">Export response</h3>
+<div class="codehilite"><pre><span></span><code>HTTP 200 application/json
+{ ...stix bundle JSON... }
+</code></pre></div>
+
+<h3 id="taxii-push-response">TAXII push response</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pushed&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;objects&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;bundle_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bundle--…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">201</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<h3 id="misp-push-response">MISP push response</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pushed&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;bundle_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bundle--…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;misp_event_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;42&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<h3 id="error-responses">Error responses</h3>
+<table>
+<thead>
+<tr>
+<th>HTTP</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>502 Bad Gateway</td>
+<td>Upstream TAXII or MISP server unreachable or returned an unexpected response</td>
+</tr>
+<tr>
+<td>403 Forbidden</td>
+<td>Caller does not have <code>ADMIN</code> role</td>
+</tr>
+</tbody>
+</table>
+<p>Every push attempt (including failures) is recorded in the <code>threat_intel_push</code> table and in the audit log (see §9).</p>
+<h3 id="curl-recipes">curl recipes</h3>
+<p>All recipes assume <code>:8081</code> and an admin Bearer token already obtained via <code>POST /api/auth/login</code>. Set <code>$TOKEN</code> before running.</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Login to obtain $TOKEN</span>
+<span class="nv">TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8081/api/auth/login<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;username&quot;:&quot;&lt;admin-username&gt;&quot;,&quot;password&quot;:&quot;&lt;admin-password&gt;&quot;}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;import json,sys;print(json.load(sys.stdin)[&quot;token&quot;])&#39;</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-c<span class="w"> </span><span class="m">24</span><span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span>
+</code></pre></div>
+
+<p>The admin user / password hash are seeded at boot from <code>castellum.admin.username</code> + <code>castellum.admin.password-hash</code> (BCrypt) — see <code>BootstrapAdminInitializer</code>. There is no compiled-in fallback admin.</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Push via the stateless ThreatIntel endpoint (no config row needed)</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;http://localhost:8081/api/threat-intel/push/taxii?collection=&lt;override-uuid&gt;&quot;</span>
+
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/threat-intel/push/misp
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># Export-only (returns the STIX bundle inline)</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/threat-intel/export<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-40
+</code></pre></div>
+
+<p><strong>UI equivalent — Settings page export panel.</strong> The STIX Export section of the Settings page (<code>StixExportPanel</code>) provides two ADMIN-only controls; VIEWER role sees neither:</p>
+<ul>
+<li><strong>Download STIX bundle</strong> — triggers the export endpoint and saves the result as <code>stix-bundle-&lt;timestamp&gt;.json</code>.</li>
+<li><strong>Preview bundle</strong> — fetches the bundle text via <code>exportStixBundleText()</code> and renders it as pretty-printed JSON (<code>JSON.stringify(…, null, 2)</code>) in a scrollable on-screen block. Indentation is applied client-side only; the wire format remains compact JSON.</li>
+</ul>
+<p>Both controls share a busy lock so only one operation runs at a time. Errors appear inline below the buttons.</p>
+<hr>
+<h2 id="3-encryption-castellum-integration-key">3. Encryption — <code>CASTELLUM_INTEGRATION_KEY</code></h2>
 <p>Persisted credentials are encrypted at rest with AES-256-GCM (<code>AesGcmCipher</code>).</p>
 <ul>
 <li>Source env var: <code>CASTELLUM_INTEGRATION_KEY</code></li>
@@ -597,14 +817,14 @@ footer {
 <li>Generate one with:
   <code>bash
   openssl rand -base64 32</code></li>
-<li>If unset, the application boots but every <code>PUT /api/integrations/{type}</code> (which encrypts) and every <code>POST /api/integrations/{type}/push</code> (which decrypts to verify the row is still readable) fails with:
-  <code>IllegalStateException: CASTELLUM_INTEGRATION_KEY is not configured — set a base64 AES-256 key</code></li>
+<li>If unset, the application boots but every <code>PUT /api/integrations/{type}</code> (which encrypts) and every <code>POST /api/integrations/{type}/push</code> (which decrypts to verify the row is still readable) fails with <code>IllegalStateException: CASTELLUM_INTEGRATION_KEY is not configured — set a base64 AES-256 key</code>.</li>
 <li>Invalid base64 fails fast at boot with <code>CASTELLUM_INTEGRATION_KEY is not valid base64</code>.</li>
-<li>A key that decodes to anything other than 32 bytes fails at boot with <code>CASTELLUM_INTEGRATION_KEY must decode to &lt;expected&gt;</code> bytes.</li>
+<li>A key that decodes to anything other than 32 bytes fails at boot with <code>CASTELLUM_INTEGRATION_KEY must decode to &lt;expected&gt; bytes</code>.</li>
 </ul>
-<p><strong>Key rotation:</strong> there is no automatic re-encrypt-on-key-change path. Rotating the key invalidates existing rows; the <code>POST /{type}/push</code> decrypt-probe will throw, and the operator must re-PUT the config to re-encrypt under the new key.</p>
+<p>The <code>AesGcmCipher</code> uses a 12-byte random IV per record and a 128-bit GCM authentication tag. Each row in <code>integration_config</code> stores the IV concatenated with the ciphertext blob (column type <code>BYTEA</code> on Postgres, <code>VARBINARY(4096)</code> on the H2 test profile). Decryption failures surface as a 500 so a wrong <code>CASTELLUM_INTEGRATION_KEY</code> after rotation fails loud rather than silently misbehaving.</p>
+<p><strong>Key rotation:</strong> there is no automatic re-encrypt-on-key-change path. Rotating the key invalidates existing rows; the <code>POST /{type}/push</code> decrypt-probe will throw, and the operator must re-PUT the config to re-encrypt under the new key. The full "truncate + re-enter" rotation procedure is documented in <a href="operations.html"><code>operations.html</code></a> §7.</p>
 <hr>
-<h2 id="2-put-api-integrations-type-json-shape">2. <code>PUT /api/integrations/{type}</code> — JSON shape</h2>
+<h2 id="4-put-api-integrations-type-json-shape">4. <code>PUT /api/integrations/{type}</code> — JSON shape</h2>
 <p>Request body schema (from <code>IntegrationConfigDto.SaveRequest</code>):</p>
 <div class="codehilite"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;...&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;free-form JSON, persisted as-is in config_json&quot;</span><span class="w"> </span><span class="p">},</span>
@@ -618,7 +838,7 @@ footer {
 <li><code>credentials: null</code> → persisted as <code>cipher.encrypt("")</code> (a non-empty ciphertext over an empty plaintext; <code>credentialsSet</code> returns <code>false</code> only if the byte array is null/empty).</li>
 </ul>
 <p><code>{type}</code> is normalized to upper-case and must be one of <code>TAXII</code> or <code>MISP</code>. Anything else returns <strong>400</strong> with body <code>unsupported integration type: &lt;input&gt; (expected TAXII or MISP)</code>.</p>
-<h3 id="2-1-taxii">2.1 TAXII</h3>
+<h3 id="4-1-taxii">4.1 TAXII</h3>
 <p>Recommended <code>config</code> keys (consumed by the push path):</p>
 <table>
 <thead>
@@ -644,7 +864,17 @@ footer {
 <span class="p">}</span>
 </code></pre></div>
 
-<h3 id="2-2-misp">2.2 MISP</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Save TAXII config</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:8081/api/integrations/TAXII<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;config&quot;: { &quot;collectionId&quot;: &quot;&lt;your-taxii-collection-uuid&gt;&quot; },</span>
+<span class="s1">    &quot;credentials&quot;: &quot;Bearer &lt;your-taxii-token&gt;&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="4-2-misp">4.2 MISP</h3>
 <p><code>config</code> is currently unread by the push path — <code>ThreatIntelService.pushMisp()</code> takes no parameters from the persisted row. Persist <code>{}</code> (or any operator-facing notes — they will round-trip through the response) and put the live MISP transport creds in env vars consumed by the MISP client.</p>
 <p>Example body:</p>
 <div class="codehilite"><pre><span></span><code><span class="p">{</span>
@@ -653,7 +883,17 @@ footer {
 <span class="p">}</span>
 </code></pre></div>
 
-<h3 id="2-3-response-shape">2.3 Response shape</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Save MISP config</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:8081/api/integrations/MISP<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;config&quot;: {},</span>
+<span class="s1">    &quot;credentials&quot;: &quot;&lt;your-misp-api-key&gt;&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="4-3-response-shape">4.3 Response shape</h3>
 <p><code>IntegrationConfigDto.Response</code> (returned by <code>PUT</code> and <code>GET</code>):</p>
 <div class="codehilite"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
@@ -668,8 +908,26 @@ footer {
 </code></pre></div>
 
 <p>The encrypted bytes are <strong>never</strong> serialized — <code>credentialsSet</code> is the only signal exposed.</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Inspect persisted config (no secrets returned)</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/integrations/TAXII<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+</code></pre></div>
+
+<h3 id="4-4-reachability-probe">4.4 Reachability probe</h3>
+<p><code>POST /api/integrations/{type}/probe</code> (ADMIN) performs a bounded-timeout connectivity check against a candidate TAXII 2.1 or MISP endpoint <em>before</em> the operator saves it. Body: <code>{ "url": "…", "collectionId": "…" }</code> (<code>collectionId</code> optional, TAXII only). Returns <code>{ "reachable": &lt;bool&gt;, "detail": "…" }</code>.</p>
+<p>Any HTTP response — including <code>401</code> / <code>403</code> from an auth-gated server — counts as <code>reachable: true</code>; only connection-refused / host-unreachable and read timeouts return <code>reachable: false</code>. Timeouts are tunable via <code>castellum.integration.probe.connect-timeout-ms</code> (default 3000) and <code>castellum.integration.probe.read-timeout-ms</code> (default 5000). The probe is read-only and persists nothing.</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Probe a candidate TAXII endpoint before saving it</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8081/api/integrations/TAXII/probe<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{ &quot;url&quot;: &quot;https://cti-taxii.mitre.org/taxii/&quot;, &quot;collectionId&quot;: &quot;&lt;collection-uuid&gt;&quot; }&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+</code></pre></div>
+
+<h3 id="4-5-config-presets-and-auto-detect-admin-ui">4.5 Config presets and auto-detect (admin UI)</h3>
+<p><code>TaxiiConfigPanel</code> and <code>MispConfigPanel</code> offer one-click <strong>presets</strong> that fill the URL — and, for TAXII, the collection id — in a single selection (e.g. the MITRE ATT&amp;CK TAXII root <code>https://cti-taxii.mitre.org/taxii/</code>, or CIRCL MISP <code>https://misp.circl.lu/</code>). Selecting a preset immediately fires the reachability probe above and renders a reachability indicator beside the field; when a known server is recognised from the entered URL the panel surfaces an "auto-detected" note. In a Docker-compose dev stack the panels prefill the bundled TAXII / MISP service URLs while the saved config is still blank.</p>
 <hr>
-<h2 id="3-post-api-integrations-type-push-empty-config-behavior">3. <code>POST /api/integrations/{type}/push</code> — empty-config behavior</h2>
+<h2 id="5-post-api-integrations-type-push-empty-config-behavior">5. <code>POST /api/integrations/{type}/push</code> — empty-config behavior</h2>
 <p>Behavior matrix when the config row does not exist:</p>
 <table>
 <thead>
@@ -704,71 +962,54 @@ $ cat /tmp/r
 {&quot;status&quot;:401,&quot;path&quot;:&quot;/api/integrations/TAXII/push&quot;,&quot;error&quot;:&quot;unauthorized&quot;}
 </code></pre></div>
 
-<p>So the auth gate is the first line — missing token short-circuits before any config-lookup or decrypt logic runs.</p>
-<hr>
-<h2 id="4-curl-recipes">4. curl recipes</h2>
-<p>All recipes assume <code>:8081</code> and an admin Bearer token already obtained via <code>POST /api/auth/login</code>. Set <code>$TOKEN</code> before running.</p>
-<h3 id="4-1-login-to-obtain-token">4.1 Login to obtain <code>$TOKEN</code></h3>
-<div class="codehilite"><pre><span></span><code><span class="nv">TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8081/api/auth/login<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;username&quot;:&quot;&lt;admin-username&gt;&quot;,&quot;password&quot;:&quot;&lt;admin-password&gt;&quot;}&#39;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;import json,sys;print(json.load(sys.stdin)[&quot;token&quot;])&#39;</span><span class="k">)</span>
-<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-c<span class="w"> </span><span class="m">24</span><span class="w"> </span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span>
-</code></pre></div>
-
-<p>The admin user / password hash are seeded at boot from <code>castellum.admin.username</code> + <code>castellum.admin.password-hash</code> (BCrypt) — see <code>BootstrapAdminInitializer</code>. There is no compiled-in fallback admin.</p>
-<h3 id="4-2-save-taxii-config">4.2 Save TAXII config</h3>
-<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:8081/api/integrations/TAXII<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;config&quot;: { &quot;collectionId&quot;: &quot;&lt;your-taxii-collection-uuid&gt;&quot; },</span>
-<span class="s1">    &quot;credentials&quot;: &quot;Bearer &lt;your-taxii-token&gt;&quot;</span>
-<span class="s1">  }&#39;</span>
-</code></pre></div>
-
-<h3 id="4-3-save-misp-config">4.3 Save MISP config</h3>
-<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>http://localhost:8081/api/integrations/MISP<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;content-type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;config&quot;: {},</span>
-<span class="s1">    &quot;credentials&quot;: &quot;&lt;your-misp-api-key&gt;&quot;</span>
-<span class="s1">  }&#39;</span>
-</code></pre></div>
-
-<h3 id="4-4-inspect-persisted-config-no-secrets-returned">4.4 Inspect persisted config (no secrets returned)</h3>
-<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>http://localhost:8081/api/integrations/TAXII<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
-</code></pre></div>
-
-<h3 id="4-5-push-via-the-persisted-config-endpoint">4.5 Push via the persisted-config endpoint</h3>
-<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<p>So the auth gate is the first line — a missing token short-circuits before any config-lookup or decrypt logic runs.</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Push via the persisted-config endpoint</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>http://localhost:8081/api/integrations/TAXII/push<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
 </code></pre></div>
 
-<h3 id="4-6-push-via-the-stateless-threatintel-endpoint-no-config-row-needed">4.6 Push via the stateless ThreatIntel endpoint (no config row needed)</h3>
-<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="s2">&quot;http://localhost:8081/api/threat-intel/push/taxii?collection=&lt;override-uuid&gt;&quot;</span>
+<hr>
+<h2 id="6-configuration-surfaces">6. Configuration surfaces</h2>
+<p>Two configuration surfaces are supported. Pick exactly one — they are mutually exclusive:</p>
+<ol>
+<li><strong><code>integration_config</code> table (V15 migration)</strong> — the recommended path. Credentials are stored in Postgres encrypted at rest with AES-256-GCM. Managed through the admin UI (<code>TaxiiConfigPanel</code>, <code>MispConfigPanel</code>) or directly through <code>GET / PUT /api/integrations/{type}</code>. The encryption key comes from <code>CASTELLUM_INTEGRATION_KEY</code> (§3); without that env var, the application refuses to load any encrypted row at boot.</li>
+<li><strong>Environment variables (legacy)</strong> — the pre-V15 path, still honoured for ops parity. Credentials live in plaintext in the process env. Avoid for new deployments.</li>
+</ol>
+<h3 id="environment-variable-form-legacy">Environment-variable form (legacy)</h3>
+<div class="codehilite"><pre><span></span><code># TAXII 2.1
+TAXII_BASE_URL=https://taxii.example.com
+TAXII_COLLECTION_ID=&lt;default-collection-id&gt;
+TAXII_USERNAME=&lt;user&gt;
+TAXII_PASSWORD=&lt;pass&gt;
 
-curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>http://localhost:8081/api/threat-intel/push/misp
+# MISP
+MISP_BASE_URL=https://misp.example.com
+MISP_API_KEY=&lt;api-key&gt;
+MISP_DISTRIBUTION=0       # 0=organisation only; 1=community; 2=connected; 3=all
+MISP_THREAT_LEVEL_ID=2    # 1=high; 2=medium; 3=low; 4=undefined
 </code></pre></div>
 
-<h3 id="4-7-export-only-returns-the-stix-bundle-inline">4.7 Export-only (returns the STIX bundle inline)</h3>
-<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>http://localhost:8081/api/threat-intel/export<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-40
+<p>Corresponding <code>application.yml</code> keys:</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">castellum</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">taxii</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">base-url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${TAXII_BASE_URL:}</span>
+<span class="w">    </span><span class="nt">collection-id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${TAXII_COLLECTION_ID:}</span>
+<span class="w">    </span><span class="nt">username</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${TAXII_USERNAME:}</span>
+<span class="w">    </span><span class="nt">password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${TAXII_PASSWORD:}</span>
+<span class="w">    </span><span class="nt">backoff-base-millis</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6000</span>
+<span class="w">  </span><span class="nt">misp</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">base-url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${MISP_BASE_URL:}</span>
+<span class="w">    </span><span class="nt">api-key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${MISP_API_KEY:}</span>
+<span class="w">    </span><span class="nt">distribution</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${MISP_DISTRIBUTION:0}</span>
+<span class="w">    </span><span class="nt">threat-level-id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${MISP_THREAT_LEVEL_ID:2}</span>
+<span class="w">    </span><span class="nt">backoff-base-millis</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">6000</span>
 </code></pre></div>
-
-<p><strong>UI equivalent — Settings page export panel.</strong> The STIX Export section of the Settings page (<code>StixExportPanel</code>) provides two ADMIN-only controls; VIEWER role sees neither:</p>
-<ul>
-  <li><strong>Download STIX bundle</strong> — triggers the export endpoint and saves the result as <code>stix-bundle-&lt;timestamp&gt;.json</code>.</li>
-  <li><strong>Preview bundle</strong> — fetches the bundle text via <code>exportStixBundleText()</code> and renders it as pretty-printed JSON (<code>JSON.stringify(…, null, 2)</code>) in a scrollable on-screen block. Indentation is applied client-side only; the wire format remains compact JSON.</li>
-</ul>
-<p>Both controls share a busy lock so only one operation runs at a time. Errors appear inline below the buttons.</p>
 
 <hr>
-<h2 id="5-troubleshooting">5. Troubleshooting</h2>
+<h2 id="7-retry-behaviour">7. Retry behaviour</h2>
+<p>Both <code>TaxiiClient</code> and <code>MispClient</code> retry up to 3 times on 5xx responses using exponential back-off. The back-off base is configurable (<code>backoff-base-millis</code>; default 6 s, matching <code>NvdClient</code>). Non-retryable errors (4xx, network reset) propagate immediately as <code>IOException</code>.</p>
+<hr>
+<h2 id="8-troubleshooting">8. Troubleshooting</h2>
 <table>
 <thead>
 <tr>
@@ -781,7 +1022,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <tr>
 <td><strong>401 on every endpoint</strong></td>
 <td>Bearer token missing or expired.</td>
-<td>Re-run §4.1. Confirm <code>Authorization: Bearer &lt;token&gt;</code> header is present on the failing request.</td>
+<td>Re-run the login recipe (§2). Confirm <code>Authorization: Bearer &lt;token&gt;</code> header is present on the failing request.</td>
 </tr>
 <tr>
 <td><strong>403 on <code>/api/integrations/**</code></strong></td>
@@ -791,7 +1032,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <tr>
 <td><strong>404 <code>integration_config not found</code></strong></td>
 <td>No <code>PUT /api/integrations/{type}</code> has been done since boot (or DB reset).</td>
-<td>Save the config first (§4.2 / §4.3) before calling <code>/push</code>.</td>
+<td>Save the config first (§4.1 / §4.2) before calling <code>/push</code>.</td>
 </tr>
 <tr>
 <td><strong>400 <code>unsupported integration type</code></strong></td>
@@ -816,7 +1057,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <tr>
 <td><strong>Push hangs (no response)</strong></td>
 <td>Upstream TAXII/MISP server unreachable; the HTTP client doesn't have an aggressive timeout in some paths.</td>
-<td>Check network reachability + the upstream server's logs. Cancel the request from the client side; the backend transaction will roll forward with <code>lastPushStatus = "ERROR: ..."</code> once the underlying call eventually throws.</td>
+<td>Check network reachability + the upstream server's logs. Run the reachability probe (§4.4) against the URL. Cancel the request from the client side; the backend transaction rolls forward with <code>lastPushStatus = "ERROR: ..."</code> once the underlying call eventually throws.</td>
 </tr>
 <tr>
 <td><strong><code>credentialsSet: false</code> after a PUT</strong></td>
@@ -826,7 +1067,51 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 </tbody>
 </table>
 <hr>
-<h2 id="6-probe-evidence-captured-against-local-backend-8081">6. Probe evidence captured against local backend (<code>:8081</code>)</h2>
+<h2 id="9-audit-push-log">9. Audit / push log</h2>
+<p>The <code>threat_intel_push</code> table captures every push attempt:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>push_target</code></td>
+<td><code>TAXII</code>, <code>MISP</code>, or <code>EXPORT</code></td>
+</tr>
+<tr>
+<td><code>bundle_id</code></td>
+<td>STIX bundle <code>id</code> field</td>
+</tr>
+<tr>
+<td><code>status_code</code></td>
+<td>HTTP status code returned by upstream</td>
+</tr>
+<tr>
+<td><code>response_excerpt</code></td>
+<td>First 1 KB of upstream response body</td>
+</tr>
+<tr>
+<td><code>occurred_at</code></td>
+<td>Timestamp (defaults to <code>now()</code>)</td>
+</tr>
+<tr>
+<td><code>audit_log_id</code></td>
+<td>FK to matching <code>audit_log</code> row</td>
+</tr>
+</tbody>
+</table>
+<p>Query recent pushes:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="n">push_target</span><span class="p">,</span><span class="w"> </span><span class="n">bundle_id</span><span class="p">,</span><span class="w"> </span><span class="n">status_code</span><span class="p">,</span><span class="w"> </span><span class="n">occurred_at</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">threat_intel_push</span>
+<span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">occurred_at</span><span class="w"> </span><span class="k">DESC</span>
+<span class="k">LIMIT</span><span class="w"> </span><span class="mi">20</span><span class="p">;</span>
+</code></pre></div>
+
+<hr>
+<h2 id="10-probe-evidence-captured-against-local-backend-8081">10. Probe evidence captured against local backend (<code>:8081</code>)</h2>
 <p>The following probes were executed during runbook authoring; the recorded responses confirm the auth gate is the first line of defense for every documented endpoint.</p>
 <div class="codehilite"><pre><span></span><code>$ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X GET  http://localhost:8081/api/integrations/TAXII
 401
@@ -846,7 +1131,22 @@ $ curl -s -o /dev/null -w &quot;%{http_code}\n&quot; -X POST http://localhost:80
 
 <p>ADMIN-gated branches (404 missing config, 400 bad type, 500 missing key, 200 push outcomes) are derived from <code>IntegrationConfigController</code> and <code>ThreatIntelController</code> source — operators reproducing this runbook against their own deployment should expect those exact response shapes once they hold a valid admin token.</p>
 <hr>
-<h2 id="7-out-of-scope">7. Out of scope</h2>
+<h2 id="11-live-integration-testing">11. Live integration testing</h2>
+<p>The unit tests use <code>MockRestServiceServer</code> surrogates. For a real end-to-end test:</p>
+<ol>
+<li>Start a local TAXII server (e.g. <code>medallion</code>):
+   <code>bash
+   docker run -p 5000:5000 oasis-open/medallion</code></li>
+<li>Set <code>TAXII_BASE_URL=http://localhost:5000</code> and a valid collection ID.</li>
+<li>POST to <code>/api/threat-intel/push/taxii</code> and confirm a 201 response.</li>
+</ol>
+<p>For MISP:</p>
+<div class="codehilite"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker/misp-minimal.yml<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+
+<p>Then set <code>MISP_BASE_URL</code> and <code>MISP_API_KEY</code> and POST to <code>/api/threat-intel/push/misp</code>.</p>
+<hr>
+<h2 id="12-out-of-scope">12. Out of scope</h2>
 <ul>
 <li>Standing up a real TAXII 2.1 server (e.g., <code>mitre/cti-taxii-server</code>) or a MISP instance for round-trip verification. The runbook assumes the operator has these endpoints already and only documents the Castellum side of the wire.</li>
 <li>Multi-tenant or multi-endpoint per-type configs. The current schema is one row per <code>integration_type</code> (<code>TAXII</code> / <code>MISP</code>) — a deployment with two TAXII servers needs a schema change.</li>
