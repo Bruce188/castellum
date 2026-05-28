@@ -317,7 +317,7 @@ describe('runOtSweep', () => {
       const progressSnapshots: OtSweepProgress[] = [];
       let callCount = 0;
 
-      const fakeProbeFn: ProbeFn = vi.fn((host, protocol, port) => {
+      const fakeProbeFn: ProbeFn = vi.fn((_host, _protocol, _port) => {
         callCount++;
         // Reject with 403 (non-5xx) — should NOT be a throttle signal.
         return Promise.reject(new Error('403 Forbidden'));
