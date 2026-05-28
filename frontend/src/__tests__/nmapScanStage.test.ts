@@ -167,11 +167,12 @@ describe('makeNmapStage', () => {
       const ctx = makeCtx();
 
       const runnerPromise = runner(ctx);
+      const rejection = expect(runnerPromise).rejects.toThrow(failureReason); // attach handler before timers fire
 
       await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(DEFAULT_POLL_MS);
 
-      await expect(runnerPromise).rejects.toThrow(failureReason);
+      await rejection;
     });
 
     it('reports FAILED scanStatus before throwing', async () => {
@@ -184,9 +185,11 @@ describe('makeNmapStage', () => {
       const ctx = makeCtx();
 
       const runnerPromise = runner(ctx);
+      const rejection = expect(runnerPromise).rejects.toThrow(); // attach handler before timers fire
+
       await vi.advanceTimersByTimeAsync(0);
 
-      await expect(runnerPromise).rejects.toThrow();
+      await rejection;
 
       // ctx.report should have captured the FAILED status.
       expect(ctx.reports.some((r) => r.scanStatus === 'FAILED')).toBe(true);
@@ -202,10 +205,11 @@ describe('makeNmapStage', () => {
       const runner = makeNmapStage('PING_SWEEP', { triggerScan, getScanDetail });
       const ctx = makeCtx();
       const runnerPromise = runner(ctx);
+      const rejection = expect(runnerPromise).rejects.toThrow(); // attach handler before timers fire
 
       await vi.advanceTimersByTimeAsync(0);
 
-      await expect(runnerPromise).rejects.toThrow();
+      await rejection;
     });
 
     it('does NOT call getScanDetail after FAILED terminal', async () => {
@@ -218,9 +222,10 @@ describe('makeNmapStage', () => {
       const runner = makeNmapStage('PING_SWEEP', { triggerScan, getScanDetail });
       const ctx = makeCtx();
       const runnerPromise = runner(ctx);
+      const rejection = expect(runnerPromise).rejects.toThrow(); // attach handler before timers fire
 
       await vi.advanceTimersByTimeAsync(0);
-      await expect(runnerPromise).rejects.toThrow();
+      await rejection;
 
       // Advance more timers — no extra polls should happen.
       await vi.advanceTimersByTimeAsync(DEFAULT_POLL_MS * 3);
