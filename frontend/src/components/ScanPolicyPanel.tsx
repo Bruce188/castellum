@@ -20,11 +20,12 @@ export function ScanPolicyPanel({ isAdmin }: Props) {
   // Form state
   const [name, setName] = useState('');
   const [cronExpression, setCronExpression] = useState('0 0 * * * *');
-  const [cidr, setCidr] = useState('192.168.1.0/24');
+  const [cidr, setCidr] = useState('');
   const [scanType, setScanType] = useState<ScanType>('PING_SWEEP');
   const [enabled, setEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [formMsg, setFormMsg] = useState<string | null>(null);
+  const [cidrEmpty, setCidrEmpty] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -59,6 +60,23 @@ export function ScanPolicyPanel({ isAdmin }: Props) {
     void run();
     return () => { cancelled = true; };
   }, [isAdmin]);
+
+  // Prefill CIDR from the configured network interface on mount.
+  // Functional guard prevents overwriting an operator-typed value if the
+  // async response arrives late (mirrors ScanTriggerForm idiom).
+  useEffect(() => {
+    let cancelled = false;
+    api.getActiveCidr().then(r => {
+      if (cancelled) return;
+      if (r?.cidr) {
+        setCidr(prev => prev === '' ? (r.cidr ?? '') : prev);
+        setCidrEmpty(false);
+      } else {
+        setCidrEmpty(true);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   if (!isAdmin) {
     return (
@@ -153,6 +171,14 @@ export function ScanPolicyPanel({ isAdmin }: Props) {
             required
             className="px-2 py-1 border border-gray-300 rounded font-mono"
           />
+          {cidrEmpty && (
+            <span
+              data-testid="policy-cidr-hint"
+              className="text-xs text-amber-700 mt-1"
+            >
+              No network CIDR configured — set one in Settings.
+            </span>
+          )}
         </label>
         <label className="flex flex-col">
           Scan type
