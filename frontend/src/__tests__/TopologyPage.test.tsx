@@ -123,6 +123,16 @@ describe('<TopologyPage /> mount fanout', () => {
     expect(calledIds).toEqual(DEVICES.map(d => d.id).sort());
   });
 
+  it('surfaces the OT/ICS fingerprint probe in a disclosure on the controls', async () => {
+    render(<TopologyPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // The disclosure summary that reveals the probe (selector disambiguates from
+    // OtProbePanel's own <h2> which repeats the label).
+    expect(screen.getByText(/OT\/ICS fingerprint probe/i, { selector: 'summary' })).toBeInTheDocument();
+    // The reused OtProbePanel itself is mounted (test-id is unique to the panel).
+    expect(screen.getByTestId('ot-probe-panel')).toBeInTheDocument();
+  });
+
   describe('scope visibility persistence', () => {
     it('hydrates LOOPBACK=false from localStorage on mount', async () => {
       localStorage.setItem(

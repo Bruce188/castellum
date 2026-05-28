@@ -93,4 +93,9 @@ describe('<OtProbePanel />', () => {
     expect(help).toHaveTextContent(/S7comm.*102/);
     expect(help).toHaveTextContent(/BACnet.*47808/);
   });
+
+  it('shows the operator how to verify a probe ran (verify-help note)', () => {
+    render(<OtProbePanel isAdmin={true} />);
+    expect(screen.getByTestId('ot-verify-help')).toHaveTextContent(/OT\/ICS protocols detected/i);
+  });
 });
