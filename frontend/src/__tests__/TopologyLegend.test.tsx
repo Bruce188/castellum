@@ -75,4 +75,16 @@ describe('<TopologyLegend />', () => {
     render(<TopologyLegend visibility={allTrue} onChange={vi.fn()} />);
     expect(screen.getByTestId('topology-legend')).toBeInTheDocument();
   });
+
+  it('topologyLegend_pinnedTopRightAtZ10_opposesLoadingBadge', () => {
+    // AC#3 overlay guard (paired with topologyView_riskLoadingBadge_pinnedTopLeftNotUnderLegend):
+    // the legend owns the top-RIGHT corner at z-10; the loading badge is pinned top-left.
+    // z-10 keeps the legend below the z-20 device-detail panel. Pin the corner + stacking.
+    render(<TopologyLegend visibility={allTrue} onChange={vi.fn()} />);
+    const legend = screen.getByTestId('topology-legend');
+    expect(legend.className).toContain('top-2');
+    expect(legend.className).toContain('right-2');
+    expect(legend.className).not.toContain('left-2');
+    expect(legend.className).toContain('z-10');
+  });
 });

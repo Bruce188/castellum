@@ -202,3 +202,34 @@ describe('<TopologyView /> scope rendering', () => {
     expect(nodeIds).not.toContain('2');
   });
 });
+
+// AC#3 overlay-regression guard. The "Computing risk scores…" badge was moved
+// top-LEFT in PR #28 precisely because the TopologyLegend owns the top-right
+// corner (z-10) and otherwise covered it. Pin that invariant so a future edit
+// cannot silently re-introduce the overlap. jsdom does not compute layout, so
+// we assert the positioning *classes* (the assertable proxy for the corner).
+describe('<TopologyView /> risk-loading badge placement (AC#3 overlay guard)', () => {
+  beforeEach(() => {
+    factoryMock.mockClear();
+    mocks.add.mockClear();
+  });
+
+  it('topologyView_riskLoadingBadge_pinnedTopLeftNotUnderLegend', () => {
+    const { getByTestId } = render(
+      <TopologyView
+        devices={[makeDevice(1, '10.0.0.1', 'HOME')]}
+        risksById={new Map<number, DeviceRiskDto>()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+        risksLoading
+      />
+    );
+    const badge = getByTestId('topology-risk-loading');
+    // Top-LEFT corner — the legend owns top-right.
+    expect(badge.className).toContain('top-2');
+    expect(badge.className).toContain('left-2');
+    expect(badge.className).not.toContain('right-2');
+    // Never intercept clicks even if visually adjacent to other overlays.
+    expect(badge.className).toContain('pointer-events-none');
+  });
+});
