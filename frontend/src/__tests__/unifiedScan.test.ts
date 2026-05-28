@@ -16,12 +16,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type {
   StageId,
-  StageStatus,
   StageProgress,
   StageContext,
   StageRunner,
   StageDef,
-  StageState,
   UnifiedScanProgress,
   UnifiedScanResult,
   UnifiedScanDeps,
