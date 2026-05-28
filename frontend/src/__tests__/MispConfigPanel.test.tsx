@@ -8,17 +8,21 @@ vi.mock('../api/client', () => ({
     getIntegrationConfig: vi.fn(),
     saveIntegrationConfig: vi.fn(),
     pushIntegration: vi.fn(),
+    probeIntegration: vi.fn(),
   },
 }));
 
 const getIntegrationConfig = vi.mocked(api.getIntegrationConfig);
 const saveIntegrationConfig = vi.mocked(api.saveIntegrationConfig);
 const pushIntegration = vi.mocked(api.pushIntegration);
+const probeIntegration = vi.mocked(api.probeIntegration);
 
 beforeEach(() => {
   getIntegrationConfig.mockReset();
   saveIntegrationConfig.mockReset();
   pushIntegration.mockReset();
+  probeIntegration.mockReset();
+  probeIntegration.mockResolvedValue({ reachable: true, detail: 'ok' });
 });
 
 describe('<MispConfigPanel />', () => {
@@ -89,5 +93,81 @@ describe('<MispConfigPanel />', () => {
       expect(screen.getByTestId('misp-last-push-status').textContent).toContain('evt-99');
       expect(screen.getByTestId('misp-last-push-at').textContent).toContain('2026-05-26T02:00:00Z');
     });
+  });
+
+  // AC4 cases — red phase; the component additions do not exist yet
+
+  it('AC4 detected->prefilled: blank config (404) + reachable probe prefills docker URL and shows detected note', async () => {
+    getIntegrationConfig.mockRejectedValueOnce(new Error('404 Not Found'));
+    probeIntegration.mockResolvedValue({ reachable: true, detail: 'ok' });
+
+    render(<MispConfigPanel isAdmin={true} />);
+
+    await waitFor(() => {
+      expect((screen.getByTestId('misp-url-input') as HTMLInputElement).value)
+        .toBe('https://localhost/');
+    });
+    expect(screen.getByTestId('misp-detected-note')).toBeInTheDocument();
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
+  });
+
+  it('AC4 preset-selected->filled: selecting a preset populates url and never calls saveIntegrationConfig', async () => {
+    getIntegrationConfig.mockRejectedValueOnce(new Error('404 Not Found'));
+
+    render(<MispConfigPanel isAdmin={true} />);
+    await waitFor(() => expect(getIntegrationConfig).toHaveBeenCalled());
+
+    const select = screen.getByTestId('misp-preset-select');
+    // Fire a change to any non-blank preset option value
+    const presetUrl = 'https://misp.circl.lu/';
+    fireEvent.change(select, { target: { value: presetUrl } });
+
+    await waitFor(() => {
+      expect((screen.getByTestId('misp-url-input') as HTMLInputElement).value)
+        .toBe(presetUrl);
+    });
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
+  });
+
+  it('AC4 manual-value-not-clobbered: saved config.url survives auto-detect', async () => {
+    getIntegrationConfig.mockResolvedValueOnce({
+      id: 3, integrationType: 'MISP',
+      config: { url: 'https://saved.example' },
+      credentialsSet: true, lastPushAt: null, lastPushStatus: null,
+      createdAt: '2026-05-26T00:00:00Z', updatedAt: '2026-05-26T00:00:00Z',
+    });
+    probeIntegration.mockResolvedValue({ reachable: true, detail: 'ok' });
+
+    render(<MispConfigPanel isAdmin={true} />);
+
+    await waitFor(() => {
+      expect((screen.getByTestId('misp-url-input') as HTMLInputElement).value)
+        .toBe('https://saved.example');
+    });
+    // Give the async detect() a chance to complete and assert it did not clobber
+    await waitFor(() => expect(probeIntegration).toHaveBeenCalled());
+    expect((screen.getByTestId('misp-url-input') as HTMLInputElement).value)
+      .toBe('https://saved.example');
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
+  });
+
+  it('AC4 unreachable->status-shown: selecting a preset then unreachable probe renders misp-reachability unreachable state', async () => {
+    getIntegrationConfig.mockRejectedValueOnce(new Error('404 Not Found'));
+    probeIntegration.mockResolvedValue({ reachable: false, detail: 'connection refused' });
+
+    render(<MispConfigPanel isAdmin={true} />);
+    await waitFor(() => expect(getIntegrationConfig).toHaveBeenCalled());
+
+    const presetUrl = 'https://misp.circl.lu/';
+    fireEvent.change(screen.getByTestId('misp-preset-select'), { target: { value: presetUrl } });
+
+    await waitFor(() => {
+      const indicator = screen.getByTestId('misp-reachability');
+      expect(indicator).toBeInTheDocument();
+      // The indicator must communicate the unreachable state in text or aria
+      expect(indicator.textContent?.toLowerCase() ?? indicator.getAttribute('data-status') ?? '')
+        .toMatch(/unreachable|error|failed|refused/i);
+    });
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
   });
 });

@@ -45,17 +45,20 @@ public class IntegrationConfigController {
     private final ThreatIntelService threatIntelService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final IntegrationProbeService probeService;
 
     public IntegrationConfigController(IntegrationConfigRepository repository,
                                        AesGcmCipher cipher,
                                        ThreatIntelService threatIntelService,
                                        AuditService auditService,
-                                       ObjectMapper objectMapper) {
+                                       ObjectMapper objectMapper,
+                                       IntegrationProbeService probeService) {
         this.repository = repository;
         this.cipher = cipher;
         this.threatIntelService = threatIntelService;
         this.auditService = auditService;
         this.objectMapper = objectMapper;
+        this.probeService = probeService;
     }
 
     /** Returns the persisted config minus the encrypted-credentials bytes. */
@@ -161,6 +164,18 @@ public class IntegrationConfigController {
             repository.save(cfg);
         }
         return ResponseEntity.ok(response);
+    }
+
+    /** Probes reachability of a TAXII or MISP endpoint without persisting anything. */
+    @PostMapping("/{type}/probe")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<IntegrationProbeDto.ProbeResult> probe(@PathVariable String type,
+                                                                  @RequestBody IntegrationProbeDto.ProbeRequest body) {
+        if (body.url() == null || body.url().isBlank()) {
+            throw new IllegalArgumentException("url must not be blank");
+        }
+        String normalized = normalizeType(type);
+        return ResponseEntity.ok(probeService.probe(normalized, body.url(), body.collectionId()));
     }
 
     private String normalizeType(String type) {

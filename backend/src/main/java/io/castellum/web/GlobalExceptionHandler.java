@@ -7,6 +7,8 @@ import io.castellum.ot.OtProbeNotImplementedException;
 import io.castellum.ot.OtProbeTimeoutException;
 import io.castellum.ot.OtProbeUnreachableException;
 import io.castellum.scan.ScanScopeTooLargeException;
+import io.castellum.threatintel.IntegrationProbeTimeoutException;
+import io.castellum.threatintel.IntegrationProbeUnreachableException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -118,6 +120,20 @@ public class GlobalExceptionHandler {
         log.warn("OT probe not implemented: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
             .body(Map.of("error", "ot_probe_not_implemented", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(IntegrationProbeUnreachableException.class)
+    public ResponseEntity<Map<String, Object>> handleIntegrationProbeUnreachable(IntegrationProbeUnreachableException ex) {
+        log.warn("Integration probe unreachable: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+            .body(Map.of("error", "integration_probe_unreachable", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(IntegrationProbeTimeoutException.class)
+    public ResponseEntity<Map<String, Object>> handleIntegrationProbeTimeout(IntegrationProbeTimeoutException ex) {
+        log.warn("Integration probe timeout: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
+            .body(Map.of("error", "integration_probe_timeout", "message", ex.getMessage()));
     }
 
     @ExceptionHandler(IOException.class)

@@ -67,7 +67,9 @@ describe('api.getActiveCidr()', () => {
   });
 
   it('returns documented empty shape on network error without throwing', async () => {
-    vi.spyOn(global, 'fetch').mockRejectedValueOnce(new TypeError('network failure'));
+    // mockRejectedValue (not ...Once): request() retries network errors once, and a
+    // single-shot mock would let the retry hit real fetch and hang past the test timeout.
+    vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('network failure'));
 
     const result = await api.getActiveCidr();
 

@@ -37,6 +37,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.Mockito.doThrow;
 
 @WebMvcTest(IntegrationConfigController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class,
@@ -53,6 +54,7 @@ class IntegrationConfigControllerTest {
     @MockBean private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean private JwtService jwtService;
     @MockBean private UserRepository userRepository;
+    @MockBean private IntegrationProbeService probeService;
 
     @BeforeEach
     void resetCipher() {
@@ -225,6 +227,83 @@ class IntegrationConfigControllerTest {
     @Test
     void anon_get_returns401() throws Exception {
         mockMvc.perform(get("/api/integrations/TAXII").with(anonymous()))
+            .andExpect(status().isUnauthorized());
+    }
+
+    // ---- Probe endpoint tests (Task 1.3) ----
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_probeReachable_returns200() throws Exception {
+        when(probeService.probe(any(), any(), any()))
+            .thenReturn(new IntegrationProbeDto.ProbeResult(true, "ok"));
+
+        mockMvc.perform(post("/api/integrations/TAXII/probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"http://localhost:9000/\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reachable").value(true));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_probeUnreachable_returns502() throws Exception {
+        when(probeService.probe(any(), any(), any()))
+            .thenThrow(new IntegrationProbeUnreachableException("connection refused"));
+
+        mockMvc.perform(post("/api/integrations/TAXII/probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"http://localhost:9000/\"}"))
+            .andExpect(status().isBadGateway())
+            .andExpect(jsonPath("$.error").value("integration_probe_unreachable"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_probeTimeout_returns504() throws Exception {
+        when(probeService.probe(any(), any(), any()))
+            .thenThrow(new IntegrationProbeTimeoutException("read timeout"));
+
+        mockMvc.perform(post("/api/integrations/TAXII/probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"http://localhost:9000/\"}"))
+            .andExpect(status().isGatewayTimeout())
+            .andExpect(jsonPath("$.error").value("integration_probe_timeout"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_probeBlankUrl_returns400() throws Exception {
+        mockMvc.perform(post("/api/integrations/TAXII/probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_probeUnsupportedType_returns400() throws Exception {
+        mockMvc.perform(post("/api/integrations/SLACK/probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"http://localhost:9000/\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewer_cannotProbe_returns403() throws Exception {
+        mockMvc.perform(post("/api/integrations/TAXII/probe")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"http://localhost:9000/\"}"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anon_probe_returns401() throws Exception {
+        mockMvc.perform(post("/api/integrations/TAXII/probe")
+                .with(anonymous())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"url\":\"http://localhost:9000/\"}"))
             .andExpect(status().isUnauthorized());
     }
 }
