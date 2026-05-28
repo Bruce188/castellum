@@ -55,6 +55,9 @@ function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySour
     lastSeenIface: null,
     discoverySource: discoverySource ?? null,
     serviceCount,
+    osName: null,
+    osAccuracy: null,
+    osCpe: null,
   };
 }
 

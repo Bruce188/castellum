@@ -5,6 +5,7 @@ import io.castellum.discovery.Discovery;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.discovery.DeviceUpsertService;
 import io.castellum.domain.Device;
+import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.domain.Scan;
@@ -57,6 +58,7 @@ public class ScanExecutionService {
     private final AuditService auditService;
     private final ScanRetryService scanRetryService;
     private final RiskCacheEvictor riskCacheEvictor;
+    private final DeviceRepository deviceRepository;
 
     public ScanExecutionService(
             NmapRunner nmapRunner,
@@ -66,7 +68,8 @@ public class ScanExecutionService {
             NetworkServiceRepository networkServiceRepository,
             AuditService auditService,
             ScanRetryService scanRetryService,
-            RiskCacheEvictor riskCacheEvictor) {
+            RiskCacheEvictor riskCacheEvictor,
+            DeviceRepository deviceRepository) {
         this.nmapRunner = nmapRunner;
         this.scanRepository = scanRepository;
         this.nmapOutputParser = nmapOutputParser;
@@ -75,6 +78,7 @@ public class ScanExecutionService {
         this.auditService = auditService;
         this.scanRetryService = scanRetryService;
         this.riskCacheEvictor = riskCacheEvictor;
+        this.deviceRepository = deviceRepository;
     }
 
     /**
@@ -143,6 +147,13 @@ public class ScanExecutionService {
                     null            // iface not available from nmap XML output
                 );
                 Device device = deviceUpsertService.upsert(discovery);
+
+                if (type == ScanType.OS_FINGERPRINT && host.os() != null) {
+                    device.setOsName(host.os().name());
+                    device.setOsAccuracy(host.os().accuracy());
+                    device.setOsCpe(host.os().cpe());
+                    deviceRepository.save(device);
+                }
 
                 // 7. Persist discovered services linked to the device
                 for (NmapOutputParser.DiscoveredService svc : hostServices) {

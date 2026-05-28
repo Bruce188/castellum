@@ -3,6 +3,7 @@ package io.castellum.scan;
 import io.castellum.audit.AuditService;
 import io.castellum.discovery.DeviceUpsertService;
 import io.castellum.domain.Device;
+import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
@@ -38,6 +39,7 @@ class ScanExecutionServiceTest {
     @Mock AuditService auditService;
     @Mock ScanRetryService scanRetryService;
     @Mock io.castellum.risk.RiskCacheEvictor riskCacheEvictor;
+    @Mock DeviceRepository deviceRepository;
 
     ScanExecutionService service;
 
@@ -46,7 +48,7 @@ class ScanExecutionServiceTest {
         service = new ScanExecutionService(
             nmapRunner, scanRepository, nmapOutputParser,
             deviceUpsertService, networkServiceRepository, auditService,
-            scanRetryService, riskCacheEvictor);
+            scanRetryService, riskCacheEvictor, deviceRepository);
     }
 
     // -----------------------------------------------------------------------
@@ -176,7 +178,7 @@ class ScanExecutionServiceTest {
         when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
 
         NmapOutputParser.DiscoveredHost host =
-            new NmapOutputParser.DiscoveredHost("10.0.1.5", "myhost");
+            new NmapOutputParser.DiscoveredHost("10.0.1.5", "myhost", null);
         NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
             List.of(host), List.of());
         when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
@@ -207,7 +209,7 @@ class ScanExecutionServiceTest {
 
         // Under -Pn this address is reported "up" but exposes no open ports — a phantom.
         NmapOutputParser.DiscoveredHost phantom =
-            new NmapOutputParser.DiscoveredHost("10.0.2.0", null);
+            new NmapOutputParser.DiscoveredHost("10.0.2.0", null, null);
         NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
             List.of(phantom), List.of());
         when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
@@ -235,7 +237,7 @@ class ScanExecutionServiceTest {
         when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
 
         NmapOutputParser.DiscoveredHost realHost =
-            new NmapOutputParser.DiscoveredHost("10.0.3.7", "real");
+            new NmapOutputParser.DiscoveredHost("10.0.3.7", "real", null);
         NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
             "10.0.3.7", 22, "tcp", "ssh", "9.6p1", "OpenSSH",
             "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*");
@@ -258,5 +260,104 @@ class ScanExecutionServiceTest {
                 && "9.6p1".equals(ns.getVersion())
                 && "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*".equals(ns.getCpe())));
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (h) OS_FINGERPRINT matched host → OS fields persisted on Device
+    // -----------------------------------------------------------------------
+
+    @Test
+    void osFingerprint_matchedHost_persistsOsFieldsOnDevice() throws Exception {
+        Scan scan = stubScan(7L, "10.0.4.0/24", "OS_FINGERPRINT");
+        when(scanRepository.findById(7L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.OsMatch osMatch =
+            new NmapOutputParser.OsMatch("Linux 5.4 - 5.15", 96, "cpe:/o:linux:linux_kernel:5");
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.4.9", "router", osMatch);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(30L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+
+        service.executeAsync(7L);
+
+        verify(deviceRepository).save(argThat(d ->
+            "Linux 5.4 - 5.15".equals(d.getOsName())
+                && d.getOsAccuracy() != null
+                && d.getOsAccuracy() == 96
+                && "cpe:/o:linux:linux_kernel:5".equals(d.getOsCpe())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (i) OS_FINGERPRINT host with no OS match → Device NOT re-saved
+    // -----------------------------------------------------------------------
+
+    @Test
+    void osFingerprint_noMatch_doesNotResaveDevice() throws Exception {
+        Scan scan = stubScan(8L, "10.0.5.0/24", "OS_FINGERPRINT");
+        when(scanRepository.findById(8L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.5.3", "nooshost", null);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(31L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+
+        service.executeAsync(8L);
+
+        verify(deviceRepository, never()).save(any());
+    }
+
+    // -----------------------------------------------------------------------
+    // (j) SERVICE_DETECT with non-null OsMatch → OS NOT persisted (wrong scan type)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_doesNotPersistOs() throws Exception {
+        Scan scan = stubScan(9L, "10.0.6.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(9L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.OsMatch osMatch =
+            new NmapOutputParser.OsMatch("Windows 10", 85, "cpe:/o:microsoft:windows_10");
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.6.2", "winbox", osMatch);
+        // One open service so phantom suppression does not skip this host
+        NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
+            "10.0.6.2", 445, "tcp", "microsoft-ds", null, "Samba",
+            "cpe:2.3:a:microsoft:smb:*:*:*:*:*:*:*:*");
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of(svc));
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(32L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(32L, 445, "tcp"))
+            .thenReturn(Optional.empty());
+
+        service.executeAsync(9L);
+
+        verify(deviceRepository, never()).save(any());
     }
 }

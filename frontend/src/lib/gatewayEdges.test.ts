@@ -20,6 +20,9 @@ function makeDevice(
     lastSeenIface: null,
     discoverySource: null,
     serviceCount: 0,
+    osName: null,
+    osAccuracy: null,
+    osCpe: null,
   };
 }
 

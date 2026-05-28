@@ -130,6 +130,12 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
           )}
           <dt className="text-gray-500">discovered via</dt>
           <dd>{device.discoverySource ?? 'Unknown'}</dd>
+          <dt className="text-gray-500">OS</dt>
+          <dd data-testid="device-os">
+            {device.osName
+              ? `${device.osName}${device.osAccuracy != null ? ` (${device.osAccuracy}%)` : ''}`
+              : 'Unknown'}
+          </dd>
         </dl>
         {isAdmin && (
           <div className="mt-3">

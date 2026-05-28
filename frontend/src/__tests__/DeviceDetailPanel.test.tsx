@@ -15,6 +15,9 @@ const device: Device = {
   lastSeenIface: null,
   discoverySource: null,
   serviceCount: 0,
+  osName: null,
+  osAccuracy: null,
+  osCpe: null,
 };
 
 const risk: DeviceRiskDto = {
@@ -218,5 +221,35 @@ describe('<DeviceDetailPanel />', () => {
     const dt = screen.getByText('discovered via');
     expect(dt).toBeInTheDocument();
     expect(dt.nextElementSibling).toHaveTextContent('Unknown');
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // OS detection row — osName / osAccuracy / osCpe
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('os_renders_nameAndAccuracy_whenPresent', () => {
+    const d: Device = { ...device, osName: 'Linux 5.4 - 5.15', osAccuracy: 96, osCpe: 'cpe:/o:linux:linux_kernel:5' };
+    render(
+      <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />
+    );
+    expect(screen.getByTestId('device-os')).toHaveTextContent('Linux 5.4 - 5.15 (96%)');
+  });
+
+  it('os_rendersFallback_whenNull', () => {
+    // device fixture has no osName — fallback should show 'Unknown'
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[]} onClose={() => {}} />
+    );
+    expect(screen.getByTestId('device-os')).toHaveTextContent('Unknown');
+  });
+
+  it('os_rendersNameWithoutAccuracy_whenAccuracyNull', () => {
+    const d: Device = { ...device, osName: 'Linux', osAccuracy: null };
+    render(
+      <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />
+    );
+    const osEl = screen.getByTestId('device-os');
+    expect(osEl).toHaveTextContent('Linux');
+    expect(osEl.textContent).not.toMatch(/\(.*%\)/);
   });
 });

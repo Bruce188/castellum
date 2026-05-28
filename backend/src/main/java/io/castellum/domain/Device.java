@@ -44,6 +44,15 @@ public class Device {
     @Column(name = "discovery_source")
     private DiscoverySource discoverySource;
 
+    @Column(name = "os_name")
+    private String osName;
+
+    @Column(name = "os_accuracy")
+    private Integer osAccuracy;
+
+    @Column(name = "os_cpe")
+    private String osCpe;
+
     /**
      * Count of network services observed on this device. Computed at entity-load
      * time via the Hibernate formula; not persisted (no Flyway migration needed).
@@ -103,6 +112,15 @@ public class Device {
 
     public DiscoverySource getDiscoverySource() { return discoverySource; }
     public void setDiscoverySource(DiscoverySource discoverySource) { this.discoverySource = discoverySource; }
+
+    public String getOsName() { return osName; }
+    public void setOsName(String osName) { this.osName = osName; }
+
+    public Integer getOsAccuracy() { return osAccuracy; }
+    public void setOsAccuracy(Integer osAccuracy) { this.osAccuracy = osAccuracy; }
+
+    public String getOsCpe() { return osCpe; }
+    public void setOsCpe(String osCpe) { this.osCpe = osCpe; }
 
     public long getServiceCount() { return serviceCount; }
 
