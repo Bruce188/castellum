@@ -86,9 +86,10 @@ describe('<RelatedCvesPanel />', () => {
     const thirdRow = screen.getByTestId('related-cves-row-CVE-2024-0003');
     expect(thirdRow).toBeInTheDocument();
     expect(thirdRow).toHaveTextContent('CVE-2024-0003');
-    // Locks the call-argument contract so a future refactor cannot silently
-    // shift the deviceId positional argument.
-    expect(api.listFleetCves).toHaveBeenCalledWith(0, 50, undefined, deviceId);
+    // AC1: Locks the full 6-arg call contract. The 5th slot (kevOnly) must be
+    // explicitly undefined to reach the 6th sort slot. Dropping 'kev' here
+    // causes this test to fail — the assertion is falsifiable.
+    expect(api.listFleetCves).toHaveBeenCalledWith(0, 50, undefined, deviceId, undefined, 'kev');
   });
 
   it('renders kev badge when cve kev is true', async () => {
@@ -181,6 +182,69 @@ describe('<RelatedCvesPanel />', () => {
     render(<RelatedCvesPanel deviceId={1} hostname="host-1" ipAddress="10.0.0.1" />);
     const errorEl = await screen.findByText(/boom/);
     expect(errorEl).toHaveClass('text-red-600');
+  });
+
+  // AC3: KEV-first ordering contract.
+  // The mock resolves rows in the order the real backend would return for
+  // sort=kev: all KEV-flagged entries first, then non-KEV entries, with
+  // cveId ASC as the tiebreak within each tier.
+  // The test asserts the rendered DOM row order — NOT merely badge presence.
+  it('renders kev-flagged cves before non-kev cves when api returns kev-first order', async () => {
+    const deviceId = 11;
+    // Mixed-KEV fixture: KEV CVE at lower CVSS (5.0) placed before non-KEV
+    // at higher CVSS (9.0), mirroring sort=kev backend output.
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([
+        makeSummary('CVE-2024-KEV-1', '5.0', true),
+        makeSummary('CVE-2024-NON-1', '9.0', false),
+      ]),
+    );
+    const { container } = render(
+      <RelatedCvesPanel deviceId={deviceId} hostname="host-11" ipAddress="10.0.0.11" />,
+    );
+
+    // Wait until the list is rendered.
+    await screen.findByTestId('related-cves-row-CVE-2024-KEV-1');
+
+    // AC1 contract: sort='kev' arg was passed.
+    expect(api.listFleetCves).toHaveBeenCalledWith(0, 50, undefined, deviceId, undefined, 'kev');
+
+    // AC3 contract: DOM order places the KEV row before the non-KEV row.
+    const rows = container.querySelectorAll('[data-testid^="related-cves-row-"]');
+    expect(rows).toHaveLength(2);
+    // First rendered row must be the KEV-flagged one (lower CVSS, but KEV).
+    expect(rows[0]).toHaveAttribute('data-testid', 'related-cves-row-CVE-2024-KEV-1');
+    expect(rows[0]).toHaveTextContent('CVE-2024-KEV-1');
+    // Second rendered row is the high-CVSS non-KEV one.
+    expect(rows[1]).toHaveAttribute('data-testid', 'related-cves-row-CVE-2024-NON-1');
+    expect(rows[1]).toHaveTextContent('CVE-2024-NON-1');
+  });
+
+  // Regression guard: all-non-KEV case still renders without crash.
+  it('renders all rows when no cves are kev-flagged', async () => {
+    const deviceId = 12;
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([
+        makeSummary('CVE-2024-A', '9.0', false),
+        makeSummary('CVE-2024-B', '6.0', false),
+      ]),
+    );
+    const { container } = render(
+      <RelatedCvesPanel deviceId={deviceId} hostname="host-12" ipAddress="10.0.0.12" />,
+    );
+    await screen.findByTestId('related-cves-row-CVE-2024-A');
+    const rows = container.querySelectorAll('[data-testid^="related-cves-row-"]');
+    expect(rows).toHaveLength(2);
+    // No KEV badges should be present.
+    expect(container.querySelectorAll('[data-testid^="related-cves-kev-badge-"]')).toHaveLength(0);
+  });
+
+  // Regression guard: empty-list case still renders without crash.
+  it('renders empty state without crash when api returns no cves', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    render(<RelatedCvesPanel deviceId={13} hostname="host-13" ipAddress="10.0.0.13" />);
+    const empty = await screen.findByTestId('related-cves-empty');
+    expect(empty).toHaveTextContent('No linked CVEs for this threat.');
   });
 
   it('strictmode_doesNotDoubleFireCveDetail_onFirstExpand', async () => {
