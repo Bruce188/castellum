@@ -1,5 +1,6 @@
 package io.castellum.threatintel;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
@@ -33,6 +34,7 @@ public class IntegrationProbeService {
 
     private final RestClient client;
 
+    @Autowired
     public IntegrationProbeService(
             RestClient.Builder builder,
             @Value("${castellum.integration.probe.connect-timeout-ms:3000}") int connectTimeoutMs,
