@@ -781,5 +781,26 @@ describe('<CvesPage />', () => {
         expect(screen.getByText(/no affected devices/i)).toBeInTheDocument()
       );
     });
+
+    it('Enter key on a CVE row opens the detail drawer and calls cveDetail', async () => {
+      render(
+        <MemoryRouter initialEntries={['/cves']}>
+          <Routes><Route path="/cves" element={<CvesPage />} /></Routes>
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument());
+
+      // Find the <tr> row that contains the CVE id cell.
+      const cveIdCell = screen.getByText('CVE-2024-12345');
+      const row = cveIdCell.closest('tr');
+      expect(row).not.toBeNull();
+
+      fireEvent.keyDown(row!, { key: 'Enter' });
+
+      await waitFor(() =>
+        expect(screen.getByTestId('cve-detail-panel')).toBeInTheDocument()
+      );
+      expect(cveDetail).toHaveBeenCalledWith('CVE-2024-12345');
+    });
   });
 });

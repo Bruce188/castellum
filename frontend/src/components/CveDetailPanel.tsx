@@ -9,6 +9,8 @@ interface NvdReference {
   tags?: string[];
 }
 
+// References are parsed client-side from the already-shipped rawJson (avoiding a structured
+// references[] field on CveDetailDto), with an NVD-canonical URL as fallback when absent.
 function parseReferences(rawJson: string | null | undefined): NvdReference[] {
   try {
     if (!rawJson) return [];

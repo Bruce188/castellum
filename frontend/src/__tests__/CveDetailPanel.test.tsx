@@ -139,4 +139,65 @@ describe('<CveDetailPanel />', () => {
     screen.getByLabelText('Close CVE panel').click();
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
+
+  it('affected-node link href navigates to /cves?deviceId=<id>', async () => {
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByText('host-1')).toBeInTheDocument());
+    const link = screen.getByRole('link', { name: /host-1/i });
+    expect(link.getAttribute('href')).toBe('/cves?deviceId=42');
+  });
+
+  it('listAffectedDevices is called exactly once per open', async () => {
+    vi.mocked(api.listAffectedDevices).mockClear();
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByText('host-1')).toBeInTheDocument());
+    expect(vi.mocked(api.listAffectedDevices)).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders EPSS as percentage and composite score', async () => {
+    // epssScore '0.42' renders as "42.0%" via (Number * 100).toFixed(1)
+    // compositeScore '8.50' renders as "8.50" via Number().toFixed(2)
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByText(/42\.0%/)).toBeInTheDocument());
+    expect(screen.getByText(/8\.50/)).toBeInTheDocument();
+  });
+
+  it('parseReferences throw-path: invalid rawJson renders NVD fallback without throwing', async () => {
+    vi.mocked(api.cveDetail).mockResolvedValue({ ...cveDetail, rawJson: 'corrupted{not-json' });
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /nvd\.nist\.gov/i })).toBeInTheDocument();
+    });
+  });
+
+  it('hostname null fallback: link label shows ipAddress when hostname is null', async () => {
+    vi.mocked(api.listAffectedDevices).mockResolvedValue([
+      { deviceId: 99, hostname: null, ipAddress: '192.168.1.99',
+        matchedPort: 443, matchedService: 'nginx', matchedVersion: '1.18' },
+    ]);
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: '192.168.1.99' })).toBeInTheDocument();
+    });
+  });
 });

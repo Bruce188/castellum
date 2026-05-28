@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -113,7 +114,7 @@ public class CveController {
 
         List<NetworkService> allServices = networkServiceRepository.findAll();
         // Map from deviceId → first matching service (dedup: first-wins).
-        Map<Long, NetworkService> deviceToService = new java.util.LinkedHashMap<>();
+        Map<Long, NetworkService> deviceToService = new LinkedHashMap<>();
         for (NetworkService s : allServices) {
             if (deviceToService.containsKey(s.getDeviceId())) continue; // already captured
             String cpe = CpeMapper.toCpe23(s);

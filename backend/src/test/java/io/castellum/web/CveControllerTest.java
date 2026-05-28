@@ -854,4 +854,48 @@ class CveControllerTest {
         mockMvc.perform(get("/api/cve/CVE-2020-15778/devices").with(anonymous()))
                 .andExpect(status().isUnauthorized());
     }
+
+    /**
+     * Characterises the existing LinkedHashMap first-wins dedup guard.
+     * Two services share deviceId 42 but have distinct ports (22 and 8080).
+     * Both CPEs match the target CVE. The result must contain exactly one entry
+     * (deduplicated) and its matchedPort must be the first service's port (22),
+     * proving insertion-order first-wins semantics.
+     */
+    @Test
+    void getAffectedDevices_multipleServicesOnSameDevice_deduplicates() throws Exception {
+        Cve target = buildCve("CVE-2020-15778");
+        target.setId(1L);
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(target));
+
+        // Two services on the same device, distinct ports.
+        NetworkService sshSvc = buildService(10L, 42L, "openssh", "openssh", "8.2");
+        sshSvc.setName("openssh");
+        sshSvc.setPort(22);
+
+        NetworkService httpSvc = buildService(11L, 42L, "openssh", "openssh", "8.2");
+        httpSvc.setName("openssh");
+        httpSvc.setPort(8080);
+
+        // Fleet returns both services in insertion order (ssh first).
+        when(networkServiceRepository.findAll()).thenReturn(List.of(sshSvc, httpSvc));
+
+        // Both CPEs resolve to the same string and both match the target CVE.
+        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
+                .thenReturn(List.of(target));
+
+        Device device = new Device();
+        device.setId(42L);
+        device.setIpAddress("10.0.0.42");
+        device.setCriticality(Criticality.MEDIUM);
+        when(deviceRepository.findAllById(anyIterable())).thenReturn(List.of(device));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                // Deduped: only one entry for deviceId 42.
+                .andExpect(jsonPath("$.length()").value(1))
+                // First-wins: matchedPort is 22 (the first service's port).
+                .andExpect(jsonPath("$[0].matchedPort").value(22));
+    }
 }
