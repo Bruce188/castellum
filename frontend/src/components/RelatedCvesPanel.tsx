@@ -64,7 +64,7 @@ export function RelatedCvesPanel({ deviceId, hostname, ipAddress }: RelatedCvesP
       setLoading(true);
       setError(null);
       try {
-        const result = await api.listFleetCves(0, 50, undefined, deviceId);
+        const result = await api.listFleetCves(0, 50, undefined, deviceId, undefined, 'kev');
         if (cancelled || myRequestId !== requestIdRef.current) return;
         setCves(Array.isArray(result.content) ? result.content : []);
         setLoading(false);
