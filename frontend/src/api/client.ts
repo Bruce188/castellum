@@ -5,7 +5,8 @@ import type {
   CreateUserRequest,
   Criticality, CveAffectedDevice, CveDetailDto, CveFleetSort, CveSummaryDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
-  IntegrationConfigDto, IntegrationPushResponse, IntegrationType,
+  IntegrationConfigDto, IntegrationProbeRequest, IntegrationProbeResult,
+  IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
   OtProbeRequest, OtProbeResponse,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
@@ -479,6 +480,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
+
+  /**
+   * POST /api/integrations/{type}/probe — ADMIN-only. Connectivity probe; never
+   * auto-persists. Returns {@link IntegrationProbeResult} in all reachable cases.
+   * On 502/504 or a network TypeError, resolves {@code {reachable:false, detail:...}}
+   * rather than throwing, so callers can surface a user-friendly status.
+   */
+  probeIntegration: async (
+    type: IntegrationType,
+    url: string,
+    collectionId?: string,
+  ): Promise<IntegrationProbeResult> => {
+    const token = getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const body: IntegrationProbeRequest = { url };
+    if (collectionId !== undefined) body.collectionId = collectionId;
+    try {
+      const response = await fetch(`${BASE}/api/integrations/${type}/probe`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (response.status === 401) {
+        clearAuth();
+        throw new Error('401 Unauthorized — please sign in again');
+      }
+      if (response.ok) {
+        return await response.json() as IntegrationProbeResult;
+      }
+      // 502/504 and any other non-ok: return unreachable rather than throw
+      return { reachable: false, detail: response.statusText };
+    } catch (err) {
+      // Re-throw auth errors; absorb network TypeErrors as unreachable
+      if (err instanceof Error && err.message.startsWith('401')) throw err;
+      return { reachable: false, detail: 'unreachable' };
+    }
+  },
 
   /** POST /api/users/{username}/disable — ADMIN-only. */
   disableUser: async (username: string): Promise<void> => {

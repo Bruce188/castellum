@@ -442,3 +442,15 @@ export interface IntegrationPushResponse {
   pushedAt: string;
   lastPushStatus: string;
 }
+
+/** Request body for POST /api/integrations/{type}/probe. */
+export interface IntegrationProbeRequest {
+  url: string;
+  collectionId?: string;
+}
+
+/** Response shape for POST /api/integrations/{type}/probe. */
+export interface IntegrationProbeResult {
+  reachable: boolean;
+  detail: string | null;
+}
