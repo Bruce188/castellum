@@ -8,12 +8,20 @@ vi.mock('../api/client', () => ({
     feedsStatus: vi.fn(),
     syncStatus: vi.fn(),
     triggerInitialSync: vi.fn(),
+    getFeedSchedule: vi.fn(),
+    updateFeedSchedule: vi.fn(),
+    enableFeedSchedule: vi.fn(),
+    disableFeedSchedule: vi.fn(),
   },
 }));
 
 const feedsStatus = vi.mocked(api.feedsStatus);
 const syncStatus = vi.mocked(api.syncStatus);
 const triggerInitialSync = vi.mocked(api.triggerInitialSync);
+const getFeedSchedule = vi.mocked(api.getFeedSchedule);
+const updateFeedSchedule = vi.mocked(api.updateFeedSchedule);
+const enableFeedSchedule = vi.mocked(api.enableFeedSchedule);
+const disableFeedSchedule = vi.mocked(api.disableFeedSchedule);
 
 const FULL_CORPUS_FEEDS = {
   nvd: { lastModified: '2026-05-20T00:00:00Z', rowCount: 500 },
@@ -28,13 +36,37 @@ const STATUS_IDLE = {
   lastError: null,
 };
 
+const SCHEDULE_ENABLED = {
+  enabled: true,
+  cron: '0 0 6 * * *',
+  lastRunAt: '2026-05-27T06:00:00Z',
+  lastStatus: 'OK',
+  lastError: null,
+  nextRunAt: '2026-05-28T06:00:00Z',
+  consecutiveFailures: 0,
+};
+
+const SCHEDULE_DISABLED = {
+  ...SCHEDULE_ENABLED,
+  enabled: false,
+  nextRunAt: null,
+};
+
 beforeEach(() => {
   feedsStatus.mockReset();
   syncStatus.mockReset();
   triggerInitialSync.mockReset();
+  getFeedSchedule.mockReset();
+  updateFeedSchedule.mockReset();
+  enableFeedSchedule.mockReset();
+  disableFeedSchedule.mockReset();
+
   feedsStatus.mockResolvedValue(FULL_CORPUS_FEEDS);
   syncStatus.mockResolvedValue(STATUS_IDLE);
   triggerInitialSync.mockResolvedValue({ status: 'started', startedAt: new Date().toISOString() });
+  getFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
+  disableFeedSchedule.mockResolvedValue(SCHEDULE_DISABLED);
+  enableFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
 });
 
 describe('<FeedSyncPanel />', () => {
@@ -130,5 +162,72 @@ describe('<FeedSyncPanel />', () => {
     });
     // Panel is still visible
     expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument();
+  });
+
+  // --- Schedule sub-block (Task 4.1) ---
+
+  it('renders schedule cron, last-run, and next-run for admin', async () => {
+    render(<FeedSyncPanel isAdmin={true} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('schedule-cron')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('schedule-cron')).toHaveTextContent('0 0 6 * * *');
+    expect(screen.getByTestId('schedule-last-run')).toBeInTheDocument();
+    expect(screen.getByTestId('schedule-last-run')).toHaveTextContent('2026-05-27');
+    expect(screen.getByTestId('schedule-last-run')).toHaveTextContent('OK');
+    expect(screen.getByTestId('schedule-next-run')).toBeInTheDocument();
+    expect(screen.getByTestId('schedule-next-run')).toHaveTextContent('2026-05-28');
+  });
+
+  it('toggle disable: clicking "Disable" calls disableFeedSchedule and refetches', async () => {
+    render(<FeedSyncPanel isAdmin={true} />);
+    // Wait for the toggle to appear (enabled → label "Disable")
+    const toggleBtn = await screen.findByTestId('schedule-toggle');
+    expect(toggleBtn).toHaveTextContent(/Disable/i);
+    fireEvent.click(toggleBtn);
+    await waitFor(() => expect(disableFeedSchedule).toHaveBeenCalledTimes(1));
+    // After disable, getFeedSchedule should be called again (refetch)
+    await waitFor(() => expect(getFeedSchedule).toHaveBeenCalledTimes(2));
+  });
+
+  it('toggle enable: when schedule is disabled the toggle reads "Enable" and calls enableFeedSchedule', async () => {
+    getFeedSchedule.mockResolvedValue(SCHEDULE_DISABLED);
+    render(<FeedSyncPanel isAdmin={true} />);
+    const toggleBtn = await screen.findByTestId('schedule-toggle');
+    expect(toggleBtn).toHaveTextContent(/Enable/i);
+    fireEvent.click(toggleBtn);
+    await waitFor(() => expect(enableFeedSchedule).toHaveBeenCalledTimes(1));
+  });
+
+  it('tolerates getFeedSchedule reject (403) — panel still renders feed rows and Sync feeds button', async () => {
+    getFeedSchedule.mockRejectedValueOnce(new Error('403'));
+    render(<FeedSyncPanel isAdmin={true} />);
+    // Feed freshness rows must still appear
+    await waitFor(() => {
+      expect(screen.getByTestId('feed-row-nvd')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('feed-row-epss')).toBeInTheDocument();
+    expect(screen.getByTestId('feed-row-kev')).toBeInTheDocument();
+    // The manual "Sync feeds" button must still be present
+    expect(screen.getByRole('button', { name: /Sync feeds/i })).toBeInTheDocument();
+    // Panel must not have crashed
+    expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument();
+    // Schedule sub-block should be absent (null schedule → nothing rendered)
+    expect(screen.queryByTestId('schedule-cron')).not.toBeInTheDocument();
+  });
+
+  it('viewer: schedule-toggle is not actionable (absent or disabled)', async () => {
+    render(<FeedSyncPanel isAdmin={false} />);
+    // Give async mount a moment
+    await waitFor(() => {
+      expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument();
+    });
+    const toggleBtn = screen.queryByTestId('schedule-toggle');
+    // Either the toggle is absent for viewers or it is disabled
+    if (toggleBtn) {
+      expect(toggleBtn).toBeDisabled();
+    } else {
+      expect(toggleBtn).toBeNull();
+    }
   });
 });
