@@ -35,9 +35,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserRepository userRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public JwtAuthenticationFilter(JwtService jwtService,
-                                   @org.springframework.lang.Nullable AuditService auditService,
-                                   @org.springframework.lang.Nullable UserRepository userRepository) {
+    public JwtAuthenticationFilter(JwtService jwtService, AuditService auditService,
+                                   UserRepository userRepository) {
         this.jwtService = jwtService;
         this.auditService = auditService;
         this.userRepository = userRepository;

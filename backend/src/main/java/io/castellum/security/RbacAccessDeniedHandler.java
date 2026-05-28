@@ -24,7 +24,7 @@ public class RbacAccessDeniedHandler implements AccessDeniedHandler {
     private final AuditService auditService;
     private final ObjectMapper om;
 
-    public RbacAccessDeniedHandler(@org.springframework.lang.Nullable AuditService auditService, ObjectMapper om) {
+    public RbacAccessDeniedHandler(AuditService auditService, ObjectMapper om) {
         this.auditService = auditService;
         this.om = om;
     }
@@ -48,9 +48,7 @@ public class RbacAccessDeniedHandler implements AccessDeniedHandler {
             }
         }
 
-        if (auditService != null) {
-            auditService.recordEvent(actor, "RBAC_DENY", "rbac", resourceId, Map.of("requiredRole", requiredRole));
-        }
+        auditService.recordEvent(actor, "RBAC_DENY", "rbac", resourceId, Map.of("requiredRole", requiredRole));
 
         response.setStatus(403);
         response.setContentType("application/json");
