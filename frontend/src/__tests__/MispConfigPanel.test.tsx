@@ -105,7 +105,7 @@ describe('<MispConfigPanel />', () => {
 
     await waitFor(() => {
       expect((screen.getByTestId('misp-url-input') as HTMLInputElement).value)
-        .toBe('http://localhost:8080/');
+        .toBe('https://localhost/');
     });
     expect(screen.getByTestId('misp-detected-note')).toBeInTheDocument();
     expect(saveIntegrationConfig).not.toHaveBeenCalled();

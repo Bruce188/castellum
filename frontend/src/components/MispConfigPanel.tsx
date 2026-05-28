@@ -13,7 +13,7 @@ interface MispFormState {
 
 const EMPTY: MispFormState = { url: '', apiKey: '' };
 
-const DOCKER_MISP_URL = 'http://localhost:8080/';
+const DOCKER_MISP_URL = 'https://localhost/';
 
 const MISP_PRESETS: { label: string; url: string }[] = [
   {
