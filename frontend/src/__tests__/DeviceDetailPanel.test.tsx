@@ -242,11 +242,11 @@ describe('<DeviceDetailPanel />', () => {
   });
 
   it('os_rendersFallback_whenNull', () => {
-    // device fixture has no osName — fallback should show 'Unknown'
+    // device fixture has no osName — fallback should show 'Undetected'
     render(
       <DeviceDetailPanel device={device} risk={risk} services={[]} onClose={() => {}} />
     );
-    expect(screen.getByTestId('device-os')).toHaveTextContent('Unknown');
+    expect(screen.getByTestId('device-os')).toHaveTextContent('Undetected');
   });
 
   it('os_rendersNameWithoutAccuracy_whenAccuracyNull', () => {
