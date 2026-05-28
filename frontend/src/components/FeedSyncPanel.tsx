@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
-import type { FeedsStatusDto, SyncStatusResponse } from '../api/types';
+import type { FeedScheduleDto, FeedsStatusDto, SyncStatusResponse } from '../api/types';
 import {
   freshnessTier,
   FRESHNESS_DOT_CLASSES,
@@ -23,6 +23,7 @@ const POLL_INTERVAL_MS = 5000;
 export function FeedSyncPanel({ isAdmin }: Props) {
   const [feeds, setFeeds] = useState<FeedsStatusDto | null>(null);
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);
+  const [schedule, setSchedule] = useState<FeedScheduleDto | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -55,11 +56,31 @@ export function FeedSyncPanel({ isAdmin }: Props) {
       .then(f => { if (!cancelled) setFeeds(f); })
       .catch(() => { /* keep null — panel still renders */ });
     loadStatus();
+    if (isAdmin) {
+      api.getFeedSchedule()
+        .then(s => { if (!cancelled) setSchedule(s); })
+        .catch(() => { /* tolerate 403/non-admin — leave schedule null */ });
+    }
     return () => {
       cancelled = true;
       stopPoll();
     };
   }, []);
+
+  async function handleScheduleToggle() {
+    if (!schedule) return;
+    try {
+      if (schedule.enabled) {
+        await api.disableFeedSchedule();
+      } else {
+        await api.enableFeedSchedule();
+      }
+      const updated = await api.getFeedSchedule();
+      setSchedule(updated);
+    } catch {
+      /* ignore — schedule toggle errors are non-fatal */
+    }
+  }
 
   async function handleSync() {
     if (!isAdmin || submitting) return;
@@ -131,6 +152,32 @@ export function FeedSyncPanel({ isAdmin }: Props) {
             <p data-testid="last-error" className="text-red-600">
               Last error: {status.lastError}
             </p>
+          )}
+        </div>
+      )}
+
+      {/* Schedule sub-block (only when loaded) */}
+      {schedule && (
+        <div className="mb-3 text-xs text-gray-600 space-y-0.5">
+          <p data-testid="schedule-cron">
+            Schedule: <span className="font-mono">{schedule.cron}</span>
+          </p>
+          <p data-testid="schedule-last-run">
+            Last run: <span className="font-mono">{schedule.lastRunAt ? schedule.lastRunAt.substring(0, 10) : '—'}</span>
+            {schedule.lastStatus && <span className="ml-1">({schedule.lastStatus})</span>}
+          </p>
+          <p data-testid="schedule-next-run">
+            Next run: <span className="font-mono">{schedule.nextRunAt ? schedule.nextRunAt.substring(0, 10) : '—'}</span>
+          </p>
+          {isAdmin && (
+            <button
+              type="button"
+              data-testid="schedule-toggle"
+              onClick={handleScheduleToggle}
+              className="mt-1 px-2 py-0.5 text-xs rounded border border-gray-300 bg-gray-50 hover:bg-gray-100"
+            >
+              {schedule.enabled ? 'Disable' : 'Enable'}
+            </button>
           )}
         </div>
       )}
