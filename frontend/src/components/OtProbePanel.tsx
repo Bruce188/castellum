@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { api } from '../api/client';
 import type { OtProbeResponse, OtProtocol } from '../api/types';
 import { runOtSweep, DEFAULT_SWEEP_CONFIG } from '../lib/otSweep';
@@ -45,6 +45,8 @@ export function OtProbePanel({ isAdmin }: Props) {
   const [sweepCells, setSweepCells] = useState<OtSweepCell[] | null>(null);
   const [sweepCompleted, setSweepCompleted] = useState(0);
   const [sweepTotal, setSweepTotal] = useState(0);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+  const sweepAbortRef = useRef<AbortController | null>(null);
 
   function selectProtocol(next: OtProtocol) {
     setProtocol(next);
@@ -73,6 +75,10 @@ export function OtProbePanel({ isAdmin }: Props) {
     setSweeping(true);
     setSweepCells(null);
     setSweepCompleted(0);
+    setSweepError(null);
+
+    const controller = new AbortController();
+    sweepAbortRef.current = controller;
 
     try {
       const page = await api.listDevices();
@@ -80,19 +86,29 @@ export function OtProbePanel({ isAdmin }: Props) {
       const total = hosts.length * PROTOCOLS.length;
       setSweepTotal(total);
 
-      const probeFn = (h: string, proto: OtProtocol, port: number) =>
-        api.probeOtOnce(h, proto, port);
+      const probeFn = (h: string, proto: OtProtocol, port: number, sig?: AbortSignal) =>
+        api.probeOtOnce(h, proto, port, sig);
 
       const onProgress = (p: OtSweepProgress) => {
         setSweepCells([...p.cells]);
         setSweepCompleted(p.completed);
       };
 
-      await runOtSweep(hosts, PROTOCOLS, probeFn, DEFAULT_SWEEP_CONFIG, onProgress);
+      await runOtSweep(hosts, PROTOCOLS, probeFn, DEFAULT_SWEEP_CONFIG, onProgress, controller.signal);
+    } catch (err) {
+      // Ignore operator-initiated abort — not an error
+      if (!controller.signal.aborted) {
+        setSweepError(err instanceof Error ? err.message : 'sweep failed');
+      }
     } finally {
+      sweepAbortRef.current = null;
       setSweeping(false);
     }
   }, [isAdmin, sweeping]);
+
+  function handleSweepStop() {
+    sweepAbortRef.current?.abort();
+  }
 
   const formDisabled = !isAdmin || submitting;
   const sweepDisabled = !isAdmin || sweeping;
@@ -125,7 +141,7 @@ export function OtProbePanel({ isAdmin }: Props) {
       </p>
 
       {/* AC1 — primary sweep button */}
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-3">
         <button
           type="button"
           data-testid="ot-sweep-all-btn"
@@ -135,6 +151,21 @@ export function OtProbePanel({ isAdmin }: Props) {
         >
           {sweeping ? 'Sweeping…' : 'Probe all OT/ICS protocols'}
         </button>
+        {sweeping && (
+          <button
+            type="button"
+            data-testid="ot-sweep-stop-btn"
+            onClick={handleSweepStop}
+            className="px-4 py-2 text-sm font-medium rounded bg-red-600 text-white hover:bg-red-700"
+          >
+            Stop sweep
+          </button>
+        )}
+        {sweepError && (
+          <span data-testid="ot-sweep-error" role="alert" className="text-sm text-red-600">
+            {sweepError}
+          </span>
+        )}
       </div>
 
       {/* AC3 — progress tally + grid (rendered once sweep has been started) */}

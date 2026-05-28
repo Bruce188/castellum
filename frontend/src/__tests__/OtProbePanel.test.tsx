@@ -347,4 +347,77 @@ describe('<OtProbePanel />', () => {
     render(<OtProbePanel isAdmin={false} />);
     expect(screen.getByTestId('ot-sweep-all-btn')).toBeDisabled();
   });
+
+  // -------------------------------------------------------------------------
+  // NB5 — listDevices() failure surfaces as sweep error
+  // -------------------------------------------------------------------------
+
+  it('NB5 — listDevices failure shows sweep error and resets sweeping state', async () => {
+    listDevices.mockRejectedValueOnce(new Error('boom'));
+
+    render(<OtProbePanel isAdmin={true} />);
+
+    fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ot-sweep-error')).toHaveTextContent('boom');
+      expect(screen.getByTestId('ot-sweep-error')).toHaveAttribute('role', 'alert');
+    });
+
+    // sweeping state must have reset — button label back to non-sweeping text
+    expect(screen.getByTestId('ot-sweep-all-btn')).toHaveTextContent('Probe all OT/ICS protocols');
+
+    // probeOtOnce must not have been called
+    expect(probeOtOnce).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // NB3 — operator stop button aborts the sweep cleanly
+  // -------------------------------------------------------------------------
+
+  it('NB3 — stop button aborts sweep and returns to non-sweeping state without error', async () => {
+    vi.useFakeTimers();
+    try {
+      const hosts = ['10.0.0.1'];
+      listDevices.mockResolvedValue(makePage(hosts));
+
+      // probeOtOnce returns a promise that never resolves on its own — keeps sweep in-flight
+      let resolveProbe!: (v: typeof MOCK_PROBE_RESULT) => void;
+      const deferredProbe = new Promise<typeof MOCK_PROBE_RESULT>((res) => {
+        resolveProbe = res;
+      });
+      probeOtOnce.mockReturnValue(deferredProbe);
+
+      render(<OtProbePanel isAdmin={true} />);
+
+      fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+      // Advance timers to let listDevices resolve and the sweep start
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      // Stop button should be visible while sweeping
+      expect(screen.getByTestId('ot-sweep-stop-btn')).toBeInTheDocument();
+
+      // Click stop
+      fireEvent.click(screen.getByTestId('ot-sweep-stop-btn'));
+
+      // Drain all remaining timers so runOtSweep resolves via abort
+      await act(async () => {
+        resolveProbe({ ...MOCK_PROBE_RESULT });
+        await vi.runAllTimersAsync();
+      });
+
+      // UI must return to non-sweeping: stop button gone, sweep button re-enabled
+      expect(screen.queryByTestId('ot-sweep-stop-btn')).not.toBeInTheDocument();
+      expect(screen.getByTestId('ot-sweep-all-btn')).not.toBeDisabled();
+      expect(screen.getByTestId('ot-sweep-all-btn')).toHaveTextContent('Probe all OT/ICS protocols');
+
+      // No error banner for an operator-initiated stop
+      expect(screen.queryByTestId('ot-sweep-error')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
