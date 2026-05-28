@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OtProbePanel } from '../components/OtProbePanel';
 import { api } from '../api/client';
 
@@ -41,6 +41,10 @@ function makePage(ips: string[]) {
       discoveryScope: 'HOME' as const,
       lastSeenIface: null,
       discoverySource: null,
+      serviceCount: 0,
+      osName: null,
+      osAccuracy: null,
+      osCpe: null,
     })),
     totalElements: ips.length,
     totalPages: 1,
@@ -55,6 +59,12 @@ beforeEach(() => {
   probeOtOnce.mockReset();
   // Default: listDevices resolves empty, probeOtOnce never called
   listDevices.mockResolvedValue(makePage([]));
+});
+
+// Safety net: never let a fake-timer test leak its timer state into the next
+// test (a timed-out fake-timer case may skip its own restore in finally).
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ---------------------------------------------------------------------------
@@ -153,122 +163,145 @@ describe('<OtProbePanel />', () => {
   // -------------------------------------------------------------------------
 
   it('AC1 — sweep button exists and dispatches probeOtOnce for each host × protocol', async () => {
-    const hosts = ['192.168.1.10', '192.168.1.20'];
-    listDevices.mockResolvedValue(makePage(hosts));
+    vi.useFakeTimers();
+    try {
+      const hosts = ['192.168.1.10', '192.168.1.20'];
+      listDevices.mockResolvedValue(makePage(hosts));
 
-    // probeOtOnce resolves immediately for every cell
-    probeOtOnce.mockResolvedValue({
-      ...MOCK_PROBE_RESULT,
-      vendor: 'ACME',
-      product: 'PLC-v1',
-    });
+      // probeOtOnce resolves immediately for every cell
+      probeOtOnce.mockResolvedValue({
+        ...MOCK_PROBE_RESULT,
+        vendor: 'ACME',
+        product: 'PLC-v1',
+      });
 
-    render(<OtProbePanel isAdmin={true} />);
+      render(<OtProbePanel isAdmin={true} />);
 
-    // The primary sweep button must exist without opening the toggle
-    const sweepBtn = screen.getByTestId('ot-sweep-all-btn');
-    expect(sweepBtn).toBeInTheDocument();
+      // The primary sweep button must exist without opening the toggle
+      const sweepBtn = screen.getByTestId('ot-sweep-all-btn');
+      expect(sweepBtn).toBeInTheDocument();
 
-    fireEvent.click(sweepBtn);
+      fireEvent.click(sweepBtn);
 
-    // All 8 combinations (2 hosts × 4 protocols) must be probed
-    await waitFor(() => {
+      // Drain all pacing timers so the orchestrator completes
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      // All 8 combinations (2 hosts × 4 protocols) must be probed
       expect(probeOtOnce).toHaveBeenCalledTimes(8);
-    });
 
-    // Verify all 4 protocols appear across the calls
-    const calledProtocols = probeOtOnce.mock.calls.map(c => c[1]);
-    expect(calledProtocols).toContain('MODBUS_TCP');
-    expect(calledProtocols).toContain('DNP3');
-    expect(calledProtocols).toContain('S7COMM');
-    expect(calledProtocols).toContain('BACNET_IP');
+      // Verify all 4 protocols appear across the calls
+      const calledProtocols = probeOtOnce.mock.calls.map(c => c[1]);
+      expect(calledProtocols).toContain('MODBUS_TCP');
+      expect(calledProtocols).toContain('DNP3');
+      expect(calledProtocols).toContain('S7COMM');
+      expect(calledProtocols).toContain('BACNET_IP');
 
-    // Verify default ports used
-    const callMap = probeOtOnce.mock.calls.map(c => ({ host: c[0], protocol: c[1], port: c[2] }));
-    expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'MODBUS_TCP', port: 502 }));
-    expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'DNP3', port: 20000 }));
-    expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'S7COMM', port: 102 }));
-    expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'BACNET_IP', port: 47808 }));
+      // Verify default ports used
+      const callMap = probeOtOnce.mock.calls.map(c => ({ host: c[0], protocol: c[1], port: c[2] }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'MODBUS_TCP', port: 502 }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'DNP3', port: 20000 }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'S7COMM', port: 102 }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'BACNET_IP', port: 47808 }));
 
-    // The retrying probeOt must NOT be used by the sweep path
-    expect(probeOt).not.toHaveBeenCalled();
+      // The retrying probeOt must NOT be used by the sweep path
+      expect(probeOt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('AC3 — ot-sweep-progress shows running tally and ot-sweep-grid shows per-cell status', async () => {
-    const hosts = ['10.0.0.1'];
-    listDevices.mockResolvedValue(makePage(hosts));
+    vi.useFakeTimers();
+    try {
+      const hosts = ['10.0.0.1'];
+      listDevices.mockResolvedValue(makePage(hosts));
 
-    // Resolve all 4 cells immediately
-    probeOtOnce.mockResolvedValue({
-      ...MOCK_PROBE_RESULT,
-      host: '10.0.0.1',
-      vendor: 'ACME',
-      product: 'PLC-v2',
-    });
-
-    render(<OtProbePanel isAdmin={true} />);
-
-    fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
-
-    // Progress element must appear
-    await waitFor(() => {
-      expect(screen.getByTestId('ot-sweep-progress')).toBeInTheDocument();
-    });
-
-    // Grid element must appear
-    await waitFor(() => {
-      expect(screen.getByTestId('ot-sweep-grid')).toBeInTheDocument();
-    });
-
-    // After all cells settle, progress shows 4/4
-    await waitFor(() => {
-      expect(screen.getByTestId('ot-sweep-progress')).toHaveTextContent('4/4');
-    });
-
-    // Each per-cell testid must exist in the grid
-    const protocols = ['MODBUS_TCP', 'DNP3', 'S7COMM', 'BACNET_IP'];
-    for (const proto of protocols) {
-      await waitFor(() => {
-        expect(screen.getByTestId(`ot-sweep-cell-10.0.0.1-${proto}`)).toBeInTheDocument();
+      // Resolve all 4 cells immediately
+      probeOtOnce.mockResolvedValue({
+        ...MOCK_PROBE_RESULT,
+        host: '10.0.0.1',
+        vendor: 'ACME',
+        product: 'PLC-v2',
       });
+
+      render(<OtProbePanel isAdmin={true} />);
+
+      fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+      // Progress element must appear (grid is shown as soon as sweep starts)
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByTestId('ot-sweep-progress')).toBeInTheDocument();
+      expect(screen.getByTestId('ot-sweep-grid')).toBeInTheDocument();
+
+      // After all cells settle, progress shows 4/4
+      expect(screen.getByTestId('ot-sweep-progress')).toHaveTextContent('4/4');
+
+      // Each per-cell testid must exist in the grid
+      const protocols = ['MODBUS_TCP', 'DNP3', 'S7COMM', 'BACNET_IP'];
+      for (const proto of protocols) {
+        expect(screen.getByTestId(`ot-sweep-cell-10.0.0.1-${proto}`)).toBeInTheDocument();
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 
   it('AC3 — partial results appear before all cells complete', async () => {
-    const hosts = ['10.0.0.1'];
-    listDevices.mockResolvedValue(makePage(hosts));
+    vi.useFakeTimers();
+    try {
+      const hosts = ['10.0.0.1'];
+      listDevices.mockResolvedValue(makePage(hosts));
 
-    // Use individual resolvers so we control settlement order
-    let resolveFirst!: (v: typeof MOCK_PROBE_RESULT) => void;
-    let resolveRest!: (v: typeof MOCK_PROBE_RESULT) => void;
+      // Use individual resolvers so we control settlement order
+      let resolveFirst!: (v: typeof MOCK_PROBE_RESULT) => void;
+      let resolveRest!: (v: typeof MOCK_PROBE_RESULT) => void;
 
-    const firstSettled = new Promise<typeof MOCK_PROBE_RESULT>((res) => { resolveFirst = res; });
-    const restSettled = new Promise<typeof MOCK_PROBE_RESULT>((res) => { resolveRest = res; });
+      const firstSettled = new Promise<typeof MOCK_PROBE_RESULT>((res) => { resolveFirst = res; });
+      const restSettled = new Promise<typeof MOCK_PROBE_RESULT>((res) => { resolveRest = res; });
 
-    // First call uses a deferred promise; subsequent calls use another deferred
-    probeOtOnce
-      .mockReturnValueOnce(firstSettled)
-      .mockReturnValue(restSettled);
+      // First call uses a deferred promise; subsequent calls use another deferred
+      probeOtOnce
+        .mockReturnValueOnce(firstSettled)
+        .mockReturnValue(restSettled);
 
-    render(<OtProbePanel isAdmin={true} />);
-    fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+      render(<OtProbePanel isAdmin={true} />);
+      fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
 
-    // Settle the first probe
-    resolveFirst({ ...MOCK_PROBE_RESULT, host: '10.0.0.1', vendor: 'PartialVendor' });
+      // Advance timers enough for the first pacing gap (MODBUS_TCP = 500ms) to elapse
+      // and the first probe to be dispatched
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
 
-    // Progress should appear and show at least 1 completed before all 4 are done
-    await waitFor(() => {
+      // Settle the first probe and flush microtasks
+      await act(async () => {
+        resolveFirst({ ...MOCK_PROBE_RESULT, host: '10.0.0.1', vendor: 'PartialVendor' });
+        // flush microtasks so the orchestrator processes the resolved promise
+        await Promise.resolve();
+      });
+
+      // Progress should appear and show at least 1 completed
+      expect(screen.getByTestId('ot-sweep-progress')).toBeInTheDocument();
       const progress = screen.getByTestId('ot-sweep-progress');
-      // tally text contains something like "1/4" (partial)
       expect(progress.textContent).toMatch(/\d+\/4/);
-    });
 
-    // Now resolve the rest
-    resolveRest({ ...MOCK_PROBE_RESULT, host: '10.0.0.1' });
+      // Now resolve the rest and drain all remaining timers. runAllTimersAsync
+      // flushes the orchestrator to completion, so assert directly — a waitFor
+      // here would deadlock under fake timers (its polling never advances).
+      await act(async () => {
+        resolveRest({ ...MOCK_PROBE_RESULT, host: '10.0.0.1' });
+        await vi.runAllTimersAsync();
+      });
 
-    await waitFor(() => {
       expect(screen.getByTestId('ot-sweep-progress')).toHaveTextContent('4/4');
-    });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('AC4 — advanced toggle exposes the single-protocol form which still dispatches api.probeOt', async () => {

@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import { api } from '../api/client';
 import type { OtProbeResponse, OtProtocol } from '../api/types';
+import { runOtSweep, DEFAULT_SWEEP_CONFIG } from '../lib/otSweep';
+import type { OtSweepProgress, OtSweepCell } from '../lib/otSweep';
 
 interface Props {
   isAdmin: boolean;
@@ -28,16 +30,6 @@ const PROTOCOLS: ProtocolOption[] = [
   { value: 'BACNET_IP', label: 'BACnet/IP', defaultPort: 47808 },
 ];
 
-type SweepCellStatus = 'pending' | 'in-flight' | 'success' | 'failed';
-
-interface SweepCell {
-  host: string;
-  protocol: OtProtocol;
-  port: number;
-  status: SweepCellStatus;
-  result?: OtProbeResponse;
-  error?: string;
-}
 
 export function OtProbePanel({ isAdmin }: Props) {
   // --- single-protocol state ---
@@ -50,7 +42,7 @@ export function OtProbePanel({ isAdmin }: Props) {
 
   // --- sweep state ---
   const [sweeping, setSweeping] = useState(false);
-  const [sweepCells, setSweepCells] = useState<SweepCell[] | null>(null);
+  const [sweepCells, setSweepCells] = useState<OtSweepCell[] | null>(null);
   const [sweepCompleted, setSweepCompleted] = useState(0);
   const [sweepTotal, setSweepTotal] = useState(0);
 
@@ -88,57 +80,15 @@ export function OtProbePanel({ isAdmin }: Props) {
       const total = hosts.length * PROTOCOLS.length;
       setSweepTotal(total);
 
-      // Build the initial cell matrix and show it immediately
-      const matrix: SweepCell[] = hosts.flatMap((h) =>
-        PROTOCOLS.map((p) => ({
-          host: h,
-          protocol: p.value,
-          port: p.defaultPort,
-          status: 'pending' as const,
-        }))
-      );
-      setSweepCells([...matrix]);
+      const probeFn = (h: string, proto: OtProtocol, port: number) =>
+        api.probeOtOnce(h, proto, port);
 
-      let settled = 0;
+      const onProgress = (p: OtSweepProgress) => {
+        setSweepCells([...p.cells]);
+        setSweepCompleted(p.completed);
+      };
 
-      // Fan-out: probe each host×protocol. Per-host serialization via sequential
-      // await per host; hosts run concurrently across the outer Promise.all.
-      await Promise.all(
-        hosts.map(async (h) => {
-          for (const proto of PROTOCOLS) {
-            const cellIdx = matrix.findIndex(
-              (c) => c.host === h && c.protocol === proto.value,
-            );
-            if (cellIdx >= 0) {
-              matrix[cellIdx] = { ...matrix[cellIdx], status: 'in-flight' };
-              setSweepCells([...matrix]);
-            }
-
-            try {
-              const res = await api.probeOtOnce(h, proto.value, proto.defaultPort);
-              if (cellIdx >= 0) {
-                matrix[cellIdx] = {
-                  ...matrix[cellIdx],
-                  status: 'success',
-                  result: res,
-                };
-              }
-            } catch (err) {
-              if (cellIdx >= 0) {
-                matrix[cellIdx] = {
-                  ...matrix[cellIdx],
-                  status: 'failed',
-                  error: err instanceof Error ? err.message : String(err),
-                };
-              }
-            }
-
-            settled++;
-            setSweepCells([...matrix]);
-            setSweepCompleted(settled);
-          }
-        }),
-      );
+      await runOtSweep(hosts, PROTOCOLS, probeFn, DEFAULT_SWEEP_CONFIG, onProgress);
     } finally {
       setSweeping(false);
     }
@@ -196,7 +146,7 @@ export function OtProbePanel({ isAdmin }: Props) {
           <div data-testid="ot-sweep-grid" className="overflow-x-auto mb-4">
             <table className="text-xs border border-gray-200">
               <tbody>
-                {sweepCells.map((cell: SweepCell) => (
+                {sweepCells.map((cell: OtSweepCell) => (
                   <tr key={`${cell.host}-${cell.protocol}`}>
                     <td
                       data-testid={`ot-sweep-cell-${cell.host}-${cell.protocol}`}
