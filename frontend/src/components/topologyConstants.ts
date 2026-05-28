@@ -3,6 +3,7 @@
  * non-component exports do not violate the react-refresh/only-export-components
  * rule (which requires every export from a JSX module to be a React component).
  */
+import { scopeBorderColor } from '../lib/scopeColors';
 
 /**
  * Optional path highlight overlay. {@link #nodeIds} is the ordered list of
@@ -23,3 +24,23 @@ export interface HighlightPath {
 export function makeEdgeKey(a: number, b: number): string {
   return a <= b ? `${a}-${b}` : `${b}-${a}`;
 }
+
+export interface EdgeStyleToken {
+  color: string;
+  style: 'straight' | 'solid' | 'dashed';
+  width: number;
+  opacity: number;
+}
+
+/**
+ * Drawn edge strokes — single source of truth for BOTH TopologyView's cytoscape
+ * stylesheet and the attack-graph edge legend so the two cannot drift. Values mirror
+ * the cytoscape style block (TopologyView.tsx). 'subnet' uses curve-style straight;
+ * the rest use line-style.
+ */
+export const EDGE_STYLES = {
+  subnet:       { color: '#9ca3af', style: 'straight', width: 1, opacity: 0.5 },
+  gateway:      { color: '#9ca3af', style: 'solid',    width: 2, opacity: 0.7 },
+  dockerBridge: { color: scopeBorderColor.DOCKER_BRIDGE, style: 'dashed', width: 2, opacity: 0.8 },
+  attackPath:   { color: '#dc2626', style: 'dashed',   width: 3, opacity: 1 },
+} as const satisfies Record<string, EdgeStyleToken>;
