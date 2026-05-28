@@ -219,4 +219,36 @@ describe('<DeviceDetailPanel />', () => {
     expect(dt).toBeInTheDocument();
     expect(dt.nextElementSibling).toHaveTextContent('Unknown');
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // OS detection row — osName / osAccuracy / osCpe
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('os_renders_nameAndAccuracy_whenPresent', () => {
+    // @ts-expect-error osName/osAccuracy/osCpe not yet on Device interface (RED phase)
+    const d: Device = { ...device, osName: 'Linux 5.4 - 5.15', osAccuracy: 96, osCpe: 'cpe:/o:linux:linux_kernel:5' };
+    render(
+      <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />
+    );
+    expect(screen.getByTestId('device-os')).toHaveTextContent('Linux 5.4 - 5.15 (96%)');
+  });
+
+  it('os_rendersFallback_whenNull', () => {
+    // device fixture has no osName — fallback should show 'Unknown'
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[]} onClose={() => {}} />
+    );
+    expect(screen.getByTestId('device-os')).toHaveTextContent('Unknown');
+  });
+
+  it('os_rendersNameWithoutAccuracy_whenAccuracyNull', () => {
+    // @ts-expect-error osName/osAccuracy not yet on Device interface (RED phase)
+    const d: Device = { ...device, osName: 'Linux', osAccuracy: null };
+    render(
+      <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />
+    );
+    const osEl = screen.getByTestId('device-os');
+    expect(osEl).toHaveTextContent('Linux');
+    expect(osEl.textContent).not.toMatch(/\(.*%\)/);
+  });
 });
