@@ -11,7 +11,8 @@ export type StageId =
   | 'PING_SWEEP'
   | 'SERVICE_DETECT'
   | 'OS_FINGERPRINT'
-  | 'OT_ICS_SWEEP';
+  | 'OT_ICS_SWEEP'
+  | 'DOCKER_DISCOVERY';
 
 export type StageStatus = 'pending' | 'running' | 'complete' | 'failed';
 
@@ -32,13 +33,13 @@ export type StageRunner = (ctx: StageContext) => Promise<void>;
 
 export interface StageDef {
   id: StageId;
-  kind: 'nmap' | 'ot';
+  kind: 'nmap' | 'ot' | 'docker';
   run: StageRunner;
 }
 
 export interface StageState {
   id: StageId;
-  kind: 'nmap' | 'ot';
+  kind: 'nmap' | 'ot' | 'docker';
   status: StageStatus;
   scanStatus?: string;
   discoveredDeviceIds?: number[];
@@ -78,7 +79,6 @@ export function runUnifiedScan(
   signal?: AbortSignal,
 ): Promise<UnifiedScanResult> {
   const concurrency = deps.concurrency ?? 4;
-  const totalStages = 4;
 
   // Initialize stage states in the order provided by deps.stages.
   const stateMap = new Map<StageId, StageState>();
@@ -92,6 +92,10 @@ export function runUnifiedScan(
       status: 'pending',
     });
   }
+
+  // Total stages is the count actually supplied — keeps the progress denominator correct
+  // as stages are added (e.g. DOCKER_DISCOVERY) rather than hard-coding a fixed count.
+  const totalStages = orderedIds.length;
 
   // Helper: build a snapshot of current progress.
   function buildProgress(): UnifiedScanProgress {

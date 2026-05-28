@@ -457,11 +457,12 @@ describe('runUnifiedScan', () => {
       await vi.runAllTimersAsync();
       const result: UnifiedScanResult = await promise;
 
-      const expectedKinds: Record<StageId, 'nmap' | 'ot'> = {
+      const expectedKinds: Record<StageId, 'nmap' | 'ot' | 'docker'> = {
         PING_SWEEP: 'nmap',
         SERVICE_DETECT: 'nmap',
         OS_FINGERPRINT: 'nmap',
         OT_ICS_SWEEP: 'ot',
+        DOCKER_DISCOVERY: 'docker',
       };
 
       for (const stage of result.stages) {
