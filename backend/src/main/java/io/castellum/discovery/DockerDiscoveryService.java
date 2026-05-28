@@ -2,6 +2,8 @@ package io.castellum.discovery;
 
 import io.castellum.audit.AuditService;
 import io.castellum.domain.Device;
+import io.castellum.domain.NetworkService;
+import io.castellum.domain.NetworkServiceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -50,17 +52,20 @@ public class DockerDiscoveryService {
     private final DockerCliClient cli;
     private final DockerInspectParser parser;
     private final DeviceUpsertService upsertService;
+    private final NetworkServiceRepository networkServiceRepository;
     private final AuditService auditService;
     private final Clock clock;
 
     public DockerDiscoveryService(DockerCliClient cli,
                                   DockerInspectParser parser,
                                   DeviceUpsertService upsertService,
+                                  NetworkServiceRepository networkServiceRepository,
                                   AuditService auditService,
                                   Clock clock) {
         this.cli = cli;
         this.parser = parser;
         this.upsertService = upsertService;
+        this.networkServiceRepository = networkServiceRepository;
         this.auditService = auditService;
         this.clock = clock;
     }
@@ -106,6 +111,10 @@ public class DockerDiscoveryService {
             deviceIds.add(saved.getId());
             containerCount++;
 
+            // Persist the container's primary service (image-derived name/version/CPE) so the
+            // running image's real version drives CVE correlation in the fleet view.
+            upsertContainerService(saved, c, observedAt);
+
             // Record this network's gateway for synthetic-centre upsert.
             String gwIp = primary.gatewayIp();
             if (gwIp != null && !gwIp.isBlank()) {
@@ -147,5 +156,39 @@ public class DockerDiscoveryService {
         log.info("Docker discovery upserted {} containers + {} gateways ({} devices)",
             containerCount, gatewayCount, updated);
         return new DockerDiscoveryResponse(containerCount, gatewayCount, updated, deviceIds);
+    }
+
+    /**
+     * Upsert the container's primary network service, keyed on {@code (deviceId, port, protocol)}.
+     *
+     * <p>Name/version/CPE come from the container image via {@link DockerImageCpe#derive}. Images
+     * whose base name maps to a known NVD product AND whose tag yields a concrete version (e.g.
+     * {@code postgres:16}) get a version-bearing CPE so {@link io.castellum.cve.CveMatcher}
+     * range-matches real CVEs; other images record an inventory-only service (name + version, no
+     * CPE). Containers exposing no port, or with a blank/unparseable image, get no service row.
+     */
+    private void upsertContainerService(Device device, DockerContainer c, Instant observedAt) {
+        DockerContainer.ExposedPort primary = c.primaryPort();
+        if (primary == null) {
+            return; // no listening port to key a service on
+        }
+        DockerImageCpe.DerivedService derived = DockerImageCpe.derive(c.image());
+        if (derived == null) {
+            return; // image null/blank/unparseable — nothing to record
+        }
+        NetworkService ns = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(device.getId(), primary.port(), primary.protocol())
+            .orElseGet(NetworkService::new);
+        if (ns.getId() == null) {
+            ns.setDeviceId(device.getId());
+            ns.setPort(primary.port());
+            ns.setProtocol(primary.protocol());
+        }
+        ns.setName(derived.displayName());
+        ns.setVersion(derived.version());
+        ns.setProduct(derived.product());
+        ns.setCpe(derived.cpe());
+        ns.setObservedAt(observedAt);
+        networkServiceRepository.save(ns);
     }
 }

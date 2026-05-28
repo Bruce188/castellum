@@ -182,4 +182,61 @@ class DockerInspectParserTest {
         String json = "[ { \"Id\": \"x\", \"NetworkSettings\": { \"Networks\": {} } } ]";
         assertThat(parser.parse(json)).isEmpty();
     }
+
+    // -----------------------------------------------------------------------
+    // Config.Image + exposed-port extraction (drives image→CPE service derivation)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void parse_extractsImageFromConfig() throws IOException {
+        List<DockerContainer> containers = parser.parse(fixture("inspect-reference.json"));
+        assertThat(byName(containers, "pingpay-db").image()).isEqualTo("postgres:15.6");
+        assertThat(byName(containers, "pingpay-frontend").image()).isEqualTo("nginx:1.27.0");
+        assertThat(byName(containers, "supabase_db_pingpay").image())
+            .isEqualTo("public.ecr.aws/supabase/postgres:15.1.0.147");
+    }
+
+    @Test
+    void parse_extractsExposedPortsWithProtocol() throws IOException {
+        List<DockerContainer> containers = parser.parse(fixture("inspect-reference.json"));
+        // pingpay-db exposes 3306/tcp (internal-only — still listed as an exposed port)
+        DockerContainer db = byName(containers, "pingpay-db");
+        assertThat(db.exposedPorts()).containsExactly(new DockerContainer.ExposedPort(3306, "tcp"));
+        assertThat(db.primaryPort()).isEqualTo(new DockerContainer.ExposedPort(3306, "tcp"));
+        // storage exposes none (empty Ports object)
+        DockerContainer storage = byName(containers, "supabase_storage_pingpay");
+        assertThat(storage.exposedPorts()).isEmpty();
+        assertThat(storage.primaryPort()).isNull();
+    }
+
+    @Test
+    void parse_primaryPort_picksLowestExposed() {
+        String json = """
+            [
+              {
+                "Id": "x", "Name": "/multi-port",
+                "NetworkSettings": {
+                  "Ports": { "8443/tcp": null, "443/tcp": null, "80/tcp": [ { "HostPort": "80" } ] },
+                  "Networks": { "n": { "IPAddress": "172.30.0.2", "Gateway": "172.30.0.1" } }
+                }
+              }
+            ]
+            """;
+        DockerContainer c = parser.parse(json).get(0);
+        assertThat(c.exposedPorts()).hasSize(3);
+        assertThat(c.primaryPort().port()).isEqualTo(80);
+    }
+
+    @Test
+    void parse_missingConfig_imageNull() {
+        String json = """
+            [
+              {
+                "Id": "x", "Name": "/no-config",
+                "NetworkSettings": { "Ports": {}, "Networks": { "n": { "IPAddress": "172.31.0.2", "Gateway": "172.31.0.1" } } }
+              }
+            ]
+            """;
+        assertThat(parser.parse(json).get(0).image()).isNull();
+    }
 }

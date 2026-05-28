@@ -3,6 +3,8 @@ package io.castellum.discovery;
 import io.castellum.audit.AuditService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
+import io.castellum.domain.NetworkService;
+import io.castellum.domain.NetworkServiceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -48,6 +50,7 @@ class DockerDiscoveryServiceTest {
     @Autowired private DeviceRepository repo;
     @Autowired private DeviceUpsertService upsertService;
     @Autowired private DockerInspectParser parser;
+    @Autowired private NetworkServiceRepository serviceRepo;
 
     // DockerDiscoveryService is constructed by hand (newService) rather than wired into the
     // context, so AuditService is a plain Mockito mock — not a @MockBean.
@@ -61,7 +64,7 @@ class DockerDiscoveryServiceTest {
             return new DockerCliClient.CommandResult(0, inspectJson, "");
         };
         DockerCliClient cli = new DockerCliClient(runner);
-        return new DockerDiscoveryService(cli, parser, upsertService, auditService,
+        return new DockerDiscoveryService(cli, parser, upsertService, serviceRepo, auditService,
             Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
     }
 
@@ -239,11 +242,70 @@ class DockerDiscoveryServiceTest {
             throw new IOException("docker: command not found");
         };
         DockerDiscoveryService svc = new DockerDiscoveryService(
-            new DockerCliClient(failing), parser, upsertService, auditService,
+            new DockerCliClient(failing), parser, upsertService, serviceRepo, auditService,
             Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
 
         assertThatThrownBy(svc::discover)
             .isInstanceOf(DiscoveryUnavailableException.class);
         assertThat(repo.count()).isZero();
+    }
+
+    // -----------------------------------------------------------------------
+    // Image → service / CPE derivation (drives fleet CVE correlation)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void discover_knownImage_persistsCpeBearingService() throws Exception {
+        // pingpay-db = postgres:15.6 → postgresql CPE with concrete version
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(db.getId(), 3306, "tcp").orElseThrow();
+        assertThat(svc.getName()).isEqualTo("postgresql");
+        assertThat(svc.getProduct()).isEqualTo("postgresql");
+        assertThat(svc.getVersion()).isEqualTo("15.6");
+        assertThat(svc.getCpe()).isEqualTo("cpe:2.3:a:postgresql:postgresql:15.6:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void discover_namespacedPostgresImage_derivesPostgresqlCpe() throws Exception {
+        // supabase_db = public.ecr.aws/supabase/postgres:15.1.0.147 → registry+namespace stripped
+        newService(fixture("inspect-reference.json"),
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8")).discover();
+        Device sup = repo.findByIpAddress("172.19.0.2").orElseThrow();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(sup.getId(), 5432, "tcp").orElseThrow();
+        assertThat(svc.getCpe()).isEqualTo("cpe:2.3:a:postgresql:postgresql:15.1.0.147:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void discover_unmappedImage_persistsServiceWithoutCpe() throws Exception {
+        // kong:3.4.2 is not a curated NVD product → inventory only, no CPE
+        newService(fixture("inspect-reference.json"), List.of("c4")).discover();
+        Device kong = repo.findByIpAddress("172.19.0.5").orElseThrow();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(kong.getId(), 8000, "tcp").orElseThrow();
+        assertThat(svc.getName()).isEqualTo("kong");
+        assertThat(svc.getVersion()).isEqualTo("3.4.2");
+        assertThat(svc.getProduct()).isNull();
+        assertThat(svc.getCpe()).isNull();
+    }
+
+    @Test
+    void discover_containerWithNoExposedPort_noServiceRow() throws Exception {
+        // storage exposes no port → no service row keyed against it
+        newService(fixture("inspect-reference.json"), List.of("c8")).discover();
+        Device storage = repo.findByIpAddress("172.19.0.8").orElseThrow();
+        assertThat(serviceRepo.findByDeviceId(storage.getId())).isEmpty();
+    }
+
+    @Test
+    void discover_idempotent_serviceUpsertedInPlace() throws Exception {
+        DockerDiscoveryService svc = newService(fixture("inspect-reference.json"), List.of("c3"));
+        svc.discover();
+        svc.discover();
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        // re-run upserts the same (deviceId, port, protocol) row, no duplicate
+        assertThat(serviceRepo.findByDeviceId(db.getId())).hasSize(1);
     }
 }

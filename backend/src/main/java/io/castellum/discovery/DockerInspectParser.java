@@ -84,12 +84,15 @@ public class DockerInspectParser {
             return null; // un-named element — nothing to upsert against
         }
         String id = text(node, "Id");
+        String image = text(node.path("Config"), "Image");
 
         JsonNode netSettings = node.path("NetworkSettings");
         List<DockerContainer.DockerNetworkAttachment> nets = parseNetworks(netSettings.path("Networks"));
-        boolean publishes = anyPublishedPort(netSettings.path("Ports"));
+        JsonNode portsNode = netSettings.path("Ports");
+        boolean publishes = anyPublishedPort(portsNode);
+        List<DockerContainer.ExposedPort> ports = parseExposedPorts(portsNode);
 
-        return new DockerContainer(id, name, nets, publishes);
+        return new DockerContainer(id, name, image, nets, publishes, ports);
     }
 
     private List<DockerContainer.DockerNetworkAttachment> parseNetworks(JsonNode networks) {
@@ -131,6 +134,36 @@ public class DockerInspectParser {
             }
         }
         return false;
+    }
+
+    /**
+     * Parse the {@code NetworkSettings.Ports} keys ({@code "<port>/<proto>"}) into structured
+     * (port, protocol) pairs. Both published and internal-only ports are included — the set
+     * describes what the container listens on, independent of host publishing. Malformed or
+     * non-numeric keys are skipped.
+     */
+    private List<DockerContainer.ExposedPort> parseExposedPorts(JsonNode ports) {
+        List<DockerContainer.ExposedPort> out = new ArrayList<>();
+        if (ports == null || !ports.isObject()) {
+            return out;
+        }
+        Iterator<String> names = ports.fieldNames();
+        while (names.hasNext()) {
+            String key = names.next();                  // e.g. "5432/tcp"
+            int slash = key.indexOf('/');
+            String portPart = slash >= 0 ? key.substring(0, slash) : key;
+            String proto = slash >= 0 ? key.substring(slash + 1) : "tcp";
+            try {
+                int port = Integer.parseInt(portPart.trim());
+                if (port >= 1 && port <= 65535) {
+                    out.add(new DockerContainer.ExposedPort(
+                        port, proto.isBlank() ? "tcp" : proto.toLowerCase()));
+                }
+            } catch (NumberFormatException ignored) {
+                // non-numeric port key — skip
+            }
+        }
+        return out;
     }
 
     /** Container names arrive with a leading slash (e.g. {@code /pingpay-db}); strip it. */

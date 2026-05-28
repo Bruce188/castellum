@@ -3,6 +3,7 @@
     "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000pf",
     "Name": "/pingpay-frontend",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "nginx:1.27.0" },
     "NetworkSettings": {
       "Ports": {
         "80/tcp": [
@@ -24,6 +25,7 @@
     "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000pb",
     "Name": "/pingpay-backend",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "node:20.11.1" },
     "NetworkSettings": {
       "Ports": {
         "3000/tcp": [
@@ -44,6 +46,7 @@
     "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000db",
     "Name": "/pingpay-db",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "postgres:15.6" },
     "NetworkSettings": {
       "Ports": {
         "3306/tcp": null
@@ -62,6 +65,7 @@
     "Id": "b2c3d4e5f6a700000000000000000000000000000000000000000000000kong",
     "Name": "/supabase_kong_pingpay",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "kong:3.4.2" },
     "NetworkSettings": {
       "Ports": {
         "8000/tcp": [
@@ -83,6 +87,7 @@
     "Id": "b2c3d4e5f6a70000000000000000000000000000000000000000000000studio",
     "Name": "/supabase_studio_pingpay",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "supabase/studio:latest" },
     "NetworkSettings": {
       "Ports": {
         "3000/tcp": [
@@ -103,6 +108,7 @@
     "Id": "b2c3d4e5f6a70000000000000000000000000000000000000000000000sup-db",
     "Name": "/supabase_db_pingpay",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "public.ecr.aws/supabase/postgres:15.1.0.147" },
     "NetworkSettings": {
       "Ports": {
         "5432/tcp": [
@@ -123,6 +129,7 @@
     "Id": "b2c3d4e5f6a700000000000000000000000000000000000000000000pg-meta",
     "Name": "/supabase_pg_meta_pingpay",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "supabase/postgres-meta:v0.83.0" },
     "NetworkSettings": {
       "Ports": {
         "8080/tcp": null
@@ -141,6 +148,7 @@
     "Id": "b2c3d4e5f6a700000000000000000000000000000000000000000000storage",
     "Name": "/supabase_storage_pingpay",
     "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "supabase/storage-api:v1.11.6" },
     "NetworkSettings": {
       "Ports": {},
       "Networks": {
