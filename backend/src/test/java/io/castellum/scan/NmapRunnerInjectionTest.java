@@ -25,7 +25,8 @@ class NmapRunnerInjectionTest {
 
     @org.junit.jupiter.api.Test
     void run_rejectsNullCidr() {
-        assertThrows(IllegalArgumentException.class, () -> runner.run(null, ScanType.PING_SWEEP),
+        // Cast disambiguates the String-CIDR overload from the List-of-hosts overload.
+        assertThrows(IllegalArgumentException.class, () -> runner.run((String) null, ScanType.PING_SWEEP),
             "Expected IllegalArgumentException for null CIDR");
     }
 }

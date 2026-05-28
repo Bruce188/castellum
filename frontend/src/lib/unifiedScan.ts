@@ -34,6 +34,13 @@ export interface StageDef {
   id: StageId;
   kind: 'nmap' | 'ot';
   run: StageRunner;
+  /**
+   * Stage ids that must reach a successful `complete` status before this stage may start.
+   * A dependency that ends `failed` cascades: the dependent stage is marked `failed` with a
+   * "skipped — <dep> did not complete" error rather than running (and rather than hanging).
+   * Omitted/empty means the stage has no prerequisites and may dispatch immediately.
+   */
+  dependsOn?: StageId[];
 }
 
 export interface StageState {
@@ -119,6 +126,23 @@ export function runUnifiedScan(
     let inFlight = 0;
     let settled = 0;
 
+    // Dependency helpers ----------------------------------------------------
+    // A stage is "ready" when every dependency has reached terminal `complete`.
+    // A stage is "blocked-failed" when any dependency ended `failed` — it can never
+    // become ready, so we settle it immediately (cascade) instead of leaving it queued.
+    function depStatuses(def: StageDef): StageStatus[] {
+      return (def.dependsOn ?? []).map((depId) => stateMap.get(depId)?.status ?? 'pending');
+    }
+    function depsSatisfied(def: StageDef): boolean {
+      return depStatuses(def).every((s) => s === 'complete');
+    }
+    function anyDepFailed(def: StageDef): boolean {
+      return depStatuses(def).some((s) => s === 'failed');
+    }
+    function failedDepName(def: StageDef): StageId | undefined {
+      return (def.dependsOn ?? []).find((depId) => stateMap.get(depId)?.status === 'failed');
+    }
+
     function tryDispatch(): void {
       // Dispatch stages while we have capacity and queue entries.
       while (inFlight < concurrency && stageQueue.length > 0) {
@@ -134,7 +158,30 @@ export function runUnifiedScan(
           return;
         }
 
-        const def = stageQueue.shift()!;
+        // First, drain any queued stage whose dependency has already failed — cascade it
+        // to failed without running. This keeps the queue from deadlocking on a dep that
+        // will never complete and surfaces the cause in the UI.
+        const failedIdx = stageQueue.findIndex((d) => anyDepFailed(d));
+        if (failedIdx !== -1) {
+          const [blocked] = stageQueue.splice(failedIdx, 1);
+          const depName = failedDepName(blocked);
+          updateState(blocked.id, {
+            status: 'failed',
+            error: `skipped — ${depName ?? 'dependency'} did not complete`,
+          });
+          settled++;
+          continue;
+        }
+
+        // Find the first queued stage whose dependencies are all complete.
+        const readyIdx = stageQueue.findIndex((d) => depsSatisfied(d));
+        if (readyIdx === -1) {
+          // Nothing is dispatchable right now: remaining stages are waiting on deps that are
+          // still pending/running. A later settle of those deps re-invokes tryDispatch().
+          return;
+        }
+
+        const [def] = stageQueue.splice(readyIdx, 1);
         inFlight++;
 
         // Transition to running.

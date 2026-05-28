@@ -59,6 +59,7 @@ public class ScanExecutionService {
     private final ScanRetryService scanRetryService;
     private final RiskCacheEvictor riskCacheEvictor;
     private final DeviceRepository deviceRepository;
+    private final AliveHostResolver aliveHostResolver;
 
     public ScanExecutionService(
             NmapRunner nmapRunner,
@@ -69,7 +70,8 @@ public class ScanExecutionService {
             AuditService auditService,
             ScanRetryService scanRetryService,
             RiskCacheEvictor riskCacheEvictor,
-            DeviceRepository deviceRepository) {
+            DeviceRepository deviceRepository,
+            AliveHostResolver aliveHostResolver) {
         this.nmapRunner = nmapRunner;
         this.scanRepository = scanRepository;
         this.nmapOutputParser = nmapOutputParser;
@@ -79,6 +81,7 @@ public class ScanExecutionService {
         this.scanRetryService = scanRetryService;
         this.riskCacheEvictor = riskCacheEvictor;
         this.deviceRepository = deviceRepository;
+        this.aliveHostResolver = aliveHostResolver;
     }
 
     /**
@@ -112,9 +115,33 @@ public class ScanExecutionService {
             auditService.recordEvent("system", "SCAN_EXECUTE", "scan",
                 String.valueOf(scanId), scan);
 
-            // 4. Run nmap
+            // 4. Run nmap.
+            //
+            // SERVICE_DETECT is scoped to the alive-host set within the CIDR rather than the
+            // whole range. PING_SWEEP (which the unified flow runs first) upserts every live
+            // host into the device inventory; AliveHostResolver reads that inventory filtered
+            // to the CIDR. Scoping to known-up hosts lets the runner drop -Pn (no phantom
+            // inflation) and version-scan only real hosts, so a /22 no longer multiplies -sV
+            // across 1024 forced-up addresses.
             ScanType type = ScanType.valueOf(scan.getScanType());
-            NmapResult result = nmapRunner.run(scan.getCidr(), type);
+
+            boolean aliveHostPath = false;
+            NmapResult result;
+            if (type == ScanType.SERVICE_DETECT) {
+                List<String> aliveHosts = aliveHostResolver.aliveHostsIn(scan.getCidr());
+                if (aliveHosts.isEmpty()) {
+                    // No known-up hosts in this CIDR. Do NOT fall back to scanning the whole
+                    // range (that is the original timeout bug). Complete with zero services.
+                    log.info("executeAsync: scan {} SERVICE_DETECT found no alive hosts in {} — "
+                        + "completing with zero services", scanId, scan.getCidr());
+                    completeWithNoResults(scan, scanId);
+                    return;
+                }
+                aliveHostPath = true;
+                result = nmapRunner.run(aliveHosts, type);
+            } else {
+                result = nmapRunner.run(scan.getCidr(), type);
+            }
 
             // 5. Parse output
             NmapOutputParser.ParsedScan parsed = nmapOutputParser.parse(result.stdout(), type);
@@ -130,11 +157,14 @@ public class ScanExecutionService {
                     }
                 }
 
-                // Phantom suppression: SERVICE_DETECT runs nmap with -Pn, which marks every
-                // address in the CIDR "up" regardless of whether anything is listening. A host
-                // with zero open services under -Pn is a phantom (e.g. the network/broadcast
-                // address) — skip it entirely. PING_SWEEP and OS_FINGERPRINT are unaffected.
-                if (type == ScanType.SERVICE_DETECT && hostServices.isEmpty()) {
+                // Phantom suppression: on the whole-CIDR fallback, SERVICE_DETECT runs nmap with
+                // -Pn, which marks every address in the CIDR "up" regardless of whether anything
+                // is listening. A host with zero open services under -Pn is a phantom (e.g. the
+                // network/broadcast address) — skip it entirely. The alive-host path drops -Pn
+                // and targets only hosts a prior PING_SWEEP confirmed up, so there are no
+                // phantoms there: a known-up host with no open ports is still a real device and
+                // must NOT be suppressed. PING_SWEEP and OS_FINGERPRINT are unaffected.
+                if (type == ScanType.SERVICE_DETECT && !aliveHostPath && hostServices.isEmpty()) {
                     continue;
                 }
 
@@ -224,6 +254,21 @@ public class ScanExecutionService {
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    /**
+     * Mark a scan COMPLETE with no discovered services and emit the SCAN_COMPLETE audit +
+     * risk-cache eviction, mirroring the tail of the happy path. Used by the SERVICE_DETECT
+     * empty-alive-set short-circuit so an empty live set is a clean success, not a failure or
+     * a whole-range fallback.
+     */
+    private void completeWithNoResults(Scan scan, Long scanId) {
+        scan.setStatus(ScanStatus.COMPLETE);
+        scan.setCompletedAt(Instant.now());
+        scanRepository.save(scan);
+        auditService.recordEvent("system", "SCAN_COMPLETE", "scan",
+            String.valueOf(scanId), scan);
+        riskCacheEvictor.onScanComplete();
+    }
 
     private static String buildFailureReason(Exception e) {
         String className = e.getClass().getSimpleName();

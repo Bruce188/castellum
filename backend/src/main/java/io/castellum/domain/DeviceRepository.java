@@ -21,4 +21,13 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     List<Long> findIdsByFirstSeenBetween(
         @Param("from") Instant from,
         @Param("to") Instant to);
+
+    /**
+     * All known device IP addresses. Used by the alive-host resolver to scope SERVICE_DETECT
+     * to hosts within a CIDR. IPv4-in-CIDR membership is not expressible as a portable JPQL
+     * predicate, so the caller filters in-process; the device inventory is bounded
+     * (see {@code castellum.graph.max-devices}, default 1024) so a full fetch is cheap.
+     */
+    @Query("SELECT d.ipAddress FROM Device d")
+    List<String> findAllIpAddresses();
 }

@@ -109,9 +109,13 @@ class ScanRecoveryIntegrationTest {
         });
 
         // Seed a PENDING scan with requestedAt well before process start.
+        // PING_SWEEP is used here (not SERVICE_DETECT) because this test exercises the
+        // recovery commit-then-dispatch ordering contract, which is scan-type-agnostic.
+        // SERVICE_DETECT now scopes to alive hosts (resolved from the device inventory) and
+        // would short-circuit when no devices are seeded — that path has its own tests.
         Scan s = new Scan();
         s.setCidr("10.10.10.0/24");
-        s.setScanType("SERVICE_DETECT");
+        s.setScanType("PING_SWEEP");
         s.setStatus(ScanStatus.PENDING);
         s.setRequestedAt(Instant.parse("2026-05-24T00:00:00Z")); // well before boot
         Long id = scanRepository.save(s).getId();
@@ -176,9 +180,12 @@ class ScanRecoveryIntegrationTest {
     @Test
     void recovery_withRealExecutor_scanRemainsCompleteAfterDispatch() throws Exception {
         // --- arrange: one COMPLETE scan (must not be re-executed), one PENDING (must run) ---
+        // PING_SWEEP (not SERVICE_DETECT) keeps this focused on the recovery dispatch ordering
+        // contract; SERVICE_DETECT's alive-host scoping would short-circuit with no seeded
+        // devices and is covered by its own tests.
         Scan completeScan = new Scan();
         completeScan.setCidr("10.10.10.2/32");
-        completeScan.setScanType("SERVICE_DETECT");
+        completeScan.setScanType("PING_SWEEP");
         completeScan.setStatus(ScanStatus.COMPLETE);
         completeScan.setRequestedAt(Instant.parse("2026-05-24T00:00:00Z"));
         completeScan.setCompletedAt(Instant.parse("2026-05-24T01:00:00Z"));
@@ -187,7 +194,7 @@ class ScanRecoveryIntegrationTest {
 
         Scan orphan = new Scan();
         orphan.setCidr("10.10.10.3/32");
-        orphan.setScanType("SERVICE_DETECT");
+        orphan.setScanType("PING_SWEEP");
         orphan.setStatus(ScanStatus.PENDING);
         orphan.setRequestedAt(Instant.parse("2026-05-24T00:00:00Z"));
         Long orphanId = scanRepository.save(orphan).getId();

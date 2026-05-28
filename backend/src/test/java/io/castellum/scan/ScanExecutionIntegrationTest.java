@@ -100,6 +100,13 @@ class ScanExecutionIntegrationTest {
 
     @Test
     void postScan_completesAsync_persistsDevicesAndServices() throws Exception {
+        // SERVICE_DETECT is now scoped to alive hosts within the CIDR. Seed one live device
+        // (as a prior PING_SWEEP would have) so the alive-host resolver yields a target;
+        // without it the scan short-circuits to COMPLETE with zero services.
+        Device seeded = new Device(null, "10.10.10.5", null, null,
+            java.time.Instant.now(), java.time.Instant.now());
+        deviceRepository.save(seeded);
+
         // One host, two services in the mock stdout (nmap -oX - XML).
         String mockStdout = """
                 <?xml version="1.0"?>
@@ -115,7 +122,8 @@ class ScanExecutionIntegrationTest {
                 <runstats><finished/></runstats>
                 </nmaprun>
                 """;
-        when(nmapRunner.run(anyString(), any(ScanType.class)))
+        // Alive-host path uses the explicit-host-list overload.
+        when(nmapRunner.run(anyList(), any(ScanType.class)))
             .thenReturn(new NmapResult(0, mockStdout, ""));
 
         // Capture audit rows before the request.

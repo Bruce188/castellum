@@ -92,4 +92,48 @@ class NmapRunnerTest {
         assertEquals("99s", argv.get(hostTimeoutIdx + 1),
             "configured portScanHostTimeout sentinel '99s' must appear in argv; got: " + argv);
     }
+
+    // -----------------------------------------------------------------------
+    // Alive-host (explicit target list) argv: drops -Pn, appends each host
+    // -----------------------------------------------------------------------
+
+    @Test
+    void buildArgv_aliveHostList_serviceDetect_dropsPn() {
+        List<String> hosts = List.of("192.168.1.10", "192.168.1.20");
+        List<String> argv = runner.buildArgv(hosts, ScanType.SERVICE_DETECT, /* targetsKnownUp= */ true);
+        assertFalse(argv.contains("-Pn"),
+            "alive-host SERVICE_DETECT must NOT contain -Pn (targets are known-up); got: " + argv);
+        // Still a -sV version scan with the long host-timeout.
+        assertTrue(argv.contains("-sV"), "argv must contain -sV for SERVICE_DETECT");
+        int hostTimeoutIdx = argv.indexOf("--host-timeout");
+        assertEquals("180s", argv.get(hostTimeoutIdx + 1),
+            "alive-host SERVICE_DETECT must still use 180s host-timeout");
+    }
+
+    @Test
+    void buildArgv_aliveHostList_appendsEachHostAsTrailingTargets() {
+        List<String> hosts = List.of("192.168.1.10", "192.168.1.20", "192.168.1.30");
+        List<String> argv = runner.buildArgv(hosts, ScanType.SERVICE_DETECT, true);
+        // The last 3 tokens are the explicit hosts, in order.
+        assertEquals(hosts, argv.subList(argv.size() - 3, argv.size()),
+            "explicit hosts must be appended verbatim as the trailing argv tokens; got: " + argv);
+        // No raw CIDR token present.
+        assertFalse(argv.stream().anyMatch(t -> t.contains("/")),
+            "alive-host argv must not contain a CIDR token; got: " + argv);
+    }
+
+    @Test
+    void buildArgv_wholeCidrFallback_stillKeepsPn() {
+        // The single-CIDR overload (targetsKnownUp=false) preserves the original -Pn behaviour.
+        List<String> argv = runner.buildArgv(VALID_CIDR, ScanType.SERVICE_DETECT);
+        assertTrue(argv.contains("-Pn"),
+            "whole-CIDR SERVICE_DETECT fallback must still contain -Pn; got: " + argv);
+    }
+
+    @Test
+    void run_emptyHostList_throwsIllegalArgument() {
+        assertThrows(IllegalArgumentException.class,
+            () -> runner.run(List.of(), ScanType.SERVICE_DETECT),
+            "empty host list must be rejected rather than handed to nmap");
+    }
 }

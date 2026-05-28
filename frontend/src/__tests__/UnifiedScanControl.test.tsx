@@ -357,23 +357,27 @@ describe('<UnifiedScanControl /> — AC4 advanced per-type controls', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC4b — One nmap stage FAILED does NOT abort the other stages
+// AC4b — A FAILED *dependent* stage does NOT abort its sibling dependents.
+// (PING_SWEEP succeeds first; one of the stages that depend on it fails; the
+//  remaining dependents still run. This preserves per-stage failure isolation
+//  under the new PING_SWEEP-first ordering.)
 // ---------------------------------------------------------------------------
 
 describe('<UnifiedScanControl /> — partial-failure isolation', () => {
-  it('one nmap stage FAILED does not abort OT stage or remaining nmap stages', async () => {
+  it('a FAILED dependent stage (SERVICE_DETECT) does not abort the OT stage or OS_FINGERPRINT', async () => {
     vi.useFakeTimers();
 
     mockListDevices.mockResolvedValue(makePage(['10.0.0.1']));
 
-    // PING_SWEEP → id 1 → FAILED; SERVICE_DETECT + OS_FINGERPRINT → COMPLETE
+    // PING_SWEEP → id 1 → COMPLETE (prerequisite succeeds, unblocking dependents);
+    // SERVICE_DETECT → id 2 → FAILED; OS_FINGERPRINT → id 3 → COMPLETE.
     mockTriggerScan
       .mockResolvedValueOnce({ id: 1 }) // PING_SWEEP
       .mockResolvedValueOnce({ id: 2 }) // SERVICE_DETECT
       .mockResolvedValueOnce({ id: 3 }); // OS_FINGERPRINT
 
     mockGetScanDetail.mockImplementation(async (id: number) => {
-      if (id === 1) {
+      if (id === 2) {
         return makeScanDetail(id, 'FAILED', { failureReason: 'timeout' });
       }
       return makeScanDetail(id, 'COMPLETE', { discoveredDeviceIds: [id * 10] });
@@ -405,9 +409,101 @@ describe('<UnifiedScanControl /> — partial-failure isolation', () => {
     // OT stage still ran (probeOtOnce called — 1 host × 4 protocols)
     expect(mockProbeOtOnce).toHaveBeenCalledTimes(4);
 
-    // SERVICE_DETECT + OS_FINGERPRINT nmap stages still ran
+    // All three nmap stages were submitted (PING_SWEEP, then the two dependents).
     expect(mockTriggerScan).toHaveBeenCalledTimes(3);
-    expect(mockGetScanDetail).toHaveBeenCalledWith(2);
+    // The non-failing dependent (OS_FINGERPRINT, id 3) was still polled.
     expect(mockGetScanDetail).toHaveBeenCalledWith(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC — PING_SWEEP ordering: SERVICE_DETECT starts only after PING_SWEEP COMPLETE.
+// ---------------------------------------------------------------------------
+
+describe('<UnifiedScanControl /> — PING_SWEEP-first ordering', () => {
+  it('SERVICE_DETECT/OS_FINGERPRINT are submitted only after PING_SWEEP reaches COMPLETE', async () => {
+    vi.useFakeTimers();
+
+    mockListDevices.mockResolvedValue(makePage(['10.0.0.1']));
+
+    // Assign ids by submission order.
+    mockTriggerScan
+      .mockResolvedValueOnce({ id: 1 }) // PING_SWEEP (first)
+      .mockResolvedValueOnce({ id: 2 })
+      .mockResolvedValueOnce({ id: 3 });
+
+    // PING_SWEEP stays RUNNING for the first two polls, then COMPLETE. While it is
+    // non-terminal, the dependent stages must NOT have been submitted yet.
+    let pingPolls = 0;
+    mockGetScanDetail.mockImplementation(async (id: number) => {
+      if (id === 1) {
+        pingPolls += 1;
+        return makeScanDetail(id, pingPolls >= 3 ? 'COMPLETE' : 'RUNNING');
+      }
+      return makeScanDetail(id, 'COMPLETE', { discoveredDeviceIds: [id * 10] });
+    });
+
+    mockProbeOtOnce.mockResolvedValue(MOCK_PROBE_RESULT);
+
+    render(<UnifiedScanControl />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    fireEvent.click(screen.getByTestId('unified-scan-btn'));
+
+    // Advance just the first PING_SWEEP poll (RUNNING). Only PING_SWEEP should be in flight.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockTriggerScan).toHaveBeenCalledTimes(1);
+    expect(mockTriggerScan).toHaveBeenCalledWith({ cidr: TEST_CIDR, type: 'PING_SWEEP' });
+
+    // Drain the rest: PING_SWEEP completes, then the dependents are submitted and complete.
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(mockTriggerScan).toHaveBeenCalledTimes(3);
+    expect(mockTriggerScan).toHaveBeenCalledWith({ cidr: TEST_CIDR, type: 'SERVICE_DETECT' });
+    expect(mockTriggerScan).toHaveBeenCalledWith({ cidr: TEST_CIDR, type: 'OS_FINGERPRINT' });
+  });
+
+  it('when PING_SWEEP FAILS, the dependent stages are skipped (cascade) and not submitted', async () => {
+    vi.useFakeTimers();
+
+    mockListDevices.mockResolvedValue(makePage(['10.0.0.1']));
+
+    // Only PING_SWEEP is ever submitted; it fails. Provide ids defensively.
+    mockTriggerScan
+      .mockResolvedValueOnce({ id: 1 }) // PING_SWEEP
+      .mockResolvedValueOnce({ id: 2 })
+      .mockResolvedValueOnce({ id: 3 });
+
+    mockGetScanDetail.mockImplementation(async (id: number) =>
+      makeScanDetail(id, id === 1 ? 'FAILED' : 'COMPLETE', { failureReason: 'nmap timed out' }),
+    );
+    mockProbeOtOnce.mockResolvedValue(MOCK_PROBE_RESULT);
+
+    render(<UnifiedScanControl />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    fireEvent.click(screen.getByTestId('unified-scan-btn'));
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    // Only PING_SWEEP was submitted — dependents cascade-skip on its failure.
+    expect(mockTriggerScan).toHaveBeenCalledTimes(1);
+    expect(mockTriggerScan).toHaveBeenCalledWith({ cidr: TEST_CIDR, type: 'PING_SWEEP' });
+    // The OT stage (also a PING_SWEEP dependent) never probes.
+    expect(mockProbeOtOnce).not.toHaveBeenCalled();
+
+    // The dependent rows are present and surface a skipped/failed status.
+    const sdRow = screen.getByTestId('unified-stage-SERVICE_DETECT');
+    expect(sdRow).toBeInTheDocument();
+    expect(sdRow.textContent ?? '').toMatch(/failed/i);
   });
 });
