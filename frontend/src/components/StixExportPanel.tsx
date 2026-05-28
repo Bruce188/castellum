@@ -15,6 +15,7 @@ export function StixExportPanel({ isAdmin }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastFilename, setLastFilename] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
 
   if (!isAdmin) {
     return (
@@ -26,6 +27,19 @@ export function StixExportPanel({ isAdmin }: Props) {
         <p className="text-sm text-gray-600">ADMIN role required.</p>
       </section>
     );
+  }
+
+  async function handlePreview() {
+    setBusy(true);
+    setError(null);
+    try {
+      const text = await api.exportStixBundleText();
+      setPreview(JSON.stringify(JSON.parse(text), null, 2));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'preview failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleDownload() {
@@ -61,15 +75,26 @@ export function StixExportPanel({ isAdmin }: Props) {
         Downloads the current device-and-vulnerability inventory as a STIX 2.1
         JSON bundle. The bundle is generated on-demand from the live database.
       </p>
-      <button
-        type="button"
-        data-testid="stix-download-btn"
-        onClick={handleDownload}
-        disabled={busy}
-        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
-      >
-        {busy ? 'Building bundle…' : 'Download STIX bundle'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          data-testid="stix-download-btn"
+          onClick={handleDownload}
+          disabled={busy}
+          className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+        >
+          {busy ? 'Building bundle…' : 'Download STIX bundle'}
+        </button>
+        <button
+          type="button"
+          data-testid="stix-preview-btn"
+          onClick={handlePreview}
+          disabled={busy}
+          className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700 disabled:opacity-50"
+        >
+          {busy ? 'Loading…' : 'Preview bundle'}
+        </button>
+      </div>
       {lastFilename && !error && (
         <p className="mt-2 text-sm text-green-700" role="status">
           Downloaded: <code>{lastFilename}</code>
@@ -79,6 +104,14 @@ export function StixExportPanel({ isAdmin }: Props) {
         <p className="mt-2 text-sm text-red-600" role="alert">
           {error}
         </p>
+      )}
+      {preview && !error && (
+        <pre
+          data-testid="stix-preview"
+          className="mt-3 p-3 bg-gray-100 rounded text-xs overflow-auto max-h-96 border border-gray-300"
+        >
+          {preview}
+        </pre>
       )}
     </section>
   );

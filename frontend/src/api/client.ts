@@ -434,6 +434,28 @@ export const api = {
     return await response.blob();
   },
 
+  /**
+   * POST /api/threat-intel/export — ADMIN-only. Streams a STIX 2.1 JSON
+   * bundle as a {@link string} suitable for preview/display.
+   */
+  exportStixBundleText: async (): Promise<string> => {
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${BASE}/api/threat-intel/export`, {
+      method: 'POST',
+      headers,
+    });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return await response.text();
+  },
+
   /** GET /api/integrations/{type} — ADMIN-only. Throws {@code Error('404 ...')} when not configured. */
   getIntegrationConfig: (type: IntegrationType) =>
     request<IntegrationConfigDto>(`/api/integrations/${type}`),

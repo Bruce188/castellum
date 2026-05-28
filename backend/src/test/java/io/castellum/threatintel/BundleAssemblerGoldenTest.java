@@ -1,5 +1,6 @@
 package io.castellum.threatintel;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveCpeMatch;
@@ -230,6 +231,50 @@ class BundleAssemblerGoldenTest {
             assertThat(stixObjectMapper.writeValueAsString(actParsed))
                 .as("Bundle JSON should match golden fixture")
                 .isEqualTo(stixObjectMapper.writeValueAsString(expParsed));
+        }
+    }
+
+    @Test
+    void assembledBundle_hasExplicitStixBundleShape() throws Exception {
+        StixBundle bundle = assembler.assemble();
+        String json = stixObjectMapper.writeValueAsString(bundle);
+        JsonNode root = stixObjectMapper.readTree(json);
+
+        // AC1: top-level bundle shape
+        assertThat(root.path("type").asText())
+            .as("bundle type must be 'bundle'")
+            .isEqualTo("bundle");
+        assertThat(root.path("id").asText())
+            .as("bundle id must be non-blank")
+            .isNotBlank();
+        assertThat(root.path("id").asText())
+            .as("bundle id must start with 'bundle--'")
+            .startsWith("bundle--");
+        assertThat(root.path("spec_version").asText())
+            .as("bundle spec_version must be '2.1'")
+            .isEqualTo("2.1");
+
+        // objects array must exist and be non-empty
+        assertThat(root.path("objects").isArray())
+            .as("'objects' must be a JSON array")
+            .isTrue();
+        assertThat(root.path("objects"))
+            .as("'objects' array must be non-empty")
+            .isNotEmpty();
+
+        // every object must carry a non-blank type and id
+        for (JsonNode obj : root.path("objects")) {
+            assertThat(obj.path("type").asText())
+                .as("each STIX object must have a non-blank 'type'")
+                .isNotBlank();
+            assertThat(obj.path("id").asText())
+                .as("each STIX object must have a non-blank 'id'")
+                .isNotBlank();
+            if (obj.has("spec_version")) {
+                assertThat(obj.path("spec_version").asText())
+                    .as("when 'spec_version' is present it must be non-blank")
+                    .isNotBlank();
+            }
         }
     }
 }
