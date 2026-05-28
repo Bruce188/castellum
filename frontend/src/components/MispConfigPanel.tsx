@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { IntegrationConfigDto } from '../api/types';
 
@@ -12,6 +12,17 @@ interface MispFormState {
 }
 
 const EMPTY: MispFormState = { url: '', apiKey: '' };
+
+const DOCKER_MISP_URL = 'http://localhost:8080/';
+
+const MISP_PRESETS: { label: string; url: string }[] = [
+  {
+    label: 'CIRCL MISP demo',
+    url: 'https://misp.circl.lu/',
+  },
+];
+
+type ProbeStatus = 'idle' | 'checking' | 'reachable' | 'unreachable';
 
 /**
  * ADMIN UI for the MISP integration. Same shape as {@code TaxiiConfigPanel}
@@ -28,10 +39,48 @@ export function MispConfigPanel({ isAdmin }: Props) {
   const [pushing, setPushing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detected, setDetected] = useState(false);
+  const [probeStatus, setProbeStatus] = useState<ProbeStatus>('idle');
+
+  // Holds a ref to the last loaded savedConfig so detect() can read it
+  // without a stale closure over state.
+  const savedConfigRef = useRef<IntegrationConfigDto | null>(null);
+  const formRef = useRef<MispFormState>(EMPTY);
+
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   useEffect(() => {
     if (!isAdmin) return;
-    void load();
+    let cancelled = false;
+
+    async function run() {
+      await load();
+      if (cancelled) return;
+      void detect(cancelled);
+    }
+
+    function detect(isCancelled: boolean) {
+      return (async () => {
+        try {
+          const result = await api.probeIntegration('MISP', DOCKER_MISP_URL);
+          if (isCancelled) return;
+          if (result.reachable) {
+            prefillIfBlank({ url: DOCKER_MISP_URL }, savedConfigRef.current);
+            setDetected(true);
+          }
+        } catch {
+          // Detection failure is silent
+        }
+      })();
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
@@ -39,9 +88,12 @@ export function MispConfigPanel({ isAdmin }: Props) {
     setError(null);
     try {
       const cfg = await api.getIntegrationConfig('MISP');
+      savedConfigRef.current = cfg;
       hydrate(cfg);
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('404')) {
+        // No config saved yet — leave the form blank.
+        savedConfigRef.current = null;
         setSavedConfig(null);
         setCredentialsSet(false);
         return;
@@ -56,7 +108,59 @@ export function MispConfigPanel({ isAdmin }: Props) {
     setLastPushAt(cfg.lastPushAt);
     setLastPushStatus(cfg.lastPushStatus);
     const c = cfg.config ?? {};
-    setForm({ url: (c.url as string) ?? '', apiKey: '' });
+    const next: MispFormState = {
+      url: (c.url as string) ?? '',
+      apiKey: '',
+    };
+    formRef.current = next;
+    setForm(next);
+  }
+
+  /**
+   * Prefill fields only when the saved config has a blank/absent value for that
+   * field AND the current form field is also blank. The saved DB config is the
+   * "manually saved" authority — never clobber it.
+   */
+  function prefillIfBlank(
+    next: Partial<MispFormState>,
+    currentSavedConfig: IntegrationConfigDto | null,
+  ) {
+    const savedCfg = currentSavedConfig?.config ?? {};
+    setForm(prev => {
+      const updated = { ...prev };
+      let changed = false;
+      for (const key of Object.keys(next) as (keyof MispFormState)[]) {
+        const savedVal = (savedCfg[key] as string | undefined) ?? '';
+        const formVal = prev[key].trim();
+        if (savedVal === '' && formVal === '') {
+          updated[key] = next[key] as string;
+          changed = true;
+        }
+      }
+      return changed ? updated : prev;
+    });
+  }
+
+  async function handlePresetChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const url = e.target.value;
+    if (!url) return;
+    const preset = MISP_PRESETS.find(p => p.url === url);
+    if (!preset) return;
+
+    // Operator-initiated: fill URL directly
+    setForm(prev => ({
+      ...prev,
+      url: preset.url,
+    }));
+
+    // Probe reachability
+    setProbeStatus('checking');
+    try {
+      const result = await api.probeIntegration('MISP', preset.url);
+      setProbeStatus(result.reachable ? 'reachable' : 'unreachable');
+    } catch {
+      setProbeStatus('unreachable');
+    }
   }
 
   if (!isAdmin) {
@@ -119,6 +223,41 @@ export function MispConfigPanel({ isAdmin }: Props) {
       className="mt-6 border border-gray-200 rounded p-4 bg-white"
     >
       <h2 className="text-base font-semibold text-gray-800 mb-3">MISP integration</h2>
+
+      <div className="mb-3">
+        <label className="text-sm flex flex-col">
+          Preset server
+          <select
+            data-testid="misp-preset-select"
+            defaultValue=""
+            onChange={handlePresetChange}
+            className="px-2 py-1 border border-gray-300 rounded text-sm"
+          >
+            <option value="">Choose a preset…</option>
+            {MISP_PRESETS.map(p => (
+              <option key={p.url} value={p.url}>{p.label}</option>
+            ))}
+          </select>
+        </label>
+        {probeStatus !== 'idle' && (
+          <span
+            data-testid="misp-reachability"
+            data-status={probeStatus}
+            className={
+              probeStatus === 'checking'
+                ? 'text-xs text-gray-500 ml-1'
+                : probeStatus === 'reachable'
+                  ? 'text-xs text-green-700 ml-1'
+                  : 'text-xs text-red-600 ml-1'
+            }
+          >
+            {probeStatus === 'checking' && 'Checking reachability…'}
+            {probeStatus === 'reachable' && 'reachable'}
+            {probeStatus === 'unreachable' && 'unreachable'}
+          </span>
+        )}
+      </div>
+
       <form onSubmit={handleSave} className="grid grid-cols-2 gap-2 mb-3 text-sm">
         <label className="flex flex-col col-span-2">
           MISP URL
@@ -130,6 +269,11 @@ export function MispConfigPanel({ isAdmin }: Props) {
             className="px-2 py-1 border border-gray-300 rounded font-mono"
             placeholder="https://misp.example.com"
           />
+          {detected && (
+            <span data-testid="misp-detected-note" className="text-xs text-blue-600 mt-0.5">
+              auto-detected (editable)
+            </span>
+          )}
         </label>
         <label className="flex flex-col col-span-2">
           API key
