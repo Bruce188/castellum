@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { CveDetailDto, CveAffectedDevice } from '../api/types';
+import { CvssVectorBreakdown } from './CvssVectorBreakdown';
 
 interface NvdReference {
   url: string;
@@ -139,6 +140,16 @@ export function CveDetailPanel({ cveId, onClose }: Props) {
               <p className="text-sm text-gray-700">{detail.description ?? 'No description.'}</p>
             )}
           </section>
+
+          {detail.cvssV31Vector && (
+            <section className="mb-4">
+              <h3 className="text-sm font-semibold mb-1">CVSS Vector</h3>
+              <CvssVectorBreakdown
+                vector={detail.cvssV31Vector}
+                score={detail.cvssV31Score}
+              />
+            </section>
+          )}
 
           <section className="mb-4">
             <h3 className="text-sm font-semibold mb-1">References</h3>

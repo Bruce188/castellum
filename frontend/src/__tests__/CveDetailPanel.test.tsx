@@ -39,6 +39,12 @@ const cveDetail: CveDetailDto = {
   compositeScore: '8.50',
 };
 
+const cveDetailWithVector: CveDetailDto = {
+  ...cveDetail,
+  cvssV31Vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
+  cvssV31Score: '7.8',
+};
+
 const affectedDevices: CveAffectedDevice[] = [
   { deviceId: 42, hostname: 'host-1', ipAddress: '10.0.0.42',
     matchedPort: 22, matchedService: 'openssh', matchedVersion: '8.2' },
@@ -266,5 +272,38 @@ describe('<CveDetailPanel />', () => {
     });
     // NVD fallback link must still appear
     expect(screen.getByRole('link', { name: /nvd\.nist\.gov/i })).toBeInTheDocument();
+  });
+
+  // --- F2: CVSS vector human-readable breakdown (red phase) ---
+
+  it('renders the decoded CVSS breakdown alongside the preserved score chip when a vector is present', async () => {
+    vi.mocked(api.cveDetail).mockResolvedValue(cveDetailWithVector);
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    // Decoded breakdown is shown (AC2).
+    await screen.findByText('Attack Vector');
+    expect(screen.getByText('Attack Vector')).toBeInTheDocument();
+    // PRESERVE: the existing CVSS score chip still renders (augment, not replace).
+    expect(screen.getByText('7.8')).toBeInTheDocument();
+  });
+
+  it('does not crash and leaks no metric labels for the null-vector fixture, score chip preserved', async () => {
+    vi.mocked(api.cveDetail).mockResolvedValue(cveDetail);
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    // Panel body renders without crashing.
+    await waitFor(() => {
+      expect(screen.getByText('OpenSSH scp client vulnerability.')).toBeInTheDocument();
+    });
+    // PRESERVE: score chip still shows.
+    expect(screen.getByText('7.8')).toBeInTheDocument();
+    // AC3: no decoded metric label leaks when the vector is null.
+    expect(screen.queryByText('Attack Vector')).toBeNull();
   });
 });
