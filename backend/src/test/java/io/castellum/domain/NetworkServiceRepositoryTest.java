@@ -84,4 +84,32 @@ class NetworkServiceRepositoryTest {
         assertEquals(1, found.size());
         assertEquals(22, found.get(0).getPort());
     }
+
+    private NetworkService saveService(Long deviceId, int port, String proto) {
+        NetworkService svc = new NetworkService();
+        svc.setDeviceId(deviceId);
+        svc.setPort(port);
+        svc.setProtocol(proto);
+        svc.setObservedAt(Instant.now());
+        return serviceRepository.save(svc);
+    }
+
+    @Test
+    void findByDeviceIdIn_returnsServicesForAllGivenDevices_excludesOthers() {
+        Device d1 = createDevice("10.1.0.1");
+        Device d2 = createDevice("10.1.0.2");
+        Device d3 = createDevice("10.1.0.3");
+        saveService(d1.getId(), 22, "tcp");
+        saveService(d1.getId(), 443, "tcp");
+        saveService(d2.getId(), 502, "tcp");
+        saveService(d3.getId(), 102, "tcp"); // must NOT appear
+
+        List<NetworkService> found =
+            serviceRepository.findByDeviceIdIn(List.of(d1.getId(), d2.getId()));
+
+        assertEquals(3, found.size());
+        assertTrue(found.stream().allMatch(s ->
+            s.getDeviceId().equals(d1.getId()) || s.getDeviceId().equals(d2.getId())));
+        assertTrue(found.stream().noneMatch(s -> s.getDeviceId().equals(d3.getId())));
+    }
 }
