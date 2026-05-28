@@ -4,7 +4,7 @@ import type {
   ChangePasswordRequest,
   CreateUserRequest,
   Criticality, CveAffectedDevice, CveDetailDto, CveFleetSort, CveSummaryDto,
-  Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
+  Device, DeviceRiskDto, FeedScheduleDto, FeedScheduleUpdateRequest, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   IntegrationConfigDto, IntegrationProbeRequest, IntegrationProbeResult,
   IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
@@ -419,6 +419,25 @@ export const api = {
   /** PUT /api/scan-policy/{id}/enable — ADMIN-only. */
   enableScanPolicy: (id: number) =>
     request<ScanPolicyDto>(`/api/scan-policy/${id}/enable`, { method: 'PUT' }),
+
+  /** GET /api/admin/feed-schedule — ADMIN-only. */
+  getFeedSchedule: () =>
+    request<FeedScheduleDto>('/api/admin/feed-schedule'),
+
+  /** PUT /api/admin/feed-schedule — ADMIN-only. Update cron and enabled flag. */
+  updateFeedSchedule: (body: FeedScheduleUpdateRequest) =>
+    request<FeedScheduleDto>('/api/admin/feed-schedule', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  /** PUT /api/admin/feed-schedule/enable — ADMIN-only. */
+  enableFeedSchedule: () =>
+    request<FeedScheduleDto>('/api/admin/feed-schedule/enable', { method: 'PUT' }),
+
+  /** PUT /api/admin/feed-schedule/disable — ADMIN-only. */
+  disableFeedSchedule: () =>
+    request<FeedScheduleDto>('/api/admin/feed-schedule/disable', { method: 'PUT' }),
 
   /** DELETE /api/scan-policy/{id} — ADMIN-only. */
   deleteScanPolicy: async (id: number): Promise<void> => {

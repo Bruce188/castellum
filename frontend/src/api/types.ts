@@ -245,6 +245,21 @@ export interface SyncStatusResponse {
   lastError: string | null;
 }
 
+export interface FeedScheduleDto {
+  enabled: boolean;
+  cron: string;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  nextRunAt: string | null;
+  consecutiveFailures: number;
+}
+
+export interface FeedScheduleUpdateRequest {
+  enabled: boolean;
+  cron: string;
+}
+
 export interface AuditEntry {
   id: number;
   occurredAt: string;        // ISO8601

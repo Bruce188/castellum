@@ -64,6 +64,7 @@ castellum:
     feed-url: ${KEV_FEED_URL:https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
   risk:
     refresh-cron: ${RISK_REFRESH_CRON:0 0 6 * * *}
+    poll-interval-millis: ${RISK_POLL_INTERVAL_MILLIS:60000}
   scan:
     executor:
       # Bounded thread pool for @Async scan execution.
