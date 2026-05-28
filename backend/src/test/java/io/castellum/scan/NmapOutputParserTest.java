@@ -154,6 +154,73 @@ class NmapOutputParserTest {
         assertTrue(result.services().isEmpty(), "malformed XML must produce no services");
     }
 
+    // -----------------------------------------------------------------------
+    // OS fingerprint: <os><osmatch> elements from nmap -O
+    // -----------------------------------------------------------------------
+
+    @Test
+    void osFingerprint_extractsHighestAccuracyOsMatch() throws IOException {
+        NmapOutputParser.ParsedScan result =
+            parser.parse(fixture("os-fingerprint.xml"), ScanType.SERVICE_DETECT);
+
+        assertEquals(1, result.hosts().size(), "one host must be discovered");
+        NmapOutputParser.DiscoveredHost host = result.hosts().get(0);
+        assertEquals("192.168.68.51", host.ipAddress());
+
+        assertNotNull(host.os(), "os() must not be null when <os><osmatch> is present");
+        assertEquals("Linux 5.4 - 5.15", host.os().name(),
+            "highest-accuracy osmatch name must be selected");
+        assertEquals(96, host.os().accuracy(),
+            "highest-accuracy osmatch accuracy must be 96");
+        assertTrue(host.os().cpe().startsWith("cpe:/o:"),
+            "cpe must start with cpe:/o: but was: " + host.os().cpe());
+    }
+
+    @Test
+    void osFingerprint_multipleOsmatch_firstWins() throws IOException {
+        NmapOutputParser.ParsedScan result =
+            parser.parse(fixture("os-fingerprint.xml"), ScanType.SERVICE_DETECT);
+
+        NmapOutputParser.DiscoveredHost host = result.hosts().get(0);
+        assertNotNull(host.os(), "os() must not be null");
+        assertNotEquals("Linux 4.15 - 5.8", host.os().name(),
+            "the second (lower-accuracy) osmatch must not be selected");
+    }
+
+    @Test
+    void noOsElement_yieldsNullOsMatch() throws IOException {
+        NmapOutputParser.ParsedScan result =
+            parser.parse(fixture("service-detect.xml"), ScanType.SERVICE_DETECT);
+
+        assertEquals(1, result.hosts().size(), "one host expected in service-detect.xml");
+        NmapOutputParser.DiscoveredHost host = result.hosts().get(0);
+        assertNull(host.os(), "os() must be null when no <os> element is present");
+    }
+
+    @Test
+    void osmatch_nonNumericAccuracy_yieldsNullAccuracy() {
+        String xml = """
+                <?xml version="1.0"?>
+                <nmaprun>
+                <host><status state="up" reason="echo-reply"/>
+                <address addr="10.0.0.7" addrtype="ipv4"/>
+                <hostnames></hostnames>
+                <ports>
+                <port protocol="tcp" portid="80"><state state="open"/><service name="http"/></port>
+                </ports>
+                <os><osmatch name="WeirdOS" accuracy="abc"/></os>
+                </host>
+                <runstats><finished/></runstats>
+                </nmaprun>
+                """;
+        NmapOutputParser.ParsedScan result = parser.parse(xml, ScanType.SERVICE_DETECT);
+        assertEquals(1, result.hosts().size(), "one host must be parsed");
+        NmapOutputParser.DiscoveredHost host = result.hosts().get(0);
+        assertNotNull(host.os(), "os() must not be null when <osmatch> is present");
+        assertEquals("WeirdOS", host.os().name(), "name must be preserved even with bad accuracy");
+        assertNull(host.os().accuracy(), "non-numeric accuracy must yield null");
+    }
+
     @Test
     void closedPorts_areExcluded() {
         // A host with one open and one closed port; only the open one becomes a service.

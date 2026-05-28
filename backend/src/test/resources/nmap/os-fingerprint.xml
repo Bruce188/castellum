@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -O -oX - 192.168.68.51" start="1779904249" version="7.94SVN" xmloutputversion="1.05">
+<host starttime="1779904249" endtime="1779904261"><status state="up" reason="echo-reply" reason_ttl="64"/>
+<address addr="192.168.68.51" addrtype="ipv4"/>
+<hostnames>
+<hostname name="host.docker.internal" type="PTR"/>
+</hostnames>
+<ports><port protocol="tcp" portid="22"><state state="open" reason="syn-ack" reason_ttl="64"/><service name="ssh" method="table" conf="3"/></port>
+</ports>
+<os><osmatch name="Linux 5.4 - 5.15" accuracy="96"><osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X" accuracy="96" cpe="cpe:/o:linux:linux_kernel:5"/></osmatch>
+<osmatch name="Linux 4.15 - 5.8" accuracy="92"><osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="4.X" accuracy="92" cpe="cpe:/o:linux:linux_kernel:4"/></osmatch>
+</os>
+</host>
+<runstats><finished time="1779904261" timestr="Wed May 27 19:51:01 2026" summary="Nmap done" elapsed="12.00" exit="success"/><hosts up="1" down="0" total="1"/>
+</runstats>
+</nmaprun>
