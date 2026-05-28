@@ -760,6 +760,13 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <span class="w">  </span>http://localhost:8081/api/threat-intel/export<span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-40
 </code></pre></div>
 
+<p><strong>UI equivalent — Settings page export panel.</strong> The STIX Export section of the Settings page (<code>StixExportPanel</code>) provides two ADMIN-only controls; VIEWER role sees neither:</p>
+<ul>
+  <li><strong>Download STIX bundle</strong> — triggers the export endpoint and saves the result as <code>stix-bundle-&lt;timestamp&gt;.json</code>.</li>
+  <li><strong>Preview bundle</strong> — fetches the bundle text via <code>exportStixBundleText()</code> and renders it as pretty-printed JSON (<code>JSON.stringify(…, null, 2)</code>) in a scrollable on-screen block. Indentation is applied client-side only; the wire format remains compact JSON.</li>
+</ul>
+<p>Both controls share a busy lock so only one operation runs at a time. Errors appear inline below the buttons.</p>
+
 <hr>
 <h2 id="5-troubleshooting">5. Troubleshooting</h2>
 <table>
