@@ -200,4 +200,71 @@ describe('<CveDetailPanel />', () => {
       expect(screen.getByRole('link', { name: '192.168.1.99' })).toBeInTheDocument();
     });
   });
+
+  // --- NEW FAILING TESTS (red phase) ---
+
+  it('listAffectedDevices rejects but cveDetail resolves: CVE body still renders and shows affected-devices error notice', async () => {
+    vi.mocked(api.listAffectedDevices).mockRejectedValueOnce(new Error('500 Internal Server Error'));
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    // CVE description must still appear despite the affected-devices failure
+    await waitFor(() => {
+      expect(screen.getByText('OpenSSH scp client vulnerability.')).toBeInTheDocument();
+    });
+    // An inline notice about the affected-devices failure must appear
+    expect(screen.getByText(/couldn'?t load affected devices/i)).toBeInTheDocument();
+  });
+
+  it('cveDetail rejects: panel wrapper, header, close button, and visible error body are present', async () => {
+    vi.mocked(api.cveDetail).mockRejectedValueOnce(new Error('404 Not Found'));
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    // The aside wrapper must remain
+    expect(screen.getByTestId('cve-detail-panel')).toBeInTheDocument();
+    // Close button must remain
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /close cve panel/i })).toBeInTheDocument();
+    });
+    // A visible error body — NOT a header-only panel
+    expect(screen.getByText(/couldn'?t load cve detail/i)).toBeInTheDocument();
+  });
+
+  it('sparse-but-resolved detail: no-enrichment copy and NVD fallback link both present', async () => {
+    const sparseDetail: CveDetailDto = {
+      cveId: 'CVE-2020-15778',
+      published: null,
+      lastModified: '2024-01-15T00:00:00Z',
+      vulnStatus: null,
+      description: null,
+      cvssV31Score: null,
+      cvssV31Vector: null,
+      cvssV30Score: null,
+      cvssV30Vector: null,
+      cvssV2Score: null,
+      cvssV2Vector: null,
+      fetchedAt: null,
+      rawJson: '{}',
+      kev: false,
+      epssScore: null,
+      compositeScore: null,
+    };
+    vi.mocked(api.cveDetail).mockResolvedValueOnce(sparseDetail);
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    // No-enrichment copy must appear
+    await waitFor(() => {
+      expect(screen.getByText(/no additional detail/i)).toBeInTheDocument();
+    });
+    // NVD fallback link must still appear
+    expect(screen.getByRole('link', { name: /nvd\.nist\.gov/i })).toBeInTheDocument();
+  });
 });
