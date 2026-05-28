@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { DevicePicker } from '../components/DevicePicker';
 import { TopologyView } from '../components/TopologyView';
-import { type HighlightPath, makeEdgeKey } from '../components/topologyConstants';
+import { type HighlightPath, makeEdgeKey, EDGE_STYLES } from '../components/topologyConstants';
+import { RiskTierKey } from '../components/RiskTierKey';
 import { api } from '../api/client';
 import type { Device, DeviceRiskDto, HopDto, ShortestPathResponse } from '../api/types';
+
+const EDGE_KEY_ENTRIES: ReadonlyArray<{ key: keyof typeof EDGE_STYLES; label: string }> = [
+  { key: 'subnet',       label: 'Subnet link' },
+  { key: 'gateway',      label: 'Gateway hub' },
+  { key: 'dockerBridge', label: 'Docker bridge' },
+  { key: 'attackPath',   label: 'Attack path' },
+];
 
 interface Props {
   /** When false, render an ADMIN-required notice and no controls. */
@@ -213,7 +221,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
           </p>
         )}
       </section>
-      <section className="h-[600px] border border-gray-200 rounded bg-gray-50">
+      <section className="relative h-[600px] border border-gray-200 rounded bg-gray-50">
         <TopologyView
           devices={devices}
           risksById={risksById}
@@ -224,6 +232,22 @@ export function AttackGraphPage({ isAdmin }: Props) {
           onBackgroundClick={() => { /* noop */ }}
           highlightPath={highlight}
         />
+        <div className="absolute top-2 right-2 bg-white/95 border border-gray-200 rounded shadow-sm p-2 text-xs space-y-2 z-10">
+          <RiskTierKey />
+          <ul data-testid="attack-graph-edge-key" className="space-y-1">
+            {EDGE_KEY_ENTRIES.map(({ key, label }) => (
+              <li key={key} className="flex items-center gap-2">
+                <span
+                  data-testid={`edge-swatch-${key}`}
+                  className="inline-block w-3 h-3 rounded-sm"
+                  style={{ backgroundColor: EDGE_STYLES[key].color }}
+                  aria-hidden="true"
+                />
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
     </div>
   );
