@@ -1,24 +1,90 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OtProbePanel } from '../components/OtProbePanel';
 import { api } from '../api/client';
 
 vi.mock('../api/client', () => ({
   api: {
     probeOt: vi.fn(),
+    listDevices: vi.fn(),
+    probeOtOnce: vi.fn(),
   },
 }));
 
 const probeOt = vi.mocked(api.probeOt);
+const listDevices = vi.mocked(api.listDevices);
+const probeOtOnce = vi.mocked(api.probeOtOnce);
+
+const MOCK_PROBE_RESULT = {
+  host: '127.0.0.1',
+  port: 502,
+  protocol: 'MODBUS_TCP' as const,
+  vendor: 'Castellum',
+  product: 'MOCK-1',
+  version: '1.0',
+  rawFields: { '0': 'Castellum', '1': 'MOCK-1' },
+  deviceId: 5,
+  serviceId: 6,
+  observedAt: '2026-05-26T12:00:00Z',
+};
+
+function makePage(ips: string[]) {
+  return {
+    content: ips.map((ip, i) => ({
+      id: i + 1,
+      ipAddress: ip,
+      hostname: null,
+      macAddress: null,
+      firstSeen: null,
+      lastSeen: null,
+      criticality: 'LOW' as const,
+      discoveryScope: 'HOME' as const,
+      lastSeenIface: null,
+      discoverySource: null,
+      serviceCount: 0,
+      osName: null,
+      osAccuracy: null,
+      osCpe: null,
+    })),
+    totalElements: ips.length,
+    totalPages: 1,
+    number: 0,
+    size: 200,
+  };
+}
 
 beforeEach(() => {
   probeOt.mockReset();
+  listDevices.mockReset();
+  probeOtOnce.mockReset();
+  // Default: listDevices resolves empty, probeOtOnce never called
+  listDevices.mockResolvedValue(makePage([]));
 });
 
+// Safety net: never let a fake-timer test leak its timer state into the next
+// test (a timed-out fake-timer case may skip its own restore in finally).
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+// ---------------------------------------------------------------------------
+// Helper: open the advanced toggle so the single-protocol form is accessible
+// ---------------------------------------------------------------------------
+function openAdvancedToggle() {
+  // The single-protocol form lives under <details data-testid="ot-advanced-toggle">
+  fireEvent.click(screen.getByTestId('ot-advanced-toggle'));
+}
+
 describe('<OtProbePanel />', () => {
+  // -------------------------------------------------------------------------
+  // Existing tests — revised to open the advanced toggle before querying
+  // single-protocol controls (AC4: form relocated under ot-advanced-toggle)
+  // -------------------------------------------------------------------------
+
   it('VIEWER sees the panel read-only (controls disabled, badge shown)', () => {
     render(<OtProbePanel isAdmin={false} />);
     expect(screen.getByText(/Read-only — ADMIN required/i)).toBeInTheDocument();
+    openAdvancedToggle();
     expect(screen.getByTestId('ot-host-input')).toBeDisabled();
     expect(screen.getByTestId('ot-port-input')).toBeDisabled();
     expect(screen.getByTestId('ot-protocol-select')).toBeDisabled();
@@ -26,20 +92,10 @@ describe('<OtProbePanel />', () => {
   });
 
   it('ADMIN can submit a probe and the result renders', async () => {
-    probeOt.mockResolvedValueOnce({
-      host: '127.0.0.1',
-      port: 502,
-      protocol: 'MODBUS_TCP',
-      vendor: 'Castellum',
-      product: 'MOCK-1',
-      version: '1.0',
-      rawFields: { '0': 'Castellum', '1': 'MOCK-1' },
-      deviceId: 5,
-      serviceId: 6,
-      observedAt: '2026-05-26T12:00:00Z',
-    });
+    probeOt.mockResolvedValueOnce(MOCK_PROBE_RESULT);
 
     render(<OtProbePanel isAdmin={true} />);
+    openAdvancedToggle();
     fireEvent.change(screen.getByTestId('ot-host-input'), { target: { value: '127.0.0.1' } });
     fireEvent.click(screen.getByRole('button', { name: /Run probe/i }));
 
@@ -58,6 +114,7 @@ describe('<OtProbePanel />', () => {
 
   it('changing the protocol updates the default port', () => {
     render(<OtProbePanel isAdmin={true} />);
+    openAdvancedToggle();
     const portInput = screen.getByTestId('ot-port-input') as HTMLInputElement;
     expect(portInput.value).toBe('502');
 
@@ -70,6 +127,7 @@ describe('<OtProbePanel />', () => {
 
   it('protocol dropdown lists only read-fingerprint protocols (no write protocols)', () => {
     render(<OtProbePanel isAdmin={true} />);
+    openAdvancedToggle();
     const select = screen.getByTestId('ot-protocol-select') as HTMLSelectElement;
     const values = Array.from(select.options).map(o => o.value).sort();
     // Constraint: protocol values are read-fingerprint only — must match backend OtProtocol enum exactly.
@@ -79,6 +137,7 @@ describe('<OtProbePanel />', () => {
   it('renders an error banner on probe failure', async () => {
     probeOt.mockRejectedValueOnce(new Error('502 unreachable'));
     render(<OtProbePanel isAdmin={true} />);
+    openAdvancedToggle();
     fireEvent.click(screen.getByRole('button', { name: /Run probe/i }));
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/502 unreachable/);
@@ -97,5 +156,268 @@ describe('<OtProbePanel />', () => {
   it('shows the operator how to verify a probe ran (verify-help note)', () => {
     render(<OtProbePanel isAdmin={true} />);
     expect(screen.getByTestId('ot-verify-help')).toHaveTextContent(/OT\/ICS protocols detected/i);
+  });
+
+  // -------------------------------------------------------------------------
+  // New tests — AC1 / AC3 / AC4 / VIEWER gating on sweep button
+  // -------------------------------------------------------------------------
+
+  it('AC1 — sweep button exists and dispatches probeOtOnce for each host × protocol', async () => {
+    vi.useFakeTimers();
+    try {
+      const hosts = ['192.168.1.10', '192.168.1.20'];
+      listDevices.mockResolvedValue(makePage(hosts));
+
+      // probeOtOnce resolves immediately for every cell
+      probeOtOnce.mockResolvedValue({
+        ...MOCK_PROBE_RESULT,
+        vendor: 'ACME',
+        product: 'PLC-v1',
+      });
+
+      render(<OtProbePanel isAdmin={true} />);
+
+      // The primary sweep button must exist without opening the toggle
+      const sweepBtn = screen.getByTestId('ot-sweep-all-btn');
+      expect(sweepBtn).toBeInTheDocument();
+
+      fireEvent.click(sweepBtn);
+
+      // Drain all pacing timers so the orchestrator completes
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      // All 8 combinations (2 hosts × 4 protocols) must be probed
+      expect(probeOtOnce).toHaveBeenCalledTimes(8);
+
+      // Verify all 4 protocols appear across the calls
+      const calledProtocols = probeOtOnce.mock.calls.map(c => c[1]);
+      expect(calledProtocols).toContain('MODBUS_TCP');
+      expect(calledProtocols).toContain('DNP3');
+      expect(calledProtocols).toContain('S7COMM');
+      expect(calledProtocols).toContain('BACNET_IP');
+
+      // Verify default ports used
+      const callMap = probeOtOnce.mock.calls.map(c => ({ host: c[0], protocol: c[1], port: c[2] }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'MODBUS_TCP', port: 502 }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'DNP3', port: 20000 }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'S7COMM', port: 102 }));
+      expect(callMap).toContainEqual(expect.objectContaining({ protocol: 'BACNET_IP', port: 47808 }));
+
+      // The retrying probeOt must NOT be used by the sweep path
+      expect(probeOt).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('AC3 — ot-sweep-progress shows running tally and ot-sweep-grid shows per-cell status', async () => {
+    vi.useFakeTimers();
+    try {
+      const hosts = ['10.0.0.1'];
+      listDevices.mockResolvedValue(makePage(hosts));
+
+      // Resolve all 4 cells immediately
+      probeOtOnce.mockResolvedValue({
+        ...MOCK_PROBE_RESULT,
+        host: '10.0.0.1',
+        vendor: 'ACME',
+        product: 'PLC-v2',
+      });
+
+      render(<OtProbePanel isAdmin={true} />);
+
+      fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+      // Progress element must appear (grid is shown as soon as sweep starts)
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByTestId('ot-sweep-progress')).toBeInTheDocument();
+      expect(screen.getByTestId('ot-sweep-grid')).toBeInTheDocument();
+
+      // After all cells settle, progress shows 4/4
+      expect(screen.getByTestId('ot-sweep-progress')).toHaveTextContent('4/4');
+
+      // Each per-cell testid must exist in the grid
+      const protocols = ['MODBUS_TCP', 'DNP3', 'S7COMM', 'BACNET_IP'];
+      for (const proto of protocols) {
+        expect(screen.getByTestId(`ot-sweep-cell-10.0.0.1-${proto}`)).toBeInTheDocument();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('AC3 — partial results appear before all cells complete', async () => {
+    vi.useFakeTimers();
+    try {
+      const hosts = ['10.0.0.1'];
+      listDevices.mockResolvedValue(makePage(hosts));
+
+      // Use individual resolvers so we control settlement order
+      let resolveFirst!: (v: typeof MOCK_PROBE_RESULT) => void;
+      let resolveRest!: (v: typeof MOCK_PROBE_RESULT) => void;
+
+      const firstSettled = new Promise<typeof MOCK_PROBE_RESULT>((res) => { resolveFirst = res; });
+      const restSettled = new Promise<typeof MOCK_PROBE_RESULT>((res) => { resolveRest = res; });
+
+      // First call uses a deferred promise; subsequent calls use another deferred
+      probeOtOnce
+        .mockReturnValueOnce(firstSettled)
+        .mockReturnValue(restSettled);
+
+      render(<OtProbePanel isAdmin={true} />);
+      fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+      // Advance timers enough for the first pacing gap (MODBUS_TCP = 500ms) to elapse
+      // and the first probe to be dispatched
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+
+      // Settle the first probe and flush microtasks
+      await act(async () => {
+        resolveFirst({ ...MOCK_PROBE_RESULT, host: '10.0.0.1', vendor: 'PartialVendor' });
+        // flush microtasks so the orchestrator processes the resolved promise
+        await Promise.resolve();
+      });
+
+      // Progress should appear and show at least 1 completed
+      expect(screen.getByTestId('ot-sweep-progress')).toBeInTheDocument();
+      const progress = screen.getByTestId('ot-sweep-progress');
+      expect(progress.textContent).toMatch(/\d+\/4/);
+
+      // Now resolve the rest and drain all remaining timers. runAllTimersAsync
+      // flushes the orchestrator to completion, so assert directly — a waitFor
+      // here would deadlock under fake timers (its polling never advances).
+      await act(async () => {
+        resolveRest({ ...MOCK_PROBE_RESULT, host: '10.0.0.1' });
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByTestId('ot-sweep-progress')).toHaveTextContent('4/4');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('AC4 — advanced toggle exposes the single-protocol form which still dispatches api.probeOt', async () => {
+    probeOt.mockResolvedValueOnce(MOCK_PROBE_RESULT);
+
+    render(<OtProbePanel isAdmin={true} />);
+
+    // The advanced toggle must exist
+    const toggle = screen.getByTestId('ot-advanced-toggle');
+    expect(toggle).toBeInTheDocument();
+
+    // Before opening: single-protocol controls may not be visible
+    // Open the toggle
+    fireEvent.click(toggle);
+
+    // Existing single-protocol controls must be present
+    expect(screen.getByTestId('ot-host-input')).toBeInTheDocument();
+    expect(screen.getByTestId('ot-port-input')).toBeInTheDocument();
+    expect(screen.getByTestId('ot-protocol-select')).toBeInTheDocument();
+
+    // Submit the single-protocol form
+    fireEvent.change(screen.getByTestId('ot-host-input'), { target: { value: '10.0.0.5' } });
+    fireEvent.click(screen.getByRole('button', { name: /Run probe/i }));
+
+    await waitFor(() => {
+      expect(probeOt).toHaveBeenCalledWith({
+        host: '10.0.0.5',
+        port: 502,
+        protocol: 'MODBUS_TCP',
+      });
+    });
+
+    // Result renders under the advanced section
+    await waitFor(() => {
+      expect(screen.getByTestId('ot-probe-result')).toHaveTextContent('Castellum');
+    });
+
+    // The sweep path (probeOtOnce) must NOT have been called by the single-protocol form
+    expect(probeOtOnce).not.toHaveBeenCalled();
+  });
+
+  it('VIEWER — sweep button is disabled', () => {
+    render(<OtProbePanel isAdmin={false} />);
+    expect(screen.getByTestId('ot-sweep-all-btn')).toBeDisabled();
+  });
+
+  // -------------------------------------------------------------------------
+  // NB5 — listDevices() failure surfaces as sweep error
+  // -------------------------------------------------------------------------
+
+  it('NB5 — listDevices failure shows sweep error and resets sweeping state', async () => {
+    listDevices.mockRejectedValueOnce(new Error('boom'));
+
+    render(<OtProbePanel isAdmin={true} />);
+
+    fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ot-sweep-error')).toHaveTextContent('boom');
+      expect(screen.getByTestId('ot-sweep-error')).toHaveAttribute('role', 'alert');
+    });
+
+    // sweeping state must have reset — button label back to non-sweeping text
+    expect(screen.getByTestId('ot-sweep-all-btn')).toHaveTextContent('Probe all OT/ICS protocols');
+
+    // probeOtOnce must not have been called
+    expect(probeOtOnce).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // NB3 — operator stop button aborts the sweep cleanly
+  // -------------------------------------------------------------------------
+
+  it('NB3 — stop button aborts sweep and returns to non-sweeping state without error', async () => {
+    vi.useFakeTimers();
+    try {
+      const hosts = ['10.0.0.1'];
+      listDevices.mockResolvedValue(makePage(hosts));
+
+      // probeOtOnce returns a promise that never resolves on its own — keeps sweep in-flight
+      let resolveProbe!: (v: typeof MOCK_PROBE_RESULT) => void;
+      const deferredProbe = new Promise<typeof MOCK_PROBE_RESULT>((res) => {
+        resolveProbe = res;
+      });
+      probeOtOnce.mockReturnValue(deferredProbe);
+
+      render(<OtProbePanel isAdmin={true} />);
+
+      fireEvent.click(screen.getByTestId('ot-sweep-all-btn'));
+
+      // Advance timers to let listDevices resolve and the sweep start
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      // Stop button should be visible while sweeping
+      expect(screen.getByTestId('ot-sweep-stop-btn')).toBeInTheDocument();
+
+      // Click stop
+      fireEvent.click(screen.getByTestId('ot-sweep-stop-btn'));
+
+      // Drain all remaining timers so runOtSweep resolves via abort
+      await act(async () => {
+        resolveProbe({ ...MOCK_PROBE_RESULT });
+        await vi.runAllTimersAsync();
+      });
+
+      // UI must return to non-sweeping: stop button gone, sweep button re-enabled
+      expect(screen.queryByTestId('ot-sweep-stop-btn')).not.toBeInTheDocument();
+      expect(screen.getByTestId('ot-sweep-all-btn')).not.toBeDisabled();
+      expect(screen.getByTestId('ot-sweep-all-btn')).toHaveTextContent('Probe all OT/ICS protocols');
+
+      // No error banner for an operator-initiated stop
+      expect(screen.queryByTestId('ot-sweep-error')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

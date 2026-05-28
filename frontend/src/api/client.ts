@@ -8,7 +8,7 @@ import type {
   IntegrationConfigDto, IntegrationProbeRequest, IntegrationProbeResult,
   IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
-  OtProbeRequest, OtProbeResponse,
+  OtProbeRequest, OtProbeResponse, OtProtocol,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
   Scan, ScanDetail, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest,
   ShortestPathResponse,
@@ -281,6 +281,39 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  /**
+   * POST /api/ot-probe — single-shot, non-retrying variant for fan-out sweeps.
+   *
+   * Bypasses the {@link request} retry wrapper intentionally: retrying a
+   * struggling PLC doubles load at exactly the moment backing off is wanted.
+   * The AIMD orchestrator (Task 2.1) is the sole retry authority.
+   */
+  probeOtOnce: async (
+    host: string,
+    protocol: OtProtocol,
+    port: number,
+    signal?: AbortSignal,
+  ): Promise<OtProbeResponse> => {
+    const token = getToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const init: RequestInit = {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ host, port, protocol } satisfies OtProbeRequest),
+    };
+    if (signal !== undefined) init.signal = signal;
+    const response = await fetch(`${BASE}/api/ot-probe`, init);
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return (await response.json()) as OtProbeResponse;
+  },
 
   /**
    * POST /api/auth/change-password — authenticated. Returns 204 on success.
