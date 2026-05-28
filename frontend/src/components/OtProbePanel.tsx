@@ -76,6 +76,15 @@ export function OtProbePanel({ isAdmin }: Props) {
         Read-only fingerprint. The probe never writes to the target device — it only
         reads identification fields exposed by the protocol.
       </p>
+      <p data-testid="ot-protocol-help" className="text-xs text-gray-500 mb-3">
+        Checks four ICS protocols: Modbus/TCP (502), DNP3 (20000), S7comm (102), BACnet/IP (47808).
+      </p>
+      <p data-testid="ot-verify-help" className="text-xs text-gray-500 mb-3">
+        A successful probe persists the device and an OT service, then shows vendor / product /
+        version below (raw protocol fields — including the read-only unit/slave id — under the
+        expander). Confirm it ran by opening the device in the topology detail panel: it flags an
+        “OT/ICS protocols detected” indicator and an “ICS / OT” badge on the service row.
+      </p>
       <form onSubmit={handleSubmit} className="grid gap-3 sm:grid-cols-3">
         <label className="text-sm sm:col-span-2">
           <span className="block text-gray-700 mb-1">Target host (IPv4)</span>
