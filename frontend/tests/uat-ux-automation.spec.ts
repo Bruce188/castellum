@@ -54,7 +54,8 @@ test.describe('UAT F5–F9 (admin)', () => {
       // deterministic in-flight/abort path is covered by component tests.
       const deactivate = page.getByTestId('passive-deactivate-btn');
       if (await deactivate.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await deactivate.click();
+        // Bounded: activation may resolve and swap Deactivate→Activate mid-click.
+        await deactivate.click({ timeout: 3_000 }).catch(() => {});
       }
       await expect(panel).toBeVisible();
       // Tolerate slow re-render of the idle Activate affordance after the toggle dance.
@@ -108,7 +109,9 @@ test.describe('UAT F5–F9 (admin)', () => {
     // is covered by component tests (UnifiedScanControl.test.tsx).
     const stop = page.getByTestId('unified-scan-stop-btn');
     if (await stop.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await stop.click().catch(() => {});
+      // Bounded click: the scan may finish mid-click and remove Stop, so cap the action — an
+      // unbounded click auto-retries up to the whole 30s test budget waiting for a gone element.
+      await stop.click({ timeout: 3_000 }).catch(() => {});
     }
     await expect(btn).toBeVisible({ timeout: 10_000 });
   });
