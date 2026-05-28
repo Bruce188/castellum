@@ -4,10 +4,10 @@ import { DevicePicker } from '../components/DevicePicker';
 import type { Device } from '../api/types';
 
 const DEVICES: Device[] = [
-  { id: 1, ipAddress: '10.0.0.1', hostname: 'web-prod', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0 },
-  { id: 2, ipAddress: '10.0.0.2', hostname: 'web-staging', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0 },
-  { id: 3, ipAddress: '172.16.0.5', hostname: 'db-primary', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0 },
-  { id: 4, ipAddress: '172.16.0.6', hostname: null, macAddress: null, firstSeen: null, lastSeen: null, criticality: 'LOW', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0 },
+  { id: 1, ipAddress: '10.0.0.1', hostname: 'web-prod', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
+  { id: 2, ipAddress: '10.0.0.2', hostname: 'web-staging', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
+  { id: 3, ipAddress: '172.16.0.5', hostname: 'db-primary', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
+  { id: 4, ipAddress: '172.16.0.6', hostname: null, macAddress: null, firstSeen: null, lastSeen: null, criticality: 'LOW', discoveryScope: 'HOME', lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
 ];
 
 describe('<DevicePicker />', () => {

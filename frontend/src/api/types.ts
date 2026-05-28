@@ -30,6 +30,12 @@ export interface Device {
   discoverySource: DiscoverySource | null;
   /** Count of network services observed on this device (from GET /api/devices serviceCount). */
   serviceCount: number;
+  /** nmap -O OS-fingerprint match name (e.g. "Linux 5.4 - 5.15"); null until an OS scan matches. */
+  osName: string | null;
+  /** OS-match confidence 0-100 from nmap's osmatch accuracy; null when no match. */
+  osAccuracy: number | null;
+  /** Optional raw cpe:/o: OS CPE from nmap osclass; null when absent. */
+  osCpe: string | null;
 }
 
 export interface NetworkService {

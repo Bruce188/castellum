@@ -15,6 +15,9 @@ const device: Device = {
   lastSeenIface: null,
   discoverySource: null,
   serviceCount: 0,
+  osName: null,
+  osAccuracy: null,
+  osCpe: null,
 };
 
 const risk: DeviceRiskDto = {
@@ -225,7 +228,6 @@ describe('<DeviceDetailPanel />', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it('os_renders_nameAndAccuracy_whenPresent', () => {
-    // @ts-expect-error osName/osAccuracy/osCpe not yet on Device interface (RED phase)
     const d: Device = { ...device, osName: 'Linux 5.4 - 5.15', osAccuracy: 96, osCpe: 'cpe:/o:linux:linux_kernel:5' };
     render(
       <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />
@@ -242,7 +244,6 @@ describe('<DeviceDetailPanel />', () => {
   });
 
   it('os_rendersNameWithoutAccuracy_whenAccuracyNull', () => {
-    // @ts-expect-error osName/osAccuracy not yet on Device interface (RED phase)
     const d: Device = { ...device, osName: 'Linux', osAccuracy: null };
     render(
       <DeviceDetailPanel device={d} risk={risk} services={[]} onClose={() => {}} />

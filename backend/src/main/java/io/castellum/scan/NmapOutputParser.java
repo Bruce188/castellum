@@ -28,7 +28,7 @@ import java.util.List;
  * <p>For services it captures the nmap service {@code name}, {@code product}, the
  * raw {@code version} banner, and the first application CPE ({@code cpe:/a:...}),
  * converted to a CPE 2.3 formatted string. OS CPEs ({@code cpe:/o:...}) are ignored
- * for service correlation.
+ * for service correlation but are captured verbatim in the host OS match record.
  *
  * <p>No Spring dependencies are invoked; no repositories are touched. This class is
  * used exclusively by {@code ScanExecutionService}.
@@ -43,8 +43,11 @@ public class NmapOutputParser {
     // to Discovery / NetworkService domain objects).
     // -----------------------------------------------------------------------
 
+    /** OS identification result from nmap {@code <os><osmatch>} elements. */
+    public record OsMatch(String name, Integer accuracy, String cpe) {}
+
     /** A discovered host from nmap output. */
-    public record DiscoveredHost(String ipAddress, String hostname) {}
+    public record DiscoveredHost(String ipAddress, String hostname, OsMatch os) {}
 
     /**
      * A discovered open port/service from nmap output.
@@ -105,7 +108,7 @@ public class NmapOutputParser {
             }
             String hostname = firstHostname(host);
 
-            hosts.add(new DiscoveredHost(ip, hostname));
+            hosts.add(new DiscoveredHost(ip, hostname, osMatch(host)));
 
             for (Element port : openPorts(host)) {
                 DiscoveredService svc = toService(ip, port);
@@ -116,6 +119,62 @@ public class NmapOutputParser {
         }
 
         return new ParsedScan(hosts, services);
+    }
+
+    // -----------------------------------------------------------------------
+    // OS fingerprint helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Extract the best OS match from a {@code <host>} element's {@code <os><osmatch>} children.
+     * Nmap orders {@code <osmatch>} elements highest-accuracy-first, so we take the first one.
+     */
+    private static OsMatch osMatch(Element host) {
+        Element os = firstChildElement(host, "os");
+        if (os == null) {
+            return null;
+        }
+        NodeList matches = os.getElementsByTagName("osmatch");
+        if (matches.getLength() == 0) {
+            return null;
+        }
+        // Nmap emits <osmatch> elements highest-accuracy-first — take the first.
+        Element osmatch = (Element) matches.item(0);
+
+        String name = emptyToNull(osmatch.getAttribute("name"));
+
+        Integer accuracy;
+        try {
+            String accStr = osmatch.getAttribute("accuracy");
+            accuracy = (accStr == null || accStr.isEmpty()) ? null : Integer.parseInt(accStr);
+        } catch (NumberFormatException e) {
+            accuracy = null;
+        }
+
+        // Prefer the cpe attribute on the first <osclass> child; else look for a <cpe> text node.
+        String cpe = null;
+        Element osclass = firstChildElement(osmatch, "osclass");
+        if (osclass != null) {
+            String attr = osclass.getAttribute("cpe");
+            if (attr != null && attr.startsWith("cpe:/o:")) {
+                cpe = emptyToNull(attr);
+            }
+        }
+        if (cpe == null) {
+            NodeList cpeNodes = osmatch.getElementsByTagName("cpe");
+            for (int i = 0; i < cpeNodes.getLength(); i++) {
+                String val = cpeNodes.item(i).getTextContent();
+                if (val != null) {
+                    val = val.trim();
+                    if (val.startsWith("cpe:/o:")) {
+                        cpe = emptyToNull(val);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return new OsMatch(name, accuracy, cpe);
     }
 
     // -----------------------------------------------------------------------
