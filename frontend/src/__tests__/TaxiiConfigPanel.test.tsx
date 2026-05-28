@@ -8,17 +8,21 @@ vi.mock('../api/client', () => ({
     getIntegrationConfig: vi.fn(),
     saveIntegrationConfig: vi.fn(),
     pushIntegration: vi.fn(),
+    probeIntegration: vi.fn(),
   },
 }));
 
 const getIntegrationConfig = vi.mocked(api.getIntegrationConfig);
 const saveIntegrationConfig = vi.mocked(api.saveIntegrationConfig);
 const pushIntegration = vi.mocked(api.pushIntegration);
+const probeIntegration = vi.mocked(api.probeIntegration);
 
 beforeEach(() => {
   getIntegrationConfig.mockReset();
   saveIntegrationConfig.mockReset();
   pushIntegration.mockReset();
+  probeIntegration.mockReset();
+  probeIntegration.mockResolvedValue({ reachable: true, detail: 'ok' });
 });
 
 describe('<TaxiiConfigPanel />', () => {
@@ -144,5 +148,81 @@ describe('<TaxiiConfigPanel />', () => {
     await waitFor(() => {
       expect(screen.getByTestId('taxii-last-push-status').textContent).toContain('connection refused');
     });
+  });
+
+  // AC4 cases — red phase; the component additions do not exist yet
+
+  it('AC4 detected->prefilled: blank config (404) + reachable probe prefills docker URL and shows detected note', async () => {
+    getIntegrationConfig.mockRejectedValueOnce(new Error('404 Not Found'));
+    probeIntegration.mockResolvedValue({ reachable: true, detail: 'ok' });
+
+    render(<TaxiiConfigPanel isAdmin={true} />);
+
+    await waitFor(() => {
+      expect((screen.getByTestId('taxii-url-input') as HTMLInputElement).value)
+        .toBe('http://localhost:9000/taxii2/');
+    });
+    expect(screen.getByTestId('taxii-detected-note')).toBeInTheDocument();
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
+  });
+
+  it('AC4 preset-selected->filled: selecting a preset populates url + collection and never calls saveIntegrationConfig', async () => {
+    getIntegrationConfig.mockRejectedValueOnce(new Error('404 Not Found'));
+
+    render(<TaxiiConfigPanel isAdmin={true} />);
+    await waitFor(() => expect(getIntegrationConfig).toHaveBeenCalled());
+
+    const select = screen.getByTestId('taxii-preset-select');
+    // Fire a change to any non-blank preset option value
+    const presetUrl = 'https://cti-taxii.mitre.org/taxii/';
+    fireEvent.change(select, { target: { value: presetUrl } });
+
+    await waitFor(() => {
+      expect((screen.getByTestId('taxii-url-input') as HTMLInputElement).value)
+        .toBe(presetUrl);
+    });
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
+  });
+
+  it('AC4 manual-value-not-clobbered: saved config.url survives auto-detect', async () => {
+    getIntegrationConfig.mockResolvedValueOnce({
+      id: 2, integrationType: 'TAXII',
+      config: { url: 'https://saved.example', collectionId: 'c1' },
+      credentialsSet: true, lastPushAt: null, lastPushStatus: null,
+      createdAt: '2026-05-26T00:00:00Z', updatedAt: '2026-05-26T00:00:00Z',
+    });
+    probeIntegration.mockResolvedValue({ reachable: true, detail: 'ok' });
+
+    render(<TaxiiConfigPanel isAdmin={true} />);
+
+    await waitFor(() => {
+      expect((screen.getByTestId('taxii-url-input') as HTMLInputElement).value)
+        .toBe('https://saved.example');
+    });
+    // Give the async detect() a chance to complete and assert it did not clobber
+    await waitFor(() => expect(probeIntegration).toHaveBeenCalled());
+    expect((screen.getByTestId('taxii-url-input') as HTMLInputElement).value)
+      .toBe('https://saved.example');
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
+  });
+
+  it('AC4 unreachable->status-shown: selecting a preset then unreachable probe renders taxii-reachability unreachable state', async () => {
+    getIntegrationConfig.mockRejectedValueOnce(new Error('404 Not Found'));
+    probeIntegration.mockResolvedValue({ reachable: false, detail: 'connection refused' });
+
+    render(<TaxiiConfigPanel isAdmin={true} />);
+    await waitFor(() => expect(getIntegrationConfig).toHaveBeenCalled());
+
+    const presetUrl = 'https://cti-taxii.mitre.org/taxii/';
+    fireEvent.change(screen.getByTestId('taxii-preset-select'), { target: { value: presetUrl } });
+
+    await waitFor(() => {
+      const indicator = screen.getByTestId('taxii-reachability');
+      expect(indicator).toBeInTheDocument();
+      // The indicator must communicate the unreachable state in text or aria
+      expect(indicator.textContent?.toLowerCase() ?? indicator.getAttribute('data-status') ?? '')
+        .toMatch(/unreachable|error|failed|refused/i);
+    });
+    expect(saveIntegrationConfig).not.toHaveBeenCalled();
   });
 });
