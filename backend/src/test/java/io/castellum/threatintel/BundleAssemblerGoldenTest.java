@@ -20,6 +20,9 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 
+import io.castellum.threatintel.stix.StixObject;
+import io.castellum.threatintel.stix.StixVulnerability;
+
 import java.math.BigDecimal;
 import java.net.URL;
 import java.nio.file.Files;
@@ -28,9 +31,13 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 /**
  * Golden-file test for BundleAssembler. Seeds 3 devices + 4 CVEs and validates:
@@ -162,6 +169,32 @@ class BundleAssemblerGoldenTest {
         assembler = new BundleAssembler(
             deviceRepository, networkServiceRepository, cveRepository,
             epssScoreRepository, kevEntryRepository, cveMatcher, FIXED_CLOCK);
+    }
+
+    @Test
+    void assembledBundle_idKeyedObjectSet_hasStablePerTypeCounts() {
+        StixBundle bundle = assembler.assemble();
+
+        Map<String, StixObject> byId = new LinkedHashMap<>();
+        for (StixObject o : bundle.objects()) {
+            byId.put(o.id(), o);
+        }
+        assertThat(byId).as("id-keyed object set size").hasSize(15);
+
+        Map<String, Long> byType = bundle.objects().stream()
+            .collect(Collectors.groupingBy(
+                o -> o.getClass().getSimpleName(), Collectors.counting()));
+        assertThat(byType).containsOnly(
+            entry("StixIdentity", 1L),
+            entry("StixInfrastructure", 3L),
+            entry("StixVulnerability", 4L),
+            entry("StixRelationship", 5L),
+            entry("StixIndicator", 2L));
+
+        assertThat(byId.values().stream()
+            .filter(o -> o instanceof StixVulnerability)
+            .map(o -> ((StixVulnerability) o).name()))
+            .contains("CVE-2026-0004");
     }
 
     @Test
