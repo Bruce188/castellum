@@ -81,6 +81,11 @@ public class DockerDiscoveryService {
         String json = cli.inspect(ids);
         List<DockerContainer> containers = parser.parse(json);
 
+        // Persistence note: each container/gateway upsert + service save commits independently
+        // (discover() is intentionally NOT @Transactional — the inverse of the all-or-nothing
+        // sweep DeviceUpsertService#upsertAll documents). A pass is fully idempotent — devices are
+        // keyed on IP, services on (deviceId, port, protocol) — so a mid-pass failure is healed by
+        // simply re-running discovery rather than leaving a half-written, un-replayable batch.
         Instant observedAt = clock.instant();
         List<Long> deviceIds = new ArrayList<>();
 

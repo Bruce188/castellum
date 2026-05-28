@@ -66,7 +66,7 @@ class DockerCliClientTest {
         String out = client.inspect(List.of("abc", "def"));
 
         assertThat(out).isEqualTo("[]");
-        assertThat(runner.invocations.get(0)).containsExactly("docker", "inspect", "abc", "def");
+        assertThat(runner.invocations.get(0)).containsExactly("docker", "inspect", "--", "abc", "def");
     }
 
     @Test

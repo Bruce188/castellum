@@ -84,9 +84,10 @@ public class DockerCliClient {
         if (ids == null || ids.isEmpty()) {
             return "[]";
         }
-        List<String> argv = new ArrayList<>(ids.size() + 2);
+        List<String> argv = new ArrayList<>(ids.size() + 3);
         argv.add("docker");
         argv.add("inspect");
+        argv.add("--"); // end-of-options guard: an id can never be parsed as a flag (defense-in-depth)
         argv.addAll(ids);
         return invoke(argv).stdout();
     }

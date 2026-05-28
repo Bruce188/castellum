@@ -308,4 +308,32 @@ class DockerDiscoveryServiceTest {
         // re-run upserts the same (deviceId, port, protocol) row, no duplicate
         assertThat(serviceRepo.findByDeviceId(db.getId())).hasSize(1);
     }
+
+    @Test
+    void discover_imageDowngrade_clearsStaleCpeAndVersion() throws Exception {
+        // First run: postgres:16 → version-bearing CPE persisted.
+        String v16 = """
+            [ { "Id": "pg", "Name": "/pg", "Config": { "Image": "postgres:16" },
+                "NetworkSettings": { "Ports": { "5432/tcp": null },
+                  "Networks": { "n": { "IPAddress": "172.40.0.2", "Gateway": "172.40.0.1" } } } } ]
+            """;
+        newService(v16, List.of("pg")).discover();
+        Device pg = repo.findByIpAddress("172.40.0.2").orElseThrow();
+        assertThat(serviceRepo.findByDeviceIdAndPortAndProtocol(pg.getId(), 5432, "tcp")
+                .orElseThrow().getCpe())
+            .isEqualTo("cpe:2.3:a:postgresql:postgresql:16:*:*:*:*:*:*:*");
+
+        // Re-tagged to a version-less image → stale CPE + version must be cleared in place,
+        // not left dangling (else CVE correlation would keep matching a version no longer running).
+        String latest = """
+            [ { "Id": "pg", "Name": "/pg", "Config": { "Image": "postgres:latest" },
+                "NetworkSettings": { "Ports": { "5432/tcp": null },
+                  "Networks": { "n": { "IPAddress": "172.40.0.2", "Gateway": "172.40.0.1" } } } } ]
+            """;
+        newService(latest, List.of("pg")).discover();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(pg.getId(), 5432, "tcp").orElseThrow();
+        assertThat(svc.getCpe()).isNull();
+        assertThat(svc.getVersion()).isNull();
+    }
 }
