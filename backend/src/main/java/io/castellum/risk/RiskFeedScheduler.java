@@ -160,10 +160,12 @@ public class RiskFeedScheduler {
     }
 
     /**
-     * Legacy delegate — keeps the existing @SpringBootTest wiring coverage green.
-     * Builds a transient row from the singleton and delegates to runFeedsOnce.
+     * Plain (NON-scheduled) delegate — keeps the existing @SpringBootTest wiring/order/isolation
+     * coverage green by exercising the real per-feed body. The ONLY scheduled entry point is
+     * {@link #tick()}; this method is deliberately not @Scheduled so the durable enable/disable
+     * flag and cron in {@code feed_sync_schedule} are the sole gate on automatic feed pulls
+     * (a second @Scheduled cron here would fire unconditionally, bypassing the enabled flag).
      */
-    @Scheduled(cron = "${castellum.risk.refresh-cron:0 0 6 * * *}", zone = "UTC")
     public void runFeeds() {
         FeedSyncSchedule row = repo.findById(FeedSyncSchedule.SINGLETON_ID).orElse(null);
         if (row == null) {
