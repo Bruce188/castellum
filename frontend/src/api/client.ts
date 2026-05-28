@@ -268,10 +268,11 @@ export const api = {
   },
 
   /** POST /api/discovery/passive — ADMIN-only. */
-  discoverPassive: (payload: PassiveDiscoveryRequest) =>
+  discoverPassive: (payload: PassiveDiscoveryRequest, signal?: AbortSignal) =>
     request<PassiveDiscoveryResponse>('/api/discovery/passive', {
       method: 'POST',
       body: JSON.stringify(payload),
+      signal,
     }),
 
   /** POST /api/ot-probe — ADMIN-only. Read-only fingerprint; never writes to the target. */
