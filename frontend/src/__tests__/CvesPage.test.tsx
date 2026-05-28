@@ -9,11 +9,15 @@ vi.mock('../api/client', () => ({
   api: {
     listFleetCves: vi.fn(),
     getDevice: vi.fn(),
+    cveDetail: vi.fn(),
+    listAffectedDevices: vi.fn(),
   },
 }));
 
 const listFleetCves = vi.mocked(api.listFleetCves);
 const getDevice = vi.mocked(api.getDevice);
+const cveDetail = vi.mocked(api.cveDetail);
+const listAffectedDevices = vi.mocked(api.listAffectedDevices);
 
 const baseCve: CveSummaryDto = {
   cveId: 'CVE-2024-12345',
@@ -702,5 +706,101 @@ describe('<CvesPage />', () => {
 
     const compositeBtn = screen.getByRole('button', { name: /Composite/i });
     expect(compositeBtn.textContent).toContain('↓');
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F8 — CVE row interaction (open detail drawer)
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('CVE row interaction', () => {
+    beforeEach(() => {
+      listFleetCves.mockResolvedValue(defaultPage);
+      cveDetail.mockResolvedValue({
+        cveId: 'CVE-2024-12345',
+        published: null,
+        lastModified: '2024-01-15T00:00:00Z',
+        vulnStatus: null,
+        description: 'Drawer description text.',
+        cvssV31Score: '8.1',
+        cvssV31Vector: null,
+        cvssV30Score: null,
+        cvssV30Vector: null,
+        cvssV2Score: null,
+        cvssV2Vector: null,
+        fetchedAt: null,
+        rawJson: null,
+        kev: false,
+        epssScore: null,
+        compositeScore: null,
+      });
+      listAffectedDevices.mockResolvedValue([]);
+    });
+
+    it('clicking a CVE row opens the detail drawer and calls cveDetail exactly once', async () => {
+      render(
+        <MemoryRouter initialEntries={['/cves']}>
+          <Routes><Route path="/cves" element={<CvesPage />} /></Routes>
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText('CVE-2024-12345'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('cve-detail-panel')).toBeInTheDocument()
+      );
+      expect(cveDetail).toHaveBeenCalledTimes(1);
+      expect(cveDetail).toHaveBeenCalledWith('CVE-2024-12345');
+    });
+
+    it('affected-nodes list renders from mocked reverse response', async () => {
+      listAffectedDevices.mockResolvedValue([
+        { deviceId: 42, hostname: 'host-1', ipAddress: '10.0.0.42',
+          matchedPort: 22, matchedService: 'openssh', matchedVersion: '8.2' },
+      ]);
+      render(
+        <MemoryRouter initialEntries={['/cves']}>
+          <Routes><Route path="/cves" element={<CvesPage />} /></Routes>
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument());
+      fireEvent.click(screen.getByText('CVE-2024-12345'));
+      await waitFor(() => expect(screen.getByText('host-1')).toBeInTheDocument());
+    });
+
+    it('zero-affected empty state renders in the drawer', async () => {
+      listAffectedDevices.mockResolvedValue([]);
+      render(
+        <MemoryRouter initialEntries={['/cves']}>
+          <Routes><Route path="/cves" element={<CvesPage />} /></Routes>
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument());
+      fireEvent.click(screen.getByText('CVE-2024-12345'));
+      await waitFor(() =>
+        expect(screen.getByText(/no affected devices/i)).toBeInTheDocument()
+      );
+    });
+
+    it('Enter key on a CVE row opens the detail drawer and calls cveDetail', async () => {
+      render(
+        <MemoryRouter initialEntries={['/cves']}>
+          <Routes><Route path="/cves" element={<CvesPage />} /></Routes>
+        </MemoryRouter>
+      );
+      await waitFor(() => expect(screen.getByText('CVE-2024-12345')).toBeInTheDocument());
+
+      // Find the <tr> row that contains the CVE id cell.
+      const cveIdCell = screen.getByText('CVE-2024-12345');
+      const row = cveIdCell.closest('tr');
+      expect(row).not.toBeNull();
+
+      fireEvent.keyDown(row!, { key: 'Enter' });
+
+      await waitFor(() =>
+        expect(screen.getByTestId('cve-detail-panel')).toBeInTheDocument()
+      );
+      expect(cveDetail).toHaveBeenCalledWith('CVE-2024-12345');
+    });
   });
 });
