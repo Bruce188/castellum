@@ -45,6 +45,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -740,5 +741,117 @@ class CveControllerTest {
             // Hamcrest nullValue() rather than doesNotExist().
             .andExpect(jsonPath("$.content[0].epssScore").value(nullValue()))
             .andExpect(jsonPath("$.content[0].compositeScore").value(nullValue()));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // F8 — reverse endpoint GET /api/cve/{cveId}/devices
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    void reverseEndpoint_compilationGate_dtoExists() throws Exception {
+        // RED: CveAffectedDeviceDto must not yet exist — this test fails to compile
+        // until the record is created in Task 1 GREEN.
+        io.castellum.web.dto.CveAffectedDeviceDto dto =
+            new io.castellum.web.dto.CveAffectedDeviceDto(1L, "host-1", "10.0.0.1", 22, "openssh", "8.2");
+        org.junit.jupiter.api.Assertions.assertEquals("host-1", dto.hostname());
+    }
+
+    @Test
+    void getAffectedDevices_matchingService_returnsDevice() throws Exception {
+        // The target CVE exists in the repository.
+        Cve cve = buildCve("CVE-2020-15778");
+        cve.setId(1L);
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+
+        // Fleet has one service whose CPE matches the target CVE.
+        NetworkService ssh = buildService(10L, 42L, "openssh", "openssh", "8.2");
+        ssh.setName("openssh");
+        when(networkServiceRepository.findAll()).thenReturn(List.of(ssh));
+        // Matcher returns the target CVE for this CPE.
+        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
+                .thenReturn(List.of(cve));
+
+        // Device hydration. The handler hydrates via deviceRepository.findAllById(keySet);
+        // match on anyIterable() since the controller passes a Map keySet (not a List).
+        Device device = new Device();
+        device.setId(42L);
+        device.setIpAddress("10.0.0.42");
+        device.setCriticality(Criticality.MEDIUM);
+        when(deviceRepository.findAllById(anyIterable())).thenReturn(List.of(device));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].deviceId").value(42))
+                .andExpect(jsonPath("$[0].ipAddress").value("10.0.0.42"))
+                .andExpect(jsonPath("$[0].matchedService").value("openssh"))
+                .andExpect(jsonPath("$[0].matchedPort").value(22))
+                .andExpect(jsonPath("$[0].matchedVersion").value("8.2"));
+    }
+
+    @Test
+    void getAffectedDevices_nonMatchingService_excluded() throws Exception {
+        Cve target = buildCve("CVE-2020-15778");
+        target.setId(1L);
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(target));
+
+        // Service whose CPE matches a DIFFERENT CVE (not the target).
+        NetworkService other = buildService(20L, 99L, "nginx", "nginx", "1.18");
+        other.setName("nginx");
+        Cve differentCve = buildCve("CVE-2021-23017");
+        differentCve.setId(5L);
+        when(networkServiceRepository.findAll()).thenReturn(List.of(other));
+        when(cveMatcher.findVulnerable("cpe:2.3:a:nginx:nginx:1.18:*:*:*:*:*:*:*"))
+                .thenReturn(List.of(differentCve));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void getAffectedDevices_versionOutsideRange_excluded() throws Exception {
+        Cve target = buildCve("CVE-2020-15778");
+        target.setId(1L);
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(target));
+
+        // Service version 9.0 — matcher returns empty (out of CVE's affected range).
+        NetworkService svc = buildService(30L, 55L, "openssh", "openssh", "9.0");
+        svc.setName("openssh");
+        when(networkServiceRepository.findAll()).thenReturn(List.of(svc));
+        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:9.0:*:*:*:*:*:*:*"))
+                .thenReturn(List.of()); // version 9.0 not in range → empty
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void getAffectedDevices_unknownCveId_returns404() throws Exception {
+        when(cveRepository.findByCveId("CVE-9999-9999")).thenReturn(Optional.empty());
+        mockMvc.perform(get("/api/cve/CVE-9999-9999/devices")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void getAffectedDevices_viewer_returns200() throws Exception {
+        Cve cve = buildCve("CVE-2020-15778");
+        cve.setId(1L);
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(cve));
+        when(networkServiceRepository.findAll()).thenReturn(List.of());
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void getAffectedDevices_anon_returns401() throws Exception {
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices").with(anonymous()))
+                .andExpect(status().isUnauthorized());
     }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { CveDetailPanel } from '../components/CveDetailPanel';
 import type { CveFleetSort, CveSummaryDto, Page } from '../api/types';
 
 const PAGE_SIZE = 25;
@@ -67,6 +68,8 @@ export function CvesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deviceLabel, setDeviceLabel] = useState<string | null>(null);
+  // F8 — CVE selected for the detail drawer (null = drawer closed).
+  const [selectedCveId, setSelectedCveId] = useState<string | null>(null);
 
   // Manual refresh path (Refresh button). Ref-based request-id versioning
   // discards results from any superseded in-flight invocation when the user
@@ -369,7 +372,15 @@ export function CvesPage() {
         </thead>
         <tbody>
           {visibleRows.map((cve) => (
-            <tr key={cve.cveId} className="border-b hover:bg-gray-50 select-none">
+            <tr
+              key={cve.cveId}
+              className="border-b hover:bg-gray-50 select-none cursor-pointer"
+              onClick={() => setSelectedCveId(cve.cveId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && setSelectedCveId(cve.cveId)}
+              aria-label={`View details for ${cve.cveId}`}
+            >
               <td className="px-2 py-1 border font-mono text-xs select-text">{cve.cveId}</td>
               <td className={`px-2 py-1 border tabular-nums ${severityClassFromString(cve.cvssV31Score)}`}>
                 {cve.cvssV31Score ?? '—'}
@@ -450,6 +461,11 @@ export function CvesPage() {
           </span>
         </div>
       )}
+
+      <CveDetailPanel
+        cveId={selectedCveId}
+        onClose={() => setSelectedCveId(null)}
+      />
     </div>
   );
 }

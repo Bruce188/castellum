@@ -142,6 +142,19 @@ export interface CveDetailDto {
   compositeScore: string | null;
 }
 
+/**
+ * One device returned by GET /api/cve/{cveId}/devices (reverse fleet match).
+ * Identifies the device and the first service that matched the target CVE.
+ */
+export interface CveAffectedDevice {
+  deviceId: number;
+  hostname: string | null;
+  ipAddress: string;
+  matchedPort: number;
+  matchedService: string | null;
+  matchedVersion: string | null;
+}
+
 /** Sort key for {@code GET /api/cve/fleet}. {@code undefined} → backend default (cvssV31Score DESC). */
 export type CveFleetSort = 'composite' | 'cvss' | 'kev' | 'epss';
 

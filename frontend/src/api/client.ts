@@ -3,7 +3,7 @@ import type {
   AuditEntry, AuditFilters,
   ChangePasswordRequest,
   CreateUserRequest,
-  Criticality, CveDetailDto, CveFleetSort, CveSummaryDto,
+  Criticality, CveAffectedDevice, CveDetailDto, CveFleetSort, CveSummaryDto,
   Device, DeviceRiskDto, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   IntegrationConfigDto, IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
@@ -138,6 +138,9 @@ export const api = {
     request<TopRiskDeviceDto[]>(`/api/risk/top?n=${n}`),
   cveDetail: (cveId: string) =>
     request<CveDetailDto>(`/api/cve/${encodeURIComponent(cveId)}`),
+  /** GET /api/cve/{cveId}/devices — VIEWER and ADMIN. 404 → throws; 200+empty → []. */
+  listAffectedDevices: (cveId: string) =>
+    request<CveAffectedDevice[]>(`/api/cve/${encodeURIComponent(cveId)}/devices`),
   /**
    * GET /api/cve/fleet — paginated CVE list. v3-F1 adds optional {@code kevOnly}
    * (narrows to KEV-catalog members) and {@code sort} (enrichment-window sort by

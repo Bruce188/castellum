@@ -13,6 +13,7 @@ import io.castellum.config.CacheNames;
 import io.castellum.graph.CpeMapper;
 import io.castellum.risk.Criticality;
 import io.castellum.risk.KevEntryRepository;
+import io.castellum.web.dto.CveAffectedDeviceDto;
 import io.castellum.web.dto.CveDetailDto;
 import io.castellum.web.dto.CveSummaryDto;
 import org.springframework.cache.annotation.Cacheable;
@@ -84,6 +85,66 @@ public class CveController {
             .map(cve -> toDetail(cve, enrichmentService.enrichOne(cve, Criticality.MEDIUM)))
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Reverse endpoint: which fleet devices are affected by a specific CVE?
+     *
+     * <p>Inversion of the forward fleet-match path: for each fleet service, derive its
+     * CPE via {@link CpeMapper#toCpe23}, run {@link CveMatcher#findVulnerable}, and keep
+     * the device if the result contains the target CVE. Version range semantics are
+     * inherited from the matcher (no split-brain). Devices are deduplicated by deviceId;
+     * the first matched service for each device is surfaced in the DTO.
+     *
+     * <p>Returns {@code 404} when the CVE id is unknown; {@code 200 + empty list} when
+     * the CVE exists but no fleet device is affected (e.g. empty fleet, or no matching
+     * service versions).
+     *
+     * <p>{@code @Cacheable} is deferred to F1 (fleet-cache iteration). Do NOT add it here.
+     */
+    @GetMapping("/{cveId}/devices")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
+    public ResponseEntity<List<CveAffectedDeviceDto>> getAffectedDevices(
+            @PathVariable String cveId) {
+        // 404 on unknown CVE — distinct from 200+empty (known CVE, zero affected).
+        if (cveRepository.findByCveId(cveId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        List<NetworkService> allServices = networkServiceRepository.findAll();
+        // Map from deviceId → first matching service (dedup: first-wins).
+        Map<Long, NetworkService> deviceToService = new java.util.LinkedHashMap<>();
+        for (NetworkService s : allServices) {
+            if (deviceToService.containsKey(s.getDeviceId())) continue; // already captured
+            String cpe = CpeMapper.toCpe23(s);
+            if (cpe == null) continue;
+            boolean matched = cveMatcher.findVulnerable(cpe)
+                    .stream()
+                    .anyMatch(c -> cveId.equals(c.getCveId()));
+            if (matched) {
+                deviceToService.put(s.getDeviceId(), s);
+            }
+        }
+
+        if (deviceToService.isEmpty()) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        // Batch-hydrate devices to get hostname + ipAddress.
+        List<Device> devices = deviceRepository.findAllById(deviceToService.keySet());
+        List<CveAffectedDeviceDto> result = devices.stream()
+                .map(d -> {
+                    NetworkService s = deviceToService.get(d.getId());
+                    return new CveAffectedDeviceDto(
+                            d.getId(),
+                            d.getHostname(),
+                            d.getIpAddress(),
+                            s.getPort(),
+                            s.getName(),
+                            s.getVersion());
+                })
+                .toList();
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping
