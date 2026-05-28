@@ -49,3 +49,44 @@ describe('api.exportStixBundle()', () => {
     expect(useAuthMod.clearAuth).toHaveBeenCalled();
   });
 });
+
+describe('api.exportStixBundleText()', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('POSTs /api/threat-intel/export and returns the bundle text on 200', async () => {
+    const mockFetch = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ type: 'bundle', id: 'bundle--xyz' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const text = await api.exportStixBundleText();
+    expect(typeof text).toBe('string');
+    expect(text).toContain('"type":"bundle"');
+
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/threat-intel/export');
+    expect(init?.method).toBe('POST');
+    const headers = (init?.headers as Record<string, string>) ?? {};
+    expect(headers['Authorization']).toBe('Bearer mock-token');
+  });
+
+  it('throws on non-2xx', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response('Server Error', { status: 500 })
+    );
+    await expect(api.exportStixBundleText()).rejects.toThrow();
+  });
+
+  it('clears auth on 401', async () => {
+    const useAuthMod = await import('../hooks/useAuth');
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+      new Response('Unauthorized', { status: 401 })
+    );
+    await expect(api.exportStixBundleText()).rejects.toThrow();
+    expect(useAuthMod.clearAuth).toHaveBeenCalled();
+  });
+});
