@@ -102,6 +102,11 @@ public class BundleAssembler {
         }
 
         // Vulnerability SDOs for all CVEs, then relationships
+        // AC2 (perf/stix-bundle-export): the full CVE corpus is loaded deliberately. The bundle's
+        // defined content includes one vulnerability SDO per corpus CVE (including orphans with no
+        // fleet CPE match, e.g. CVE-2026-0004 in the golden fixture). Restricting to matched CVEs
+        // would change bundle content and break the AC4 golden contract. Retained, unbounded — see
+        // plan-v55 §AC5. Revisit only if corpus size threatens heap.
         List<Cve> allCves = cveRepository.findAll();
         for (Cve cve : allCves) {
             StixVulnerability vuln = new StixVulnerability(
@@ -116,17 +121,49 @@ public class BundleAssembler {
             objects.put(vuln.id(), vuln);
         }
 
+        // Batch services: one query for all devices that have an IP address
+        List<Long> deviceIds = new ArrayList<>();
+        for (Device device : devices) {
+            if (device.getIpAddress() != null) deviceIds.add(device.getId());
+        }
+        Map<Long, List<NetworkService>> servicesByDevice = new LinkedHashMap<>();
+        for (NetworkService svc : networkServiceRepository.findByDeviceIdIn(deviceIds)) {
+            servicesByDevice.computeIfAbsent(svc.getDeviceId(), k -> new ArrayList<>()).add(svc);
+        }
+
+        // CPE-memoized matcher: build matched CVE id set across all services
+        Map<String, List<Cve>> matchedByCpe = new HashMap<>();
+        Set<String> matchedCveIds = new LinkedHashSet<>();
+        for (Long deviceId : deviceIds) {
+            for (NetworkService svc : servicesByDevice.getOrDefault(deviceId, List.of())) {
+                String cpe = CpeMapper.toCpe23(svc);
+                if (cpe == null) continue;
+                List<Cve> matched = matchedByCpe.computeIfAbsent(cpe, cveMatcher::findVulnerable);
+                for (Cve cve : matched) {
+                    matchedCveIds.add(cve.getCveId());
+                }
+            }
+        }
+
+        // Batch EPSS and KEV lookups
+        Map<String, Double> epssByCve = new HashMap<>();
+        for (EpssScore e : epssScoreRepository.findAllByCveIdIn(matchedCveIds)) {
+            epssByCve.put(e.getCveId(), e.getEpss().doubleValue()); // EXACT doubleValue() — AC4
+        }
+        Set<String> kevCveIds = kevEntryRepository.findAllByCveIdIn(matchedCveIds).stream()
+            .map(KevEntry::getCveId).collect(java.util.stream.Collectors.toSet());
+
         // Per-device, per-service: match CVEs, emit affects relationships and indicators
         for (Device device : devices) {
             if (device.getIpAddress() == null) continue;
             String infraId = StixIds.forDevice(device.getIpAddress());
 
-            List<NetworkService> services = networkServiceRepository.findByDeviceId(device.getId());
+            List<NetworkService> services = servicesByDevice.getOrDefault(device.getId(), List.of());
             for (NetworkService svc : services) {
                 String cpe = CpeMapper.toCpe23(svc);
                 if (cpe == null) continue;
 
-                List<Cve> matchedCves = cveMatcher.findVulnerable(cpe);
+                List<Cve> matchedCves = matchedByCpe.computeIfAbsent(cpe, cveMatcher::findVulnerable);
                 for (Cve cve : matchedCves) {
                     String vulnId = StixIds.forCve(cve.getCveId());
 
@@ -142,9 +179,8 @@ public class BundleAssembler {
 
                     // Compute composite score
                     double cvssN = CvssExtractor.normalized(cve);
-                    double epss = epssScoreRepository.findByCveId(cve.getCveId())
-                        .map(e -> e.getEpss().doubleValue()).orElse(0.0);
-                    boolean kev = kevEntryRepository.existsByCveId(cve.getCveId());
+                    double epss = epssByCve.getOrDefault(cve.getCveId(), 0.0);
+                    boolean kev = kevCveIds.contains(cve.getCveId());
                     Criticality criticality = device.getCriticality() != null ? device.getCriticality() : Criticality.MEDIUM;
                     RiskScore riskScore = CompositeScorer.score(new RiskInputs(cvssN, epss, kev, criticality));
                     BigDecimal composite = riskScore.score();
@@ -180,6 +216,7 @@ public class BundleAssembler {
             }
         }
 
+        // AC5: bundle materialized in-memory (no streaming, no size cap) — see plan-v55 §AC5.
         return StixBundle.of(StixIds.forBundle(), new ArrayList<>(objects.values()));
     }
 }
