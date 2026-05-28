@@ -41,6 +41,13 @@ export function DiscoveryControlPanel({ isAdmin }: Props) {
   // AbortController ref for the in-flight request (AC3)
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Mounted guard — mirrors the `cancelled` pattern in listInterfaces useEffect
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     api.listInterfaces()
@@ -80,16 +87,21 @@ export function DiscoveryControlPanel({ isAdmin }: Props) {
         },
         controller.signal
       );
-      setResult(out);
+      if (mountedRef.current) {
+        setResult(out);
+      }
     } catch (err) {
       // Swallow AbortError — user-initiated stop, no error banner
       if (err instanceof Error && err.name === 'AbortError') {
-        return;
+        // finally still runs; no error banner needed
+      } else if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'discovery failed');
       }
-      setError(err instanceof Error ? err.message : 'discovery failed');
     } finally {
-      setSubmitting(false);
       abortControllerRef.current = null;
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
   }
 

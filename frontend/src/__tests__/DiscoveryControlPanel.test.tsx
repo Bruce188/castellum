@@ -194,6 +194,45 @@ describe('<DiscoveryControlPanel />', () => {
     );
   });
 
+  // --- NEW case 9: real-error-with-signal surfaces the banner ---
+  it('real error surfaces the banner even when a signal is in flight', async () => {
+    listInterfaces.mockResolvedValueOnce([]);
+
+    // discoverPassive receives a signal but rejects with a non-AbortError
+    discoverPassive.mockImplementationOnce(
+      (_payload: unknown, _signal?: AbortSignal) =>
+        Promise.reject(new Error('500 boom'))
+    );
+
+    render(<DiscoveryControlPanel isAdmin={true} />);
+
+    fireEvent.click(screen.getByTestId('passive-activate-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/500 boom/);
+    });
+  });
+
+  // --- NEW case 10: unmount mid-flight produces no unhandled state-update warning ---
+  it('unmounting during in-flight discoverPassive does not throw or warn', async () => {
+    listInterfaces.mockResolvedValueOnce([]);
+
+    // Never-resolving promise — component unmounts before it settles
+    discoverPassive.mockImplementationOnce(
+      () => new Promise<never>(() => { /* never resolves */ })
+    );
+
+    const { unmount } = render(<DiscoveryControlPanel isAdmin={true} />);
+
+    fireEvent.click(screen.getByTestId('passive-activate-btn'));
+
+    // Unmount while request is still in-flight
+    unmount();
+
+    // No assertions needed beyond "test completes without throwing"
+    // (React's act() would surface unhandled setState-after-unmount warnings as errors)
+  });
+
   // --- NEW case 8: AC3 activate shows active state then deactivate aborts in-flight request ---
   it('activate shows active state then deactivate aborts the in-flight request (AC3)', async () => {
     listInterfaces.mockResolvedValueOnce([]);
