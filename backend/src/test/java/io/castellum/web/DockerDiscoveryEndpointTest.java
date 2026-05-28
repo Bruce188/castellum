@@ -3,8 +3,10 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.discovery.ActiveNetworkDetector;
-import io.castellum.discovery.DockerDiscoveryService;
 import io.castellum.discovery.DiscoverySweepRepository;
+import io.castellum.discovery.DiscoveryUnavailableException;
+import io.castellum.discovery.DockerDiscoveryResponse;
+import io.castellum.discovery.DockerDiscoveryService;
 import io.castellum.discovery.PassiveDiscoveryService;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
@@ -25,29 +27,30 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Verifies {@code GET /api/discovery/interfaces}: anon→401, viewer→403, admin→200.
- *
- * <p>The endpoint enumerates {@link java.net.NetworkInterface#getNetworkInterfaces()};
- * test only asserts shape (array, not null), not specific interface names — the host
- * running the test may have any combination of up, non-loopback NICs.
+ * Verifies {@code POST /api/discovery/docker}: ADMIN→200 with the discovered/updated count,
+ * VIEWER→403, anon→401, and docker-unavailable→503 (mapped from
+ * {@link DiscoveryUnavailableException} by {@link GlobalExceptionHandler}).
  */
 @WebMvcTest(PassiveDiscoveryController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class,
-    RbacAuthenticationEntryPoint.class, DiscoveryInterfacesEndpointTest.FixedClockConfig.class})
-class DiscoveryInterfacesEndpointTest {
+    RbacAuthenticationEntryPoint.class, GlobalExceptionHandler.class,
+    DockerDiscoveryEndpointTest.FixedClockConfig.class})
+class DockerDiscoveryEndpointTest {
 
     @TestConfiguration
     static class FixedClockConfig {
         @Bean
         Clock clock() {
-            return Clock.fixed(Instant.parse("2026-05-26T12:00:00Z"), ZoneOffset.UTC);
+            return Clock.fixed(Instant.parse("2026-05-28T12:00:00Z"), ZoneOffset.UTC);
         }
     }
 
@@ -62,23 +65,39 @@ class DiscoveryInterfacesEndpointTest {
     @MockBean private DockerDiscoveryService dockerDiscoveryService;
 
     @Test
-    void getInterfaces_anon_returns401() throws Exception {
-        mockMvc.perform(get("/api/discovery/interfaces").with(anonymous()))
-            .andExpect(status().isUnauthorized());
+    @WithMockUser(roles = "ADMIN")
+    void admin_returns200WithCounts() throws Exception {
+        when(dockerDiscoveryService.discover())
+            .thenReturn(new DockerDiscoveryResponse(8, 2, 10, List.of(1L, 2L, 3L)));
+
+        mockMvc.perform(post("/api/discovery/docker"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.containers").value(8))
+            .andExpect(jsonPath("$.gateways").value(2))
+            .andExpect(jsonPath("$.updated").value(10));
     }
 
     @Test
     @WithMockUser(roles = "VIEWER")
-    void getInterfaces_viewer_returns403() throws Exception {
-        mockMvc.perform(get("/api/discovery/interfaces"))
+    void viewer_returns403() throws Exception {
+        mockMvc.perform(post("/api/discovery/docker"))
             .andExpect(status().isForbidden());
     }
 
     @Test
+    void anon_returns401() throws Exception {
+        mockMvc.perform(post("/api/discovery/docker").with(anonymous()))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @WithMockUser(roles = "ADMIN")
-    void getInterfaces_admin_returns200WithArray() throws Exception {
-        mockMvc.perform(get("/api/discovery/interfaces"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$").isArray());
+    void dockerUnavailable_returns503() throws Exception {
+        when(dockerDiscoveryService.discover())
+            .thenThrow(new DiscoveryUnavailableException("docker CLI unavailable: command not found"));
+
+        mockMvc.perform(post("/api/discovery/docker"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.error").value("discovery_unavailable"));
     }
 }

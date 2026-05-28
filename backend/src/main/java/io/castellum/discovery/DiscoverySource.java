@@ -20,5 +20,11 @@ public enum DiscoverySource {
     /** Active OT/ICS fingerprint probe (Modbus, DNP3, S7comm, BACnet). */
     OT_PROBE,
     /** Active nmap-based network scan (PING_SWEEP, SERVICE_DETECT, OS_FINGERPRINT). */
-    NMAP_SCAN
+    NMAP_SCAN,
+    /**
+     * Local Docker daemon inventory via the {@code docker} CLI ({@code docker ps} +
+     * {@code docker inspect}). Unlike the wire-emitting sources above, this reads the
+     * host's own container runtime — no network traffic is generated.
+     */
+    DOCKER
 }

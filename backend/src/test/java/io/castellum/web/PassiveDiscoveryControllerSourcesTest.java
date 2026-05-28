@@ -3,6 +3,7 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.discovery.ActiveNetworkDetector;
+import io.castellum.discovery.DockerDiscoveryService;
 import io.castellum.discovery.DiscoverySweepRepository;
 import io.castellum.discovery.PassiveDiscoveryService;
 import io.castellum.security.CastellumUserDetailsService;
@@ -62,6 +63,7 @@ class PassiveDiscoveryControllerSourcesTest {
     @MockBean private JwtService jwtService;
     @MockBean private UserRepository userRepository;
     @MockBean private ActiveNetworkDetector activeNetworkDetector;
+    @MockBean private DockerDiscoveryService dockerDiscoveryService;
 
     @Test
     void getSources_anon_returns401() throws Exception {

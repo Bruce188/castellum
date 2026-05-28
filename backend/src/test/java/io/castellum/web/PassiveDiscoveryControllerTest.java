@@ -52,6 +52,8 @@ class PassiveDiscoveryControllerTest {
     DiscoverySweepRepository sweepRepository;
     @MockBean
     ActiveNetworkDetector activeNetworkDetector;
+    @MockBean
+    DockerDiscoveryService dockerDiscoveryService;
 
     @org.springframework.boot.test.context.TestConfiguration
     static class FixedClockConfig {

@@ -155,10 +155,12 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     // Source-class map — thin badge affordance mirroring SCOPE_CLASS pattern.
     // Active sources (ARP, MDNS, PCAP) get no extra class (they are the common case).
     // NMAP_SCAN and OT_PROBE carry a thin 'source-active-scan' marker so the topology
-    // legend or future CSS can distinguish passive vs active discovery.
+    // legend or future CSS can distinguish passive vs active discovery. DOCKER-discovered
+    // containers carry 'source-docker' so they read distinctly from network-probed hosts.
     const SOURCE_CLASS: Partial<Record<DiscoverySource, string>> = {
       NMAP_SCAN: 'source-active-scan',
       OT_PROBE: 'source-active-scan',
+      DOCKER: 'source-docker',
     };
 
     const nodes = visibleDevices.map(d => {

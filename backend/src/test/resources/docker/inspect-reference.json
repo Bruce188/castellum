@@ -1,0 +1,156 @@
+[
+  {
+    "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000pf",
+    "Name": "/pingpay-frontend",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "80/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "1071" },
+          { "HostIp": "::", "HostPort": "1071" }
+        ]
+      },
+      "Networks": {
+        "pingpay_default": {
+          "IPAddress": "172.18.0.4",
+          "Gateway": "172.18.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:12:00:04"
+        }
+      }
+    }
+  },
+  {
+    "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000pb",
+    "Name": "/pingpay-backend",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "3000/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "3000" }
+        ]
+      },
+      "Networks": {
+        "pingpay_default": {
+          "IPAddress": "172.18.0.3",
+          "Gateway": "172.18.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:12:00:03"
+        }
+      }
+    }
+  },
+  {
+    "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000db",
+    "Name": "/pingpay-db",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "3306/tcp": null
+      },
+      "Networks": {
+        "pingpay_default": {
+          "IPAddress": "172.18.0.2",
+          "Gateway": "172.18.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:12:00:02"
+        }
+      }
+    }
+  },
+  {
+    "Id": "b2c3d4e5f6a700000000000000000000000000000000000000000000000kong",
+    "Name": "/supabase_kong_pingpay",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "8000/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "54321" }
+        ],
+        "8443/tcp": null
+      },
+      "Networks": {
+        "supabase_network_pingpay": {
+          "IPAddress": "172.19.0.5",
+          "Gateway": "172.19.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:13:00:05"
+        }
+      }
+    }
+  },
+  {
+    "Id": "b2c3d4e5f6a70000000000000000000000000000000000000000000000studio",
+    "Name": "/supabase_studio_pingpay",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "3000/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "54323" }
+        ]
+      },
+      "Networks": {
+        "supabase_network_pingpay": {
+          "IPAddress": "172.19.0.6",
+          "Gateway": "172.19.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:13:00:06"
+        }
+      }
+    }
+  },
+  {
+    "Id": "b2c3d4e5f6a70000000000000000000000000000000000000000000000sup-db",
+    "Name": "/supabase_db_pingpay",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "5432/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "54322" }
+        ]
+      },
+      "Networks": {
+        "supabase_network_pingpay": {
+          "IPAddress": "172.19.0.2",
+          "Gateway": "172.19.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:13:00:02"
+        }
+      }
+    }
+  },
+  {
+    "Id": "b2c3d4e5f6a700000000000000000000000000000000000000000000pg-meta",
+    "Name": "/supabase_pg_meta_pingpay",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {
+        "8080/tcp": null
+      },
+      "Networks": {
+        "supabase_network_pingpay": {
+          "IPAddress": "172.19.0.7",
+          "Gateway": "172.19.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:13:00:07"
+        }
+      }
+    }
+  },
+  {
+    "Id": "b2c3d4e5f6a700000000000000000000000000000000000000000000storage",
+    "Name": "/supabase_storage_pingpay",
+    "State": { "Status": "running", "Running": true },
+    "NetworkSettings": {
+      "Ports": {},
+      "Networks": {
+        "supabase_network_pingpay": {
+          "IPAddress": "172.19.0.8",
+          "Gateway": "172.19.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:13:00:08"
+        }
+      }
+    }
+  }
+]
