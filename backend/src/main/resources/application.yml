@@ -100,6 +100,10 @@ castellum:
     vulns-per-pair-cap: ${GRAPH_VULNS_PER_PAIR_CAP:5}
     max-devices: ${GRAPH_MAX_DEVICES:1024}
     docker-host-ip: ${GRAPH_DOCKER_HOST_IP:192.168.68.51}
+  integration:
+    probe:
+      connect-timeout-ms: ${INTEGRATION_PROBE_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${INTEGRATION_PROBE_READ_TIMEOUT_MS:5000}
   ot:
     probe:
       connect-timeout-ms: ${OT_PROBE_CONNECT_TIMEOUT_MS:3000}
