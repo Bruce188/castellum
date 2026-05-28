@@ -27,6 +27,18 @@ function nvdFallback(cveId: string): NvdReference {
   return { url: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cveId)}`, source: 'NVD' };
 }
 
+function isSpareDetail(detail: CveDetailDto): boolean {
+  return (
+    !detail.description &&
+    !detail.cvssV31Score &&
+    !detail.cvssV30Score &&
+    !detail.cvssV2Score &&
+    !detail.epssScore &&
+    !detail.compositeScore &&
+    !detail.kev
+  );
+}
+
 interface Props {
   cveId: string | null;
   onClose: () => void;
@@ -34,24 +46,36 @@ interface Props {
 
 export function CveDetailPanel({ cveId, onClose }: Props) {
   const [detail, setDetail] = useState<CveDetailDto | null>(null);
+  const [detailError, setDetailError] = useState(false);
   const [affected, setAffected] = useState<CveAffectedDevice[]>([]);
+  const [affectedError, setAffectedError] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!cveId) {
       setDetail(null);
+      setDetailError(false);
       setAffected([]);
+      setAffectedError(false);
       return;
     }
     setLoading(true);
-    Promise.all([api.cveDetail(cveId), api.listAffectedDevices(cveId)])
-      .then(([d, a]) => {
-        setDetail(d);
-        setAffected(a);
-      })
-      .catch(() => {
-        setDetail(null);
-        setAffected([]);
+    setDetailError(false);
+    setAffectedError(false);
+    Promise.allSettled([api.cveDetail(cveId), api.listAffectedDevices(cveId)])
+      .then(([detailResult, affectedResult]) => {
+        if (detailResult.status === 'fulfilled') {
+          setDetail(detailResult.value);
+        } else {
+          setDetail(null);
+          setDetailError(true);
+        }
+        if (affectedResult.status === 'fulfilled') {
+          setAffected(affectedResult.value);
+        } else {
+          setAffected([]);
+          setAffectedError(true);
+        }
       })
       .finally(() => setLoading(false));
   }, [cveId]);
@@ -80,6 +104,10 @@ export function CveDetailPanel({ cveId, onClose }: Props) {
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
 
+      {detailError && (
+        <p className="text-sm text-red-600">Couldn't load CVE detail.</p>
+      )}
+
       {detail && (
         <>
           <section className="mb-4">
@@ -105,7 +133,11 @@ export function CveDetailPanel({ cveId, onClose }: Props) {
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-700">{detail.description ?? 'No description.'}</p>
+            {isSpareDetail(detail) ? (
+              <p className="text-sm text-gray-500">No additional detail available for this CVE yet.</p>
+            ) : (
+              <p className="text-sm text-gray-700">{detail.description ?? 'No description.'}</p>
+            )}
           </section>
 
           <section className="mb-4">
@@ -131,7 +163,9 @@ export function CveDetailPanel({ cveId, onClose }: Props) {
 
           <section>
             <h3 className="text-sm font-semibold mb-1">Affected Devices</h3>
-            {affected.length === 0 ? (
+            {affectedError ? (
+              <p className="text-sm text-red-500">Couldn't load affected devices.</p>
+            ) : affected.length === 0 ? (
               <p className="text-sm text-gray-500">No affected devices found in this fleet.</p>
             ) : (
               <ul className="space-y-1">
