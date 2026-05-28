@@ -89,24 +89,45 @@ export async function seedDevice(
   return (await res.json()) as SeededDevice;
 }
 
+/** Discriminated result from triggerScan — callers must check `kind`. */
+export type TriggerScanResult =
+  | { kind: 'ok'; scanId: string }
+  | { kind: 'rate-limited'; retryAfter: number | null };
+
 /**
- * POST /api/scan (ADMIN) and return the created scan id. The backend requires
- * a non-null ScanType; PING_SWEEP (-sn) is the fastest. Defaults to a single
- * localhost target so the scan reaches a terminal state quickly under test.
+ * POST /api/scan (ADMIN) and return a discriminated result. The backend
+ * requires a non-null ScanType; PING_SWEEP (-sn) is the fastest. Defaults to a
+ * single localhost target so the scan reaches a terminal state quickly.
+ *
+ * On 429 the result carries the Retry-After seconds (null when header absent).
+ * All other non-2xx statuses throw, preserving the original behaviour for
+ * callers that were relying on a throw to bubble to test.skip().
+ *
+ * Backward-compat: callers that previously caught a thrown Error and checked
+ * for ECONNREFUSED will still receive a throw for connection-level failures.
+ * Only 429 is now returned as a discriminated value instead of thrown.
  */
 export async function triggerScan(
   request: APIRequestContext,
   token: string,
   cidr = '127.0.0.1/32',
   type: 'PING_SWEEP' | 'SERVICE_DETECT' | 'OS_FINGERPRINT' = 'PING_SWEEP',
-): Promise<string> {
+): Promise<TriggerScanResult> {
   const res = await request.post(`${API_URL}/api/scan`, {
     headers: { Authorization: `Bearer ${token}` },
     data: { cidr, type },
   });
+
+  if (res.status() === 429) {
+    const retryAfterHeader = res.headers()['retry-after'];
+    const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : null;
+    return { kind: 'rate-limited', retryAfter };
+  }
+
   if (!res.ok()) {
     throw new Error(`triggerScan failed: ${res.status()} ${await res.text()}`);
   }
+
   const body = (await res.json()) as { id: string | number };
-  return String(body.id);
+  return { kind: 'ok', scanId: String(body.id) };
 }

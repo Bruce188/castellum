@@ -27,7 +27,12 @@ test.describe('audit log viewer', () => {
     // resourceId and the full scan (including cidr) as the JSON payload.
     const token = await apiLogin(page.request, ADMIN);
     const cidr = '10.0.0.0/30';
-    const scanId = await triggerScan(page.request, token, cidr);
+    const scanResult = await triggerScan(page.request, token, cidr);
+    if (scanResult.kind === 'rate-limited') {
+      test.skip(true, `scan submission rate-limited (Retry-After: ${scanResult.retryAfter}s) — re-run after cooldown`);
+      return;
+    }
+    const scanId = scanResult.scanId;
 
     await page.goto(`${APP}/audit`);
 
