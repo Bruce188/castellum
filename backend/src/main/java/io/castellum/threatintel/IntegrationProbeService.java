@@ -1,8 +1,11 @@
 package io.castellum.threatintel;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
@@ -12,6 +15,7 @@ import org.springframework.web.client.RestClient;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.time.Duration;
 
 /**
  * Bounded-timeout reachability probe for TAXII 2.1 and MISP integrations.
@@ -28,16 +32,28 @@ public class IntegrationProbeService {
             MediaType.parseMediaType("application/taxii+json;version=2.1");
 
     private final RestClient client;
-    private final int connectTimeoutMs;
-    private final int readTimeoutMs;
 
     public IntegrationProbeService(
             RestClient.Builder builder,
             @Value("${castellum.integration.probe.connect-timeout-ms:3000}") int connectTimeoutMs,
             @Value("${castellum.integration.probe.read-timeout-ms:5000}") int readTimeoutMs) {
-        this.connectTimeoutMs = connectTimeoutMs;
-        this.readTimeoutMs = readTimeoutMs;
-        this.client = builder.build();
+        this(builder.requestFactory(buildTimeoutFactory(connectTimeoutMs, readTimeoutMs)).build());
+    }
+
+    /** Package-visible for testing — accepts an already-configured {@link RestClient}. */
+    IntegrationProbeService(RestClient client) {
+        this.client = client;
+    }
+
+    /**
+     * Builds a {@link SimpleClientHttpRequestFactory} carrying the given connect and read
+     * timeouts. Package-visible so it can be tested independently of the Spring context.
+     */
+    static SimpleClientHttpRequestFactory buildTimeoutFactory(int connectTimeoutMs, int readTimeoutMs) {
+        ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.defaults()
+                .withConnectTimeout(Duration.ofMillis(connectTimeoutMs))
+                .withReadTimeout(Duration.ofMillis(readTimeoutMs));
+        return ClientHttpRequestFactoryBuilder.simple().build(settings);
     }
 
     /**

@@ -3,8 +3,13 @@ package io.castellum.threatintel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.net.ConnectException;
@@ -37,6 +42,21 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
     "castellum.integration.probe.read-timeout-ms=200"
 })
 class IntegrationProbeServiceTest {
+
+    /**
+     * Override the component-scanned {@link IntegrationProbeService} with one whose
+     * {@link RestClient} is built from the mock-bound builder. This keeps the
+     * {@link MockRestServiceServer} intercept intact while the production constructor
+     * applies its own timeout factory (which would otherwise override the mock).
+     */
+    @TestConfiguration
+    static class Config {
+        @Bean
+        @Primary
+        IntegrationProbeService integrationProbeService(RestClient.Builder builder) {
+            return new IntegrationProbeService(builder.build());
+        }
+    }
 
     @Autowired
     IntegrationProbeService service;
@@ -184,5 +204,26 @@ class IntegrationProbeServiceTest {
 
         assertThat(result.reachable()).isTrue();
         server.verify();
+    }
+
+    // -------------------------------------------------------------------------
+    // (f) buildTimeoutFactory wires connect + read timeouts into the factory
+    //     — no real socket opened; tests the static factory-builder method directly.
+    // -------------------------------------------------------------------------
+
+    @Test
+    void buildTimeoutFactory_setsConnectAndReadTimeouts() throws Exception {
+        SimpleClientHttpRequestFactory factory =
+            IntegrationProbeService.buildTimeoutFactory(1234, 5678);
+
+        java.lang.reflect.Field connectField =
+            SimpleClientHttpRequestFactory.class.getDeclaredField("connectTimeout");
+        connectField.setAccessible(true);
+        java.lang.reflect.Field readField =
+            SimpleClientHttpRequestFactory.class.getDeclaredField("readTimeout");
+        readField.setAccessible(true);
+
+        assertThat(connectField.get(factory)).isEqualTo(1234);
+        assertThat(readField.get(factory)).isEqualTo(5678);
     }
 }
