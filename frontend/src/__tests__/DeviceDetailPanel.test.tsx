@@ -33,6 +33,12 @@ const services: NetworkService[] = [
     observedAt: null, vendor: null, product: null, protocolFamily: null },
 ];
 
+const otService: NetworkService = {
+  id: 3, deviceId: 1, port: 502, protocol: 'modbus', name: 'modbus', version: '2.4',
+  observedAt: null, vendor: 'Schneider Electric', product: 'Modicon M340',
+  protocolFamily: 'OT_ICS',
+};
+
 describe('<DeviceDetailPanel />', () => {
   it('renders nothing when device is null', () => {
     const { container } = render(
@@ -251,5 +257,36 @@ describe('<DeviceDetailPanel />', () => {
     const osEl = screen.getByTestId('device-os');
     expect(osEl).toHaveTextContent('Linux');
     expect(osEl.textContent).not.toMatch(/\(.*%\)/);
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F6 — OT/ICS service badge + vendor/product surfacing (AC2 + AC3)
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('ot-service: badges OT_ICS rows and surfaces vendor/product', () => {
+    render(<DeviceDetailPanel device={device} risk={risk} services={[...services, otService]} onClose={() => {}} />);
+    const badges = screen.getAllByTestId('ot-service-badge');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]).toHaveTextContent(/ICS\s*\/\s*OT/i);
+    expect(screen.getByText(/Schneider Electric/)).toBeInTheDocument();
+    expect(screen.getByText(/Modicon M340/)).toBeInTheDocument();
+  });
+
+  it('ot-service: no badge on non-OT services', () => {
+    render(<DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />);
+    expect(screen.queryByTestId('ot-service-badge')).toBeNull();
+    expect(screen.getByText('openssh')).toBeInTheDocument();
+  });
+
+  it('ot-indicator: present when >=1 OT_ICS service', () => {
+    render(<DeviceDetailPanel device={device} risk={risk} services={[...services, otService]} onClose={() => {}} />);
+    const ind = screen.getByTestId('ot-detected-indicator');
+    expect(ind).toBeInTheDocument();
+    expect(ind).toHaveTextContent(/OT\/ICS protocols detected/i);
+  });
+
+  it('ot-indicator: absent when no OT_ICS service', () => {
+    render(<DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />);
+    expect(screen.queryByTestId('ot-detected-indicator')).toBeNull();
   });
 });

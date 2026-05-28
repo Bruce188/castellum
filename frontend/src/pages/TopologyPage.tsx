@@ -5,6 +5,7 @@ import { DeviceDetailPanel } from '../components/DeviceDetailPanel';
 import { EmptyCorpusBanner } from '../components/EmptyCorpusBanner';
 import { OnboardingCard } from '../components/OnboardingCard';
 import { ScanTriggerForm } from '../components/ScanTriggerForm';
+import { OtProbePanel } from '../components/OtProbePanel';
 import { api } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import type { Device, DeviceRiskDto, DiscoveryScope, NetworkService } from '../api/types';
@@ -150,6 +151,14 @@ export function TopologyPage() {
         <header className="flex items-center justify-between gap-4">
           <ScanTriggerForm />
         </header>
+        <details className="mt-2">
+          <summary className="text-sm text-gray-600 cursor-pointer select-none">
+            OT/ICS fingerprint probe
+          </summary>
+          <div className="mt-2">
+            <OtProbePanel isAdmin={isAdmin} />
+          </div>
+        </details>
       </div>
       <main className="relative">
         <TopologyView

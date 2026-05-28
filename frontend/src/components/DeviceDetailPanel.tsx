@@ -149,7 +149,17 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
       </section>
 
       <section className="mb-4">
-        <h3 className="text-sm font-semibold mb-1">Services ({services.length})</h3>
+        <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+          <span>Services ({services.length})</span>
+          {services.some(s => s.protocolFamily === 'OT_ICS') && (
+            <span
+              data-testid="ot-detected-indicator"
+              className="bg-amber-100 text-amber-800 rounded px-2 py-0.5 text-xs font-semibold"
+            >
+              OT/ICS protocols detected
+            </span>
+          )}
+        </h3>
         {services.length === 0 ? (
           <p className="text-sm text-gray-500">No services observed.</p>
         ) : (
@@ -160,14 +170,31 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
               </tr>
             </thead>
             <tbody>
-              {services.map(s => (
-                <tr key={s.id}>
-                  <td>{s.port}</td>
-                  <td>{s.protocol}</td>
-                  <td>{s.name ?? '—'}</td>
-                  <td>{s.version ?? '—'}</td>
-                </tr>
-              ))}
+              {services.map(s => {
+                const isOt = s.protocolFamily === 'OT_ICS';
+                const vp = [s.vendor, s.product].filter(Boolean).join(' ');
+                return (
+                  <tr key={s.id}>
+                    <td>{s.port}</td>
+                    <td>
+                      {s.protocol}
+                      {isOt && (
+                        <span
+                          data-testid="ot-service-badge"
+                          className="ml-1 bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle"
+                        >
+                          ICS / OT
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {s.name ?? '—'}
+                      {isOt && vp && <span className="block text-xs text-gray-500">{vp}</span>}
+                    </td>
+                    <td>{s.version ?? '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

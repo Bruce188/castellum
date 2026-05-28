@@ -84,4 +84,18 @@ describe('<OtProbePanel />', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/502 unreachable/);
     });
   });
+
+  it('names the four ICS protocols and default ports in the help line', () => {
+    render(<OtProbePanel isAdmin={true} />);
+    const help = screen.getByTestId('ot-protocol-help');
+    expect(help).toHaveTextContent(/Modbus.*502/);
+    expect(help).toHaveTextContent(/DNP3.*20000/);
+    expect(help).toHaveTextContent(/S7comm.*102/);
+    expect(help).toHaveTextContent(/BACnet.*47808/);
+  });
+
+  it('shows the operator how to verify a probe ran (verify-help note)', () => {
+    render(<OtProbePanel isAdmin={true} />);
+    expect(screen.getByTestId('ot-verify-help')).toHaveTextContent(/OT\/ICS protocols detected/i);
+  });
 });
