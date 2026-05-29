@@ -6,6 +6,14 @@ import type { Device, DeviceRiskDto, DiscoveryScope, DiscoverySource } from '../
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
+import {
+  scopeToZoneId,
+  ZONE_DEFINITIONS,
+  ZONE_COLORS,
+  ZONE_BORDER_COLORS,
+  ZONE_LABEL_COLORS,
+  presentZoneIds,
+} from '../lib/topologyZones';
 import { type HighlightPath, makeEdgeKey, EDGE_STYLES } from './topologyConstants';
 
 cytoscape.use(coseBilkent);
@@ -22,6 +30,8 @@ interface CoseBilkentLayoutOptions extends cytoscape.BaseLayoutOptions {
   nodeRepulsion?: number;
   animate?: boolean;
   randomize?: boolean;
+  /** Compound-aware: include label dimensions when sizing parent nodes. */
+  nodeDimensionsIncludeLabels?: boolean;
 }
 
 interface Props {
@@ -104,15 +114,47 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         // dashed in the DOCKER_BRIDGE scope color so they read visually as a
         // distinct overlay rather than physical L2 adjacency.
         { selector: 'edge[kind = "docker-bridge"]', style: { 'line-color': EDGE_STYLES.dockerBridge.color, 'line-style': 'dashed' as const, width: EDGE_STYLES.dockerBridge.width, opacity: EDGE_STYLES.dockerBridge.opacity } },
-        // Attack-path overlay — bright red ring on nodes, dashed red stroke on edges.
-        { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': EDGE_STYLES.attackPath.color } },
-        { selector: 'edge.path-highlight', style: { 'line-color': EDGE_STYLES.attackPath.color, 'line-style': 'dashed' as const, opacity: EDGE_STYLES.attackPath.opacity, width: EDGE_STYLES.attackPath.width } },
         // Risk-still-loading overlay — dashed blue ring + dimmed fill. Appended
         // last so it wins border resolution while the parent's deviceRisk fanout
         // is in flight. The instant scores resolve the class is dropped and the
         // node snaps to its real tier color, making the grey→green transition a
         // deliberate "now computed" cue rather than an unexplained flicker.
         { selector: 'node.risk-loading', style: { 'border-width': 2, 'border-color': '#3b82f6', 'border-style': 'dashed' as const, opacity: 0.5 } },
+        // ── Zone compound parent nodes ────────────────────────────────────────
+        // Compound (parent) nodes are unsized — their bounds are derived from
+        // their children. Style them with a semi-transparent fill + zone color
+        // border so each zone region is labeled and visually distinct.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { selector: 'node[?zone]', style: {
+          shape: 'roundrectangle' as const,
+          label: 'data(label)',
+          'font-size': 10,
+          'text-valign': 'top' as const,
+          'text-halign': 'center' as const,
+          'background-opacity': 0.15,
+          'border-width': 2,
+          'border-style': 'dashed' as const,
+          // Compound nodes derive their size from children; these values are
+          // cytoscape string keywords not covered by the TS typings.
+          width: 'label' as unknown as number,
+          height: 'label' as unknown as number,
+          padding: '20' as unknown as undefined,
+        } },
+        // Per-zone fill + border colors (inherit from ZONE_COLORS/ZONE_BORDER_COLORS).
+        { selector: 'node.zone-zone-home',   style: { 'background-color': ZONE_COLORS['zone-home'],   'border-color': ZONE_BORDER_COLORS['zone-home'],   color: ZONE_LABEL_COLORS['zone-home'] } },
+        { selector: 'node.zone-zone-docker', style: { 'background-color': ZONE_COLORS['zone-docker'], 'border-color': ZONE_BORDER_COLORS['zone-docker'], color: ZONE_LABEL_COLORS['zone-docker'] } },
+        { selector: 'node.zone-zone-local',  style: { 'background-color': ZONE_COLORS['zone-local'],  'border-color': ZONE_BORDER_COLORS['zone-local'],  color: ZONE_LABEL_COLORS['zone-local'] } },
+        { selector: 'node.zone-zone-public', style: { 'background-color': ZONE_COLORS['zone-public'], 'border-color': ZONE_BORDER_COLORS['zone-public'], color: ZONE_LABEL_COLORS['zone-public'] } },
+        // ── Cross-zone edges — dashed + heavier to read across boundaries ─────
+        { selector: 'edge[?crossZone]', style: {
+          'line-style': 'dashed' as const,
+          width: 2.5,
+          opacity: 0.85,
+        } },
+        // Attack-path overlay — defined AFTER crossZone so the attack-path style
+        // dominates for cross-zone path-highlighted edges (last selector wins).
+        { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': EDGE_STYLES.attackPath.color } },
+        { selector: 'edge.path-highlight', style: { 'line-color': EDGE_STYLES.attackPath.color, 'line-style': 'dashed' as const, opacity: EDGE_STYLES.attackPath.opacity, width: EDGE_STYLES.attackPath.width } },
       ],
     });
 
@@ -163,6 +205,21 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       DOCKER: 'source-docker',
     };
 
+    // ── Zone compound parent nodes ─────────────────────────────────────────
+    // One parent node per zone that has at least one visible device. Each
+    // parent node carries data.zone=true so tests (and selectors) can identify
+    // it without parsing the id string.
+    const presentScopes = new Set(visibleDevices.map(d => d.discoveryScope));
+    const zoneIds = presentZoneIds(presentScopes);
+    const zoneNodes = zoneIds.map(zid => ({
+      data: {
+        id: zid,
+        label: ZONE_DEFINITIONS[zid].label,
+        zone: true as const,
+      },
+      classes: `zone-${zid}`,
+    }));
+
     const nodes = visibleDevices.map(d => {
       const risk = risksById.get(d.id);
       const score = risk ? Number(risk.score) : null;
@@ -171,7 +228,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const sourceClass = d.discoverySource ? (SOURCE_CLASS[d.discoverySource] ?? null) : null;
       const extraClasses = [scopeClass, sourceClass].filter(Boolean).join(' ');
       // serviceCount suffix in the label surfaces the badge on the rendered graph.
-      // The style block at :79 already renders data(label); no style change needed.
+      // The node style block above already renders data(label); no style change needed.
       // Guard: "host.docker.internal" and *.docker.internal are Docker bridge-gateway aliases
       // that must never render as a node label. The backend filters them before storage, but
       // this guard ensures any legacy data or race condition never surfaces the alias in the UI.
@@ -182,6 +239,8 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       return {
         data: {
           id: String(d.id),
+          // Assign each device to its zone compound parent node.
+          parent: scopeToZoneId(d.discoveryScope),
           label: d.serviceCount > 0 ? `${baseName} · ${d.serviceCount} svc` : baseName,
           ip: d.ipAddress,
           riskTier: tier,
@@ -217,16 +276,21 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     }
 
     cy.elements().remove();
-    cy.add([...nodes, ...edges, ...extraEdges]);
+    // Zone parent nodes must be added BEFORE device nodes so cytoscape can
+    // resolve the parent references when child nodes are added.
+    cy.add([...zoneNodes, ...nodes, ...edges, ...extraEdges]);
     // randomize:true prevents collinear collapse on sparse graphs — without it
     // cose-bilkent starts from degenerate (0,0) seed positions and converges
     // to a straight line when the fleet is small.
+    // nodeDimensionsIncludeLabels:true ensures compound parent nodes size to
+    // include their zone label, keeping children inside the labeled boundary.
     const layoutOptions: CoseBilkentLayoutOptions = {
       name: 'cose-bilkent',
       idealEdgeLength: 100,
       nodeRepulsion: 4500,
       animate: false,
       randomize: true,
+      nodeDimensionsIncludeLabels: true,
     };
     cy.layout(layoutOptions).run();
   }, [devices, risksById, highlightPath, scopeVisibility, risksLoading]);

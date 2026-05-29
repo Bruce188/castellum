@@ -1,4 +1,5 @@
 import type { Device } from '../api/types';
+import { scopeToZoneId } from './topologyZones';
 import { ipv4Slash24 } from './subnetEdges';
 
 /**
@@ -23,6 +24,8 @@ export interface GatewayEdge {
     target: string;
     kind: 'gateway' | 'docker-bridge' | 'isolated';
     gatewayIp?: string;
+    /** True when the source and target devices belong to different topology zones. */
+    crossZone?: boolean;
   };
 }
 
@@ -119,6 +122,9 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
 
   const edges: GatewayEdge[] = [];
 
+  // Build a lookup from device id → device for cross-zone annotation.
+  const deviceById = new Map<number, Device>(devices.map(d => [d.id, d]));
+
   // Compute docker host BEFORE the groups loop so the singleton branch can
   // check whether a DOCKER_BRIDGE device will be rescued by a db- edge.
   const dockerHost = findDockerHost(devices);
@@ -154,6 +160,7 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
     const gateway = pickGateway(group);
     for (const peer of group) {
       if (peer.id === gateway.id) continue;
+      const crossZone = scopeToZoneId(peer.discoveryScope) !== scopeToZoneId(gateway.discoveryScope);
       edges.push({
         data: {
           id: `g-${peer.id}-${gateway.id}`,
@@ -161,21 +168,28 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
           target: String(gateway.id),
           kind: 'gateway',
           gatewayIp: gateway.ipAddress,
+          ...(crossZone ? { crossZone: true } : {}),
         },
       });
     }
   }
 
-  // Step 3: docker-bridge synthetic edges.
+  // Step 3: docker-bridge synthetic edges — always cross-zone (HOME → DOCKER_BRIDGE).
   if (dockerHost) {
     for (const d of devices) {
       if (d.discoveryScope !== 'DOCKER_BRIDGE') continue;
+      const srcDevice = deviceById.get(dockerHost.id);
+      const tgtDevice = d;
+      const crossZone = srcDevice
+        ? scopeToZoneId(srcDevice.discoveryScope) !== scopeToZoneId(tgtDevice.discoveryScope)
+        : true;
       edges.push({
         data: {
           id: `db-${dockerHost.id}-${d.id}`,
           source: String(dockerHost.id),
           target: String(d.id),
           kind: 'docker-bridge',
+          ...(crossZone ? { crossZone: true } : {}),
         },
       });
     }

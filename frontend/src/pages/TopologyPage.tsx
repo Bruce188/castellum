@@ -175,6 +175,7 @@ export function TopologyPage() {
             setScopeVisibility(next);
             try { localStorage.setItem(SCOPE_STORAGE_KEY, JSON.stringify(next)); } catch { /* quota / SSR — drop silently */ }
           }}
+          presentScopes={new Set(devices.filter(d => scopeVisibility[d.discoveryScope] ?? true).map(d => d.discoveryScope))}
         />
         <DeviceDetailPanel
           device={selectedDevice}
