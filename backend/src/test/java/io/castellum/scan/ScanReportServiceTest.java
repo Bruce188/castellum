@@ -194,12 +194,12 @@ class ScanReportServiceTest {
         Cve cveB = new Cve();
         cveB.setCveId("CVE-2024-0002");
 
+        // Other CPE lookups return empty (registered first so specific stubs below take precedence)
+        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of());
         when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.4:*:*:*:*:*:*:*"))
             .thenReturn(List.of(cveA));
         when(cveMatcher.findVulnerable("cpe:2.3:a:nginx:nginx:1.24:*:*:*:*:*:*:*"))
             .thenReturn(List.of(cveB));
-        // Other CPE lookups return empty
-        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of());
 
         ScanReportDto report = service.buildReport(SCAN_ID);
 
