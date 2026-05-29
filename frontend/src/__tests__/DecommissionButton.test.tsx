@@ -18,6 +18,7 @@ const device: Device = {
   osName: null,
   osAccuracy: null,
   osCpe: null,
+  publishesHostPort: false,
 };
 
 describe('<DecommissionButton />', () => {

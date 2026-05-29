@@ -31,9 +31,9 @@ const shortestPath = vi.mocked(api.shortestPath);
 
 const DEVICES_PAGE = {
   content: [
-    { id: 1, ipAddress: '10.0.0.1', hostname: 'attacker-foothold', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH' as const, discoveryScope: 'HOME' as const, lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
-    { id: 2, ipAddress: '10.0.0.5', hostname: 'pivot-host', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM' as const, discoveryScope: 'HOME' as const, lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
-    { id: 3, ipAddress: '172.16.0.10', hostname: 'crown-jewels', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL' as const, discoveryScope: 'HOME' as const, lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null },
+    { id: 1, ipAddress: '10.0.0.1', hostname: 'attacker-foothold', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'HIGH' as const, discoveryScope: 'HOME' as const, lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false },
+    { id: 2, ipAddress: '10.0.0.5', hostname: 'pivot-host', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'MEDIUM' as const, discoveryScope: 'HOME' as const, lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false },
+    { id: 3, ipAddress: '172.16.0.10', hostname: 'crown-jewels', macAddress: null, firstSeen: null, lastSeen: null, criticality: 'CRITICAL' as const, discoveryScope: 'HOME' as const, lastSeenIface: null, discoverySource: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false },
   ],
   totalElements: 3, totalPages: 1, number: 0, size: 200,
 };

@@ -58,6 +58,7 @@ function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySour
     osName: null,
     osAccuracy: null,
     osCpe: null,
+    publishesHostPort: false,
   };
 }
 
@@ -231,6 +232,7 @@ describe('<TopologyView /> alias-label guard (AC4)', () => {
       osName: null,
       osAccuracy: null,
       osCpe: null,
+      publishesHostPort: false,
     };
   }
 

@@ -23,6 +23,7 @@ const current: Device = {
   osName: null,
   osAccuracy: null,
   osCpe: null,
+  publishesHostPort: false,
 };
 
 describe('api.updateDevice()', () => {
