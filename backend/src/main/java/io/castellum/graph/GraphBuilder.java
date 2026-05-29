@@ -49,9 +49,10 @@ import java.util.Map;
  * returned by {@link #extractSubnetKey(String)}.
  *
  * <p>A third, additive gateway-bridge pass runs after the EXPLOITABLE_VULN pass. It detects a
- * single HOME-scope pivot node (matched by hostname {@code "host.docker.internal"} or by the
- * configured {@link GraphProperties#getDockerHostIp()}) and emits bidirectional
- * {@link EdgeType#GATEWAY_PIVOT} edges between the pivot and every DOCKER_BRIDGE device.
+ * single HOME-scope pivot node (matched by the configured {@link GraphProperties#getDockerHostIp()})
+ * and emits bidirectional {@link EdgeType#GATEWAY_PIVOT} edges between the pivot and every
+ * DOCKER_BRIDGE device. Pivot detection is IP-based only — the hostname alias
+ * {@code "host.docker.internal"} is a Docker network artifact, never stored as a real hostname.
  * LINK_LOCAL and LOOPBACK scopes are explicitly excluded. When no pivot is detected,
  * DOCKER_BRIDGE devices remain isolated.
  */
@@ -176,13 +177,15 @@ public class GraphBuilder {
         // WEAK_CRED_PATH: typed-but-empty seam — no signal source in v1; see analysis-v5 § 3.
 
         // GATEWAY_PIVOT pass — bridges HOME and DOCKER_BRIDGE scopes through a single pivot node.
-        // Pivot detection: a HOME-scope device whose hostname is "host.docker.internal" or whose
-        // IP matches the configured dockerHostIp. If multiple qualify, pick by lowest device id.
+        // Pivot detection: a HOME-scope device whose IP matches the configured dockerHostIp.
+        // Hostname is deliberately NOT used for detection — "host.docker.internal" is a Docker
+        // bridge-gateway alias that is never stored as a real hostname (filtered by
+        // DeviceUpsertService). Matching by IP alone is correct and alias-free.
+        // If multiple qualify, pick by lowest device id.
         // LINK_LOCAL and LOOPBACK scopes are never bridged by this pass.
         Device pivot = devices.stream()
             .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
-            .filter(d -> "host.docker.internal".equals(d.getHostname())
-                || properties.getDockerHostIp().equals(d.getIpAddress()))
+            .filter(d -> properties.getDockerHostIp().equals(d.getIpAddress()))
             .min(Comparator.comparingLong(Device::getId))
             .orElse(null);
 

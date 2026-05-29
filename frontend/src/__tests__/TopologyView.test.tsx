@@ -206,6 +206,65 @@ describe('<TopologyView /> scope rendering', () => {
   });
 });
 
+// AC4 alias-label guard. Nodes whose hostname is a Docker bridge-gateway alias
+// (host.docker.internal or *.docker.internal) must render their label using the
+// IP address, never the alias string. The backend filters them before storage,
+// but the UI has a defense-in-depth guard for legacy data / race conditions.
+describe('<TopologyView /> alias-label guard (AC4)', () => {
+  beforeEach(() => {
+    factoryMock.mockClear();
+    mocks.add.mockClear();
+    mocks.elements.mockClear();
+    mocks.layout.mockClear();
+    mocks.layoutRun.mockClear();
+  });
+
+  function makeDeviceWithHostname(id: number, ip: string, hostname: string | null): Device {
+    return {
+      id, ipAddress: ip, hostname,
+      macAddress: null,
+      firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z',
+      criticality: 'MEDIUM', discoveryScope: 'DOCKER_BRIDGE',
+      lastSeenIface: null,
+      discoverySource: 'DOCKER',
+      serviceCount: 0,
+      osName: null,
+      osAccuracy: null,
+      osCpe: null,
+    };
+  }
+
+  it('topologyView_aliasLabelGuard_exactAlias_rendersIpNotAlias', () => {
+    // host.docker.internal is the canonical bridge-gateway alias; must never appear as label.
+    const ip = '172.17.0.1';
+    const alias = 'host.docker.internal';
+    const devices: Device[] = [makeDeviceWithHostname(1, ip, alias)];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string; label: string } }>;
+    const node = addArgs.find(e => e.data.id === '1');
+    expect(node?.data.label).toBe(ip);
+    expect(node?.data.label).not.toContain(alias);
+  });
+
+  it('topologyView_aliasLabelGuard_wildcardAlias_rendersIpNotAlias', () => {
+    // A *.docker.internal subdomain must also be suppressed.
+    const ip = '172.17.0.1';
+    const alias = 'gateway.docker.internal';
+    const devices: Device[] = [makeDeviceWithHostname(1, ip, alias)];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string; label: string } }>;
+    const node = addArgs.find(e => e.data.id === '1');
+    expect(node?.data.label).toBe(ip);
+    expect(node?.data.label).not.toContain(alias);
+  });
+});
+
 // AC#3 overlay-regression guard. The "Computing risk scores…" badge was moved
 // top-LEFT in PR #28 precisely because the TopologyLegend owns the top-right
 // corner (z-10) and otherwise covered it. Pin that invariant so a future edit

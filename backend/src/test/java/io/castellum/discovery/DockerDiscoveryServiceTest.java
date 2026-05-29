@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  *   <li>source = {@link DiscoverySource#DOCKER};</li>
  *   <li>scope = {@link DiscoveryScope#DOCKER_BRIDGE} iff it publishes a host port, else
  *       {@link DiscoveryScope#HOME} — the live edge logic then bridges only the
- *       DOCKER_BRIDGE ones to {@code host.docker.internal};</li>
+ *       DOCKER_BRIDGE ones to the docker-host pivot (the HOME device at the configured docker-host IP);</li>
  *   <li>one synthetic gateway device per docker network at its {@code .1} gateway;</li>
  *   <li>idempotent re-run (no duplicate rows).</li>
  * </ul>

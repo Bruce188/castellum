@@ -172,7 +172,13 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const extraClasses = [scopeClass, sourceClass].filter(Boolean).join(' ');
       // serviceCount suffix in the label surfaces the badge on the rendered graph.
       // The style block at :79 already renders data(label); no style change needed.
-      const baseName = d.hostname ?? d.ipAddress;
+      // Guard: "host.docker.internal" and *.docker.internal are Docker bridge-gateway aliases
+      // that must never render as a node label. The backend filters them before storage, but
+      // this guard ensures any legacy data or race condition never surfaces the alias in the UI.
+      const isBridgeAlias = (h: string | null) =>
+        h != null && (h === 'host.docker.internal' || h.endsWith('.docker.internal'));
+      const hostname = isBridgeAlias(d.hostname) ? null : d.hostname;
+      const baseName = hostname ?? d.ipAddress;
       return {
         data: {
           id: String(d.id),

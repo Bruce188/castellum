@@ -307,4 +307,148 @@ class DeviceUpsertServiceTest {
         var found = repo.findByIpAddress("172.18.0.9").orElseThrow();
         assertThat(found.getHostname()).isEqualTo("renamed-container");
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // AC1 + AC2 — bridge-alias hostname filtering and hostname priority
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * AC1: a discovery observation carrying hostname "host.docker.internal" (the Docker bridge
+     * gateway alias) must NOT be persisted as the device's hostname on INSERT.
+     * The device should have a null hostname rather than the alias.
+     */
+    @Test
+    void upsert_bridgeAliasHostname_notStoredOnInsert() {
+        Discovery d = new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
+            "host.docker.internal", DiscoverySource.MDNS, T1, null);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname())
+            .as("bridge alias must never be stored as hostname")
+            .isNull();
+    }
+
+    /**
+     * AC1: bridge alias observation arriving on UPDATE must not overwrite a null hostname
+     * with the alias.
+     */
+    @Test
+    void upsert_bridgeAliasHostname_notStoredOnUpdate_whenCurrentIsNull() {
+        Device seed = new Device(null, "192.168.68.51", null, null, T1, T1);
+        repo.save(seed);
+
+        Discovery d = new Discovery("192.168.68.51", null,
+            "host.docker.internal", DiscoverySource.MDNS, T2, null);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname())
+            .as("bridge alias must not fill a null hostname slot")
+            .isNull();
+    }
+
+    /**
+     * AC2: if a device was somehow seeded with the bridge alias as its hostname, a subsequent
+     * observation carrying a real hostname must SUPERSEDE it (override-alias policy).
+     */
+    @Test
+    void upsert_realHostname_supersedessStoredBridgeAlias() {
+        Device seed = new Device(null, "192.168.68.51", "host.docker.internal", null, T1, T1);
+        repo.save(seed);
+
+        Discovery d = new Discovery("192.168.68.51", null,
+            "operators-laptop", DiscoverySource.MDNS, T2, null);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname())
+            .as("real hostname must supersede a stored bridge alias")
+            .isEqualTo("operators-laptop");
+    }
+
+    /**
+     * AC2: a real hostname already stored must NOT be overwritten by a later bridge-alias
+     * observation.
+     */
+    @Test
+    void upsert_bridgeAlias_doesNotOverwriteRealHostname() {
+        Device seed = new Device(null, "192.168.68.51", "real-hostname", null, T1, T1);
+        repo.save(seed);
+
+        Discovery d = new Discovery("192.168.68.51", null,
+            "host.docker.internal", DiscoverySource.MDNS, T2, null);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname())
+            .as("real hostname must never be overwritten by a bridge alias")
+            .isEqualTo("real-hostname");
+    }
+
+    /**
+     * AC5(a): upsert sequence — bridge-alias arrives first, real hostname arrives second
+     * → final hostname is the real one.
+     */
+    @Test
+    void upsert_sequence_aliasFirst_thenRealHostname_finalIsReal() {
+        // Step 1: ARP/mDNS observes bridge alias
+        Discovery aliasObs = new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
+            "host.docker.internal", DiscoverySource.MDNS, T1, null);
+        service.upsert(aliasObs);
+
+        // Step 2: mDNS later resolves the real hostname
+        Discovery realObs = new Discovery("192.168.68.51", null,
+            "operators-laptop.local", DiscoverySource.MDNS, T2, null);
+        service.upsert(realObs);
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname()).isEqualTo("operators-laptop.local");
+    }
+
+    /**
+     * AC5(b): bridge-alias-only observation sequence — hostname stays null (never the alias).
+     */
+    @Test
+    void upsert_bridgeAliasOnly_hostnameRemainsNull() {
+        Discovery d1 = new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
+            "host.docker.internal", DiscoverySource.ARP, T1, null);
+        service.upsert(d1);
+
+        Discovery d2 = new Discovery("192.168.68.51", null,
+            "host.docker.internal", DiscoverySource.MDNS, T2, null);
+        service.upsert(d2);
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname())
+            .as("after two alias-only observations, hostname must remain null")
+            .isNull();
+    }
+
+    /**
+     * AC2 (batch): upsertAll INSERT path must also filter the bridge alias.
+     */
+    @Test
+    void upsertAll_bridgeAliasHostname_notStoredOnInsert() {
+        service.upsertAll(List.of(new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
+            "host.docker.internal", DiscoverySource.ARP, T1, null)));
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname()).isNull();
+    }
+
+    /**
+     * AC2 (batch): upsertAll UPDATE path must not let alias supersede a null or real hostname.
+     */
+    @Test
+    void upsertAll_bridgeAliasHostname_notStoredOnUpdate() {
+        Device seed = new Device(null, "192.168.68.51", null, null, T1, T1);
+        repo.save(seed);
+
+        service.upsertAll(List.of(new Discovery("192.168.68.51", null,
+            "host.docker.internal", DiscoverySource.MDNS, T2, null)));
+
+        var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
+        assertThat(found.getHostname()).isNull();
+    }
 }

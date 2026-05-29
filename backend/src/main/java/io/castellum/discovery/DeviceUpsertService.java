@@ -28,6 +28,11 @@ import java.util.Set;
  *   <li>Primary key: {@code ipAddress} (UNIQUE column).</li>
  *   <li>Existing row: update {@code lastSeen}; fill {@code macAddress} and {@code hostname}
  *       only if the existing values are {@code null}.</li>
+ *   <li>Hostname priority policy: Docker bridge-gateway aliases (e.g. {@code host.docker.internal},
+ *       {@code *.docker.internal}) are NEVER stored as a device hostname — they are artifacts of
+ *       the Docker network stack, not real host identities. A real hostname always supersedes a
+ *       stored bridge alias on a subsequent observation. Priority order:
+ *       real hostname > null (no source) > bridge alias (rejected). The alias is never written.</li>
  *   <li>New row: create with {@link Criticality#MEDIUM} default and
  *       {@link io.castellum.discovery.DiscoveryScope} derived from {@code ipAddress} via
  *       {@link DiscoveryScopeClassifier#classify(String)}.</li>
@@ -37,6 +42,29 @@ import java.util.Set;
  */
 @Service
 public class DeviceUpsertService {
+
+    /**
+     * Docker bridge-gateway alias suffixes that must never be stored as a device hostname.
+     * The gateway alias {@code host.docker.internal} (and any {@code *.docker.internal}
+     * variant) is an artifact of the Docker network stack, not a real host identity.
+     */
+    private static boolean isBridgeAlias(String hostname) {
+        if (hostname == null) return false;
+        String lower = hostname.toLowerCase(java.util.Locale.ROOT);
+        return lower.equals("host.docker.internal") || lower.endsWith(".docker.internal");
+    }
+
+    /**
+     * Returns the effective hostname to store, applying the bridge-alias filter and the
+     * override-alias policy:
+     * <ul>
+     *   <li>If the incoming hostname is a bridge alias → {@code null} (filtered out).</li>
+     *   <li>Otherwise → the incoming hostname as-is (may be {@code null}).</li>
+     * </ul>
+     */
+    private static String sanitizeHostname(String hostname) {
+        return isBridgeAlias(hostname) ? null : hostname;
+    }
 
     private final DeviceRepository repo;
     private final DiscoveryScopeClassifier scopeClassifier;
@@ -76,8 +104,11 @@ public class DeviceUpsertService {
             // hostname: overwrite-always for the scope-explicit path. A container's name is a
             // stable, authoritative identifier (re-create keeps the same name); refreshing it
             // keeps the topology label current if a prior null/stale source seeded the row.
-            if (d.hostname() != null) {
-                e.setHostname(d.hostname());
+            // Bridge alias filtered via sanitizeHostname — defense-in-depth: a container
+            // pathologically named host.docker.internal must not bypass the AC1 policy.
+            String incomingHostname = sanitizeHostname(d.hostname());
+            if (incomingHostname != null) {
+                e.setHostname(incomingHostname);
             }
             if (d.iface() != null) {
                 e.setLastSeenIface(d.iface());
@@ -87,11 +118,13 @@ public class DeviceUpsertService {
             e.setDiscoveryScope(scope);
             return repo.save(e);
         } else {
+            // sanitizeHostname on insert — mirrors the update branch above.
+            String insertHostname = sanitizeHostname(d.hostname());
             Instant now = d.observedAt();
             Device fresh = new Device(
                 null,
                 d.ipAddress(),
-                d.hostname(),
+                insertHostname,
                 d.macAddress(),
                 now,
                 now,
@@ -106,6 +139,7 @@ public class DeviceUpsertService {
 
     @Transactional
     public Device upsert(Discovery d) {
+        String incomingHostname = sanitizeHostname(d.hostname());
         Optional<Device> existing = repo.findByIpAddress(d.ipAddress());
         if (existing.isPresent()) {
             Device e = existing.get();
@@ -113,8 +147,16 @@ public class DeviceUpsertService {
             if (e.getMacAddress() == null && d.macAddress() != null) {
                 e.setMacAddress(d.macAddress());
             }
-            if (e.getHostname() == null && d.hostname() != null) {
-                e.setHostname(d.hostname());
+            // Hostname priority policy:
+            //   1. Never set: incoming is a bridge alias (filtered to null by sanitizeHostname).
+            //   2. Fill: existing is null and incoming is a real hostname.
+            //   3. Override alias: existing is a bridge alias and incoming is a real hostname
+            //      — a stale alias that somehow persisted must be superseded by any real name.
+            //   4. Preserve: existing is already a real hostname — never overwrite.
+            if (incomingHostname != null) {
+                if (e.getHostname() == null || isBridgeAlias(e.getHostname())) {
+                    e.setHostname(incomingHostname);
+                }
             }
             // iface uses overwrite-only-when-non-null — the inverse of mac/hostname's
             // fill-only-when-prior-null. ARP rescan SHOULD replace stale iface (cable swap);
@@ -134,7 +176,7 @@ public class DeviceUpsertService {
             Device fresh = new Device(
                 null,
                 d.ipAddress(),
-                d.hostname(),
+                incomingHostname,   // bridge alias filtered to null
                 d.macAddress(),
                 now,
                 now,
@@ -217,6 +259,7 @@ public class DeviceUpsertService {
         List<Slot> slots = new ArrayList<>(discoveries.size());
 
         for (Discovery d : discoveries) {
+            String incomingHostname = sanitizeHostname(d.hostname());
             Device existing = null;
             if (d.macAddress() != null && !d.macAddress().isBlank()) {
                 existing = existingByMac.get(d.macAddress());
@@ -233,8 +276,12 @@ public class DeviceUpsertService {
                 if (existing.getMacAddress() == null && d.macAddress() != null) {
                     existing.setMacAddress(d.macAddress());
                 }
-                if (existing.getHostname() == null && d.hostname() != null) {
-                    existing.setHostname(d.hostname());
+                // Hostname priority: same as upsert(Discovery) — never store bridge alias;
+                // real hostname fills null or supersedes a stored alias.
+                if (incomingHostname != null) {
+                    if (existing.getHostname() == null || isBridgeAlias(existing.getHostname())) {
+                        existing.setHostname(incomingHostname);
+                    }
                 }
                 // iface overwrite-only-when-non-null (inverse of mac/hostname). See
                 // upsert(Discovery) for rationale.
@@ -247,7 +294,7 @@ public class DeviceUpsertService {
                 updates.add(existing);
             } else {
                 Instant now = d.observedAt();
-                Device fresh = new Device(null, d.ipAddress(), d.hostname(), d.macAddress(),
+                Device fresh = new Device(null, d.ipAddress(), incomingHostname, d.macAddress(),
                     now, now, Criticality.MEDIUM);
                 fresh.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
                 fresh.setLastSeenIface(d.iface());

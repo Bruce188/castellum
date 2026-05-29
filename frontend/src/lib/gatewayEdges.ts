@@ -74,13 +74,15 @@ function pickGateway(group: Device[]): Device {
 }
 
 /**
- * Identify the device that hosts Castellum's docker bridge. Heuristic:
- * <ul>
- *   <li>HOME-scope device whose hostname is exactly {@code host.docker.internal}, OR</li>
- *   <li>HOME-scope device whose IP matches
- *       {@code localStorage[castellum.topology.docker-host-ip]} (default
- *       {@code 192.168.68.51}).</li>
- * </ul>
+ * Identify the device that hosts Castellum's docker bridge.
+ *
+ * Detection is IP-based only: a HOME-scope device whose IP matches
+ * {@code localStorage[castellum.topology.docker-host-ip]} (default {@code 192.168.68.51}).
+ *
+ * Hostname matching on {@code "host.docker.internal"} was removed — that string is a Docker
+ * bridge-gateway alias and is never stored as a real device hostname by the backend
+ * (filtered by {@code DeviceUpsertService}). IP is the stable, unambiguous identity.
+ *
  * Returns {@code null} if no candidate exists, in which case
  * DOCKER_BRIDGE devices remain orphans (no synthetic edges).
  */
@@ -90,7 +92,6 @@ function findDockerHost(devices: Device[]): Device | null {
     : null) ?? DEFAULT_DOCKER_HOST_IP;
   for (const d of devices) {
     if (d.discoveryScope !== 'HOME') continue;
-    if (d.hostname === 'host.docker.internal') return d;
     if (d.ipAddress === override) return d;
   }
   return null;
