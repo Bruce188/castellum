@@ -5,6 +5,7 @@ import io.castellum.config.SecurityConfig;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.ScanRepository;
 import io.castellum.scan.ScanExecutionService;
+import io.castellum.scan.ScanReportService;
 import io.castellum.scan.ScanSubmissionRateLimiter;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
@@ -44,6 +45,7 @@ class ScanRateLimitTest {
     @MockBean private ScanExecutionService scanExecutionService;
     @MockBean private ScanSubmissionRateLimiter scanRateLimiter;
     @MockBean private DeviceRepository deviceRepository;
+    @MockBean private ScanReportService scanReportService;
     @MockBean private CastellumUserDetailsService castellumUserDetailsService;
     @MockBean private JwtService jwtService;
     @MockBean private UserRepository userRepository;

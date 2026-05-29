@@ -428,6 +428,52 @@ export interface OtProbeResponse {
   observedAt: string;
 }
 
+// ----- Per-scan report (Task 3.1) -----
+
+/** Delta classification for a device row in a scan snapshot. Mirrors {@code ScanReportDto.SnapshotDeviceDto.delta}. */
+export type ScanDelta = 'new' | 'changed' | 'unchanged';
+
+/** Mirrors {@code ScanReportDto.ScanSummary} — scan metadata + aggregate counts. */
+export interface ScanReportSummary {
+  scanId: number;
+  cidr: string;
+  scanType: ScanType;
+  status: ScanStatus;
+  requestedAt: string;
+  completedAt: string | null;
+  durationMillis: number | null;
+  failureReason?: string | null;
+  retryCount?: number;
+  deviceCount: number;
+  serviceCount: number;
+  cveCount: number;
+}
+
+/** Mirrors {@code ScanReportDto.ServiceRowDto} — per-service row nested inside a snapshot device. */
+export interface ScanSnapshotService {
+  id: number;
+  port: number;
+  protocol: string;
+  name: string | null;
+  version: string | null;
+}
+
+/** Mirrors {@code ScanReportDto.SnapshotDeviceDto} — per-device snapshot row with delta + services + CVE ids. */
+export interface ScanSnapshotDevice {
+  id: number;
+  ipAddress: string;
+  hostname: string | null;
+  delta: ScanDelta;
+  services: ScanSnapshotService[];
+  cveIds: string[];
+}
+
+/** Top-level response from GET /api/scans/{id}/report. Mirrors {@code ScanReportDto}. */
+export interface ScanReport {
+  summary: ScanReportSummary;
+  devices: ScanSnapshotDevice[];
+}
+
 /** Mirror of the backend {@code Role} enum. */
 export type UserRole = 'ADMIN' | 'VIEWER';
 

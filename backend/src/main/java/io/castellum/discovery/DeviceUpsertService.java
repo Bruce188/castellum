@@ -162,8 +162,19 @@ public class DeviceUpsertService {
         }
     }
 
+    /**
+     * Scan-only upsert overload. Performs the same upsert as {@link #upsert(Discovery)} and
+     * additionally writes scan attribution columns when {@code scanId} is non-null:
+     * <ul>
+     *   <li>INSERT: sets {@code discoveredByScanId = scanId} AND {@code lastSeenByScanId = scanId}.</li>
+     *   <li>UPDATE: sets {@code lastSeenByScanId = scanId}; sets {@code discoveredByScanId = scanId}
+     *       ONLY if it is currently null (insert-once / first-discovery sticky — never overwrite).</li>
+     * </ul>
+     * When {@code scanId} is {@code null}, behaves identically to {@link #upsert(Discovery)} and
+     * writes NO attribution — non-scan callers (docker/passive/ARP) are unaffected.
+     */
     @Transactional
-    public Device upsert(Discovery d) {
+    public Device upsert(Discovery d, Long scanId) {
         String incomingHostname = sanitizeHostname(d.hostname());
         Optional<Device> existing = repo.findByIpAddress(d.ipAddress());
         if (existing.isPresent()) {
@@ -190,11 +201,16 @@ public class DeviceUpsertService {
                 e.setLastSeenIface(d.iface());
             }
             // discoverySource: overwrite always (last-writer-wins, mirrors lastSeen).
-            // Every upsert — regardless of insert/update — records the most recent
-            // method by which this device was observed. There is no "preserve prior"
-            // semantic: a device re-discovered by NMAP_SCAN after ARP should reflect
-            // NMAP_SCAN as the latest signal.
             e.setDiscoverySource(d.source());
+            // Scan attribution (UPDATE path):
+            //   lastSeenByScanId: last-writer-wins — always set when scanId is present.
+            //   discoveredByScanId: insert-once — only fill when currently null (first-discovery sticky).
+            if (scanId != null) {
+                e.setLastSeenByScanId(scanId);
+                if (e.getDiscoveredByScanId() == null) {
+                    e.setDiscoveredByScanId(scanId);
+                }
+            }
             return repo.save(e);
         } else {
             Instant now = d.observedAt();
@@ -211,8 +227,22 @@ public class DeviceUpsertService {
             fresh.setLastSeenIface(d.iface());
             // discoverySource: last-writer-wins (mirrors lastSeen; see update branch above).
             fresh.setDiscoverySource(d.source());
+            // Scan attribution (INSERT path): set both columns when scanId is present.
+            if (scanId != null) {
+                fresh.setDiscoveredByScanId(scanId);
+                fresh.setLastSeenByScanId(scanId);
+            }
             return repo.save(fresh);
         }
+    }
+
+    /**
+     * Non-scan upsert. Delegates to {@link #upsert(Discovery, Long)} with {@code null} scanId —
+     * writes NO scan attribution. Docker/passive/ARP callers use this entry point.
+     */
+    @Transactional
+    public Device upsert(Discovery d) {
+        return upsert(d, null);
     }
 
     /**

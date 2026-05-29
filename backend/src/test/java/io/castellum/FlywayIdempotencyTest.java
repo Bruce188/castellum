@@ -85,4 +85,49 @@ class FlywayIdempotencyTest {
             .as("V21 must create an index on kev_entry(ingested_at) backing findMaxIngestedAt()")
             .isTrue();
     }
+
+    /**
+     * V25 regression — both {@code discovered_by_scan_id} and {@code last_seen_by_scan_id}
+     * columns must exist on the {@code device} table after migration.
+     *
+     * <p>Falsifiable: deleting either {@code ADD COLUMN} line (or the H2 mirror) causes the
+     * column-presence assertion to fail. The existing {@link #secondMigrateIsNoOp()} continues
+     * to hold because V25 only raises the applied migration count — the {@code >= 10} bound still
+     * holds.</p>
+     */
+    @Test
+    void v25_addsScanAttributionColumns() throws Exception {
+        Flyway flyway = Flyway.configure()
+            .dataSource(
+                "jdbc:h2:mem:v25attr;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
+                "sa", "")
+            .locations("classpath:db/migration/h2")
+            .load();
+        flyway.migrate();
+
+        DataSource ds = flyway.getConfiguration().getDataSource();
+        boolean discoveredColFound = false;
+        boolean lastSeenColFound = false;
+        try (Connection conn = ds.getConnection()) {
+            DatabaseMetaData meta = conn.getMetaData();
+            // H2 in PostgreSQL mode lower-cases unquoted identifiers; try both casings.
+            for (String tableName : new String[] {"device", "DEVICE"}) {
+                try (ResultSet rs = meta.getColumns(null, null, tableName, "%")) {
+                    while (rs.next()) {
+                        String col = rs.getString("COLUMN_NAME").toLowerCase(Locale.ROOT);
+                        if (col.equals("discovered_by_scan_id")) discoveredColFound = true;
+                        if (col.equals("last_seen_by_scan_id"))  lastSeenColFound  = true;
+                    }
+                }
+                if (discoveredColFound && lastSeenColFound) break;
+            }
+        }
+
+        assertThat(discoveredColFound)
+            .as("V25 must add discovered_by_scan_id column to device table")
+            .isTrue();
+        assertThat(lastSeenColFound)
+            .as("V25 must add last_seen_by_scan_id column to device table")
+            .isTrue();
+    }
 }
