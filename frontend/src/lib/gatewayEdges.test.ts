@@ -61,6 +61,8 @@ describe('buildGatewayEdges', () => {
   it('mixed_scope_with_docker_host_at_default_ip', () => {
     // Device 3 at 192.168.68.51 (default docker-host IP) — detected by IP, not hostname.
     // Hostname field is null to reflect the post-fix backend behavior (alias filtered).
+    // Devices 4+5 are DOCKER_BRIDGE on 172.18.0/24 with NO docker-net gateway →
+    // unattached: they get ZERO docker-bridge edges and ZERO gateway-kind edges (Change 2).
     const devices: Device[] = [
       makeDevice(1, '192.168.68.1', 'HOME'),
       makeDevice(2, '192.168.68.50', 'HOME'),
@@ -72,35 +74,35 @@ describe('buildGatewayEdges', () => {
     const gatewayEdges = edges.filter(e => e.data.kind === 'gateway');
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
 
-    // Gateway edges within 192.168.68/24: .50 → .1, .51 → .1
-    // Within 172.18.0/24: .3 → .2 (lowest-IP fallback since no .1)
-    expect(gatewayEdges).toHaveLength(3);
+    // Gateway edges within 192.168.68/24 only: .50 → .1, .51 → .1
+    // 172.18.0/24 has no docker-net gateway — unattached devices emit NO gateway edge (Change 2)
+    expect(gatewayEdges).toHaveLength(2);
     const home68 = gatewayEdges.filter(e => e.data.gatewayIp === '192.168.68.1');
     expect(home68).toHaveLength(2);
     expect(home68.every(e => e.data.target === '1')).toBe(true);
     expect(home68.map(e => e.data.source).sort()).toEqual(['2', '3']);
 
-    // Docker-bridge synthetic edges: docker host (device 3) → each DOCKER_BRIDGE device.
-    expect(dockerEdges).toHaveLength(2);
-    expect(dockerEdges.every(e => e.data.source === '3')).toBe(true);
-    expect(dockerEdges.map(e => e.data.target).sort()).toEqual(['4', '5']);
+    // No docker-bridge edges: unattached DOCKER_BRIDGE devices get zero edges (Change 2)
+    expect(dockerEdges).toHaveLength(0);
 
-    // 172.18.0/24 gateway edge: .3 → .2 (lowest-IP fallback)
+    // No 172.18.0/24 gateway-kind edge between the two unattached devices (Change 2)
     const docker24 = gatewayEdges.find(e => e.data.gatewayIp === '172.18.0.2');
-    expect(docker24).toMatchObject({ data: { source: '5', target: '4' } });
+    expect(docker24).toBeUndefined();
   });
 
   it('docker_bridge_without_host_remains_orphan', () => {
+    // Two DOCKER_BRIDGE devices on 172.18.0/24, no HOME device, no docker-net gateway.
+    // They are unattached. Change 2: NO edges at all (no docker-bridge, no gateway-kind).
     const devices: Device[] = [
       makeDevice(1, '172.18.0.2', 'DOCKER_BRIDGE'),
       makeDevice(2, '172.18.0.3', 'DOCKER_BRIDGE'),
     ];
     const edges = buildGatewayEdges(devices);
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
-    // No HOME device matches docker-host heuristic → zero synthetic edges.
+    // No HOME device matches docker-host heuristic → zero synthetic docker-bridge edges.
     expect(dockerEdges).toHaveLength(0);
-    // DOCKER_BRIDGE devices still cluster by /24: 1 gateway-kind edge expected.
-    expect(edges).toHaveLength(1);
+    // Unattached DOCKER_BRIDGE devices also emit NO gateway-kind edges between themselves (Change 2).
+    expect(edges).toHaveLength(0);
   });
 
   it('lone_link_local_device_yields_isolated_affordance_not_zero_edges', () => {
@@ -139,9 +141,12 @@ describe('buildGatewayEdges', () => {
     });
 
     it('routes docker-bridge edges from the overridden IP', () => {
+      // Device 2 is a published container (publishesHostPort:true) so the pivot→published
+      // docker-bridge edge is emitted. No docker-net gateway in 172.18.0/24, so the only
+      // docker-bridge edge is pivot→published — we assert its source is the overridden IP.
       const devices: Device[] = [
         makeDevice(1, '192.168.68.99', 'HOME'),
-        makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+        makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE', null, true),
       ];
       const edges = buildGatewayEdges(devices);
       const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
@@ -156,10 +161,13 @@ describe('buildGatewayEdges', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it('ac4_docker_host_with_alias_hostname_detected_by_ip_not_hostname', () => {
-    // Post-fix: device at docker-host IP with a real hostname (alias was filtered by backend)
+    // Post-fix: device at docker-host IP with a real hostname (alias was filtered by backend).
+    // Device 2 is a published container (publishesHostPort:true) so a pivot→published
+    // docker-bridge edge is emitted. The signal: detection works by IP despite the alias
+    // hostname — the pivot (source) is device 1 at the docker-host IP, not by hostname.
     const devices: Device[] = [
       makeDevice(1, '192.168.68.51', 'HOME', 'operators-laptop'),
-      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE', null, true),
     ];
     const edges = buildGatewayEdges(devices);
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
@@ -168,10 +176,13 @@ describe('buildGatewayEdges', () => {
   });
 
   it('ac4_docker_host_null_hostname_detected_by_ip', () => {
-    // Bridge alias was filtered → hostname is null; IP-based detection must still work
+    // Bridge alias was filtered → hostname is null; IP-based detection must still work.
+    // Device 2 is a published container (publishesHostPort:true) so a pivot→published
+    // docker-bridge edge is emitted. The signal: detection works by IP even when
+    // hostname is null — the pivot (source) is device 1.
     const devices: Device[] = [
       makeDevice(1, '192.168.68.51', 'HOME', null),
-      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE', null, true),
     ];
     const edges = buildGatewayEdges(devices);
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
@@ -217,15 +228,28 @@ describe('buildGatewayEdges', () => {
     const publishedContainer = makeDevice(3, '172.18.0.5', 'DOCKER_BRIDGE', null, true);
     const internalContainer = makeDevice(4, '172.18.0.6', 'DOCKER_BRIDGE', null, false);
 
-    it('(a) publishesHostPort:true container gets a docker-bridge edge directly to pivot', () => {
+    // ── RECONCILED (a): Change 1 — published container in a gatewayed network gets BOTH edges ──
+    // Old contract: published container → pivot only (exactly one edge).
+    // New contract: published container → gateway (new) AND → pivot (kept).
+    it('(a) publishesHostPort:true container in a gatewayed network gets edge to pivot AND edge to gateway', () => {
       const devices = [pivot, netAGateway, publishedContainer];
       const edges = buildGatewayEdges(devices);
       const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
 
-      // The published container must have exactly one docker-bridge edge and it must point to the pivot
-      const toPivot = dbEdges.filter(e => e.data.target === String(publishedContainer.id));
-      expect(toPivot).toHaveLength(1);
-      expect(toPivot[0].data.source).toBe(String(pivot.id));
+      // The pivot must still have a docker-bridge edge to the published container (existing behaviour)
+      const pivotToPublished = dbEdges.filter(
+        e => e.data.source === String(pivot.id) && e.data.target === String(publishedContainer.id),
+      );
+      expect(pivotToPublished).toHaveLength(1);
+
+      // NEW (Change 1): the published container must ALSO have a docker-bridge edge to the docker-net gateway
+      const publishedToGateway = dbEdges.filter(
+        e => e.data.source === String(publishedContainer.id) && e.data.target === String(netAGateway.id),
+      );
+      expect(
+        publishedToGateway,
+        'published container in a gatewayed network must have a docker-bridge edge to its docker-net gateway',
+      ).toHaveLength(1);
     });
 
     it('(b) internal-only container routes to docker-net gateway, NOT to the pivot', () => {
@@ -257,11 +281,13 @@ describe('buildGatewayEdges', () => {
       expect(gatewayToPivot).toHaveLength(1);
     });
 
-    it('(d) AC3: pivot-incident docker-bridge edge count == published + K networks, not N+M total', () => {
+    it('(d) AC3 invariant: pivot-incident docker-bridge count == published + K gateways; internal containers are not pivot-incident', () => {
       // 2 published containers (in net_a and net_b)
       // 3 internal containers (2 in net_a, 1 in net_b)
       // 2 networks (net_a: 172.18.0/24, net_b: 172.19.0/24)
       // Expected pivot-incident docker-bridge edges: 2 (published) + 2 (gateways) = 4, NOT 2+3=5
+      // Change 1 adds published→gateway edges but those are NOT pivot-incident (source is the container,
+      // not the pivot), so this count must still be 4.
 
       const netBGateway = makeDevice(5, '172.19.0.1', 'DOCKER_BRIDGE', 'docker-net:net_b', false);
       const publishedInNetA = makeDevice(6, '172.18.0.10', 'DOCKER_BRIDGE', null, true);
@@ -321,27 +347,45 @@ describe('buildGatewayEdges', () => {
       }
     });
 
-    it('(f) internal-only container with no docker-net gateway in /24 falls back to docker-bridge edge to pivot', () => {
+    // ── RECONCILED (f): Change 2 — unattached internal container gets ZERO edges ──
+    // Old contract: internal container whose /24 has no docker-net gateway → fallback docker-bridge
+    //               edge to the pivot (anti-orphan).
+    // New contract (Change 2): that scenario is "unattached" → NO edges whatsoever.
+    it('(f) internal-only container with no docker-net gateway in /24 gets NO edges (unattached = disconnected)', () => {
       // An internal-only container (DOCKER_BRIDGE, publishesHostPort:false, not a gateway)
-      // whose /24 contains NO docker-net gateway device.  The fallback branch in
-      // buildGatewayEdges must produce a docker-bridge edge from the pivot to the
-      // container rather than leaving it orphaned.
+      // whose /24 contains NO docker-net gateway device.
+      // New contract: no docker-bridge edge to the pivot, no isolated self-edge.
       const pivotDevice = makeDevice(1, '192.168.68.51', 'HOME', null, false);
       // Container on 172.99.0/24 — no docker-net:* gateway exists on that /24
-      const internalContainer = makeDevice(2, '172.99.0.5', 'DOCKER_BRIDGE', null, false);
+      const unattachedContainer = makeDevice(2, '172.99.0.5', 'DOCKER_BRIDGE', null, false);
 
-      const devices = [pivotDevice, internalContainer];
+      const devices = [pivotDevice, unattachedContainer];
       const edges = buildGatewayEdges(devices);
       const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
 
-      // The fallback must emit exactly one docker-bridge edge targeting the container
-      const fallbackEdge = dbEdges.find(e => e.data.target === String(internalContainer.id));
-      expect(fallbackEdge, 'fallback docker-bridge edge to pivot must exist for orphan container').toBeTruthy();
-      // The source must be the pivot (docker host), confirming it is NOT orphaned
-      expect(fallbackEdge?.data.source).toBe(String(pivotDevice.id));
-      // No isolated edge must be emitted for the container (it was rescued)
+      // Change 2: the anti-orphan fallback is removed — no docker-bridge edge to the pivot
+      const fallbackEdge = dbEdges.find(
+        e => e.data.target === String(unattachedContainer.id) || e.data.source === String(unattachedContainer.id),
+      );
+      expect(
+        fallbackEdge,
+        'unattached container must NOT have any docker-bridge edge (no anti-orphan fallback)',
+      ).toBeUndefined();
+
+      // No isolated self-edge either
       const isolatedEdges = edges.filter(e => e.data.kind === 'isolated');
-      expect(isolatedEdges.map(e => e.data.source)).not.toContain(String(internalContainer.id));
+      expect(isolatedEdges.map(e => e.data.source)).not.toContain(String(unattachedContainer.id));
+
+      // The unattached container must appear in zero edges total
+      const allEdgesForContainer = edges.filter(
+        e =>
+          e.data.source === String(unattachedContainer.id) ||
+          e.data.target === String(unattachedContainer.id),
+      );
+      expect(
+        allEdgesForContainer,
+        'unattached docker container must have zero edges total',
+      ).toHaveLength(0);
     });
 
     it('(g) non-docker /24 groups still emit gateway and isolated kinds unchanged', () => {
@@ -364,6 +408,194 @@ describe('buildGatewayEdges', () => {
 
       // No docker-bridge edges at all (no DOCKER_BRIDGE scope devices)
       expect(edges.filter(e => e.data.kind === 'docker-bridge')).toHaveLength(0);
+    });
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Change 1 — group hub wiring: all containers in a network connect to their gateway
+    // ────────────────────────────────────────────────────────────────────────
+
+    it('change1: every container in a network (published + internal) is wired to its docker-net gateway', () => {
+      // net_a: gateway=2(172.18.0.1), published=3(172.18.0.5), internal=4(172.18.0.6)
+      // All three are in the 172.18.0/24; the gateway is the hub.
+      // Expected docker-bridge edges:
+      //   pivot→gateway (gateway wired to pivot)
+      //   published→gateway (Change 1: published also wired to hub)
+      //   internal→gateway (unchanged: internal wired to hub)
+      //   pivot→published (Change 1: published ALSO wired to pivot directly)
+      const devices = [pivot, netAGateway, publishedContainer, internalContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // published→gateway edge must exist (Change 1)
+      const publishedToGateway = dbEdges.filter(
+        e =>
+          e.data.source === String(publishedContainer.id) &&
+          e.data.target === String(netAGateway.id),
+      );
+      expect(
+        publishedToGateway,
+        'published container must have docker-bridge edge to its docker-net gateway (Change 1)',
+      ).toHaveLength(1);
+
+      // internal→gateway edge must exist (unchanged)
+      const internalToGateway = dbEdges.filter(
+        e =>
+          e.data.source === String(internalContainer.id) &&
+          e.data.target === String(netAGateway.id),
+      );
+      expect(
+        internalToGateway,
+        'internal container must have docker-bridge edge to its docker-net gateway',
+      ).toHaveLength(1);
+
+      // pivot→published edge must still exist (published keeps direct pivot link)
+      const pivotToPublished = dbEdges.filter(
+        e =>
+          e.data.source === String(pivot.id) &&
+          e.data.target === String(publishedContainer.id),
+      );
+      expect(
+        pivotToPublished,
+        'published container must keep its direct docker-bridge edge to the host pivot',
+      ).toHaveLength(1);
+
+      // pivot→gateway edge must exist (gateway wired to pivot, unchanged)
+      const pivotToGateway = dbEdges.filter(
+        e =>
+          e.data.source === String(pivot.id) &&
+          e.data.target === String(netAGateway.id),
+      );
+      expect(
+        pivotToGateway,
+        'docker-net gateway must keep its docker-bridge edge to the host pivot',
+      ).toHaveLength(1);
+    });
+
+    it('change1: published container in gatewayed network has both pivot and gateway docker-bridge edges', () => {
+      // Minimal fixture: pivot + one gateway + one published container (all in same /24)
+      const devices = [pivot, netAGateway, publishedContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // Both edges must exist for the published container
+      const pivotToPublished = dbEdges.filter(
+        e =>
+          e.data.source === String(pivot.id) &&
+          e.data.target === String(publishedContainer.id),
+      );
+      expect(pivotToPublished).toHaveLength(1);
+
+      const publishedToGateway = dbEdges.filter(
+        e =>
+          e.data.source === String(publishedContainer.id) &&
+          e.data.target === String(netAGateway.id),
+      );
+      expect(
+        publishedToGateway,
+        'published container must also have a docker-bridge edge to the docker-net gateway (Change 1)',
+      ).toHaveLength(1);
+    });
+
+    it('change1: AC3 invariant is preserved — new published→gateway edges are not pivot-incident', () => {
+      // With Change 1, a published container emits an extra docker-bridge edge (→ gateway).
+      // That edge is sourced from the container, NOT from the pivot, so it must NOT
+      // inflate the pivot-incident count.
+      const devices = [pivot, netAGateway, publishedContainer, internalContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // Pivot-incident = edges whose source is the pivot
+      const pivotIncident = dbEdges.filter(e => e.data.source === String(pivot.id));
+
+      // K=1 gateway + 1 published → 2 pivot-incident edges
+      // The extra published→gateway edge (Change 1) must NOT appear here
+      expect(
+        pivotIncident,
+        'pivot-incident count must be 2 (1 gateway + 1 published), not inflated by published→gateway edges',
+      ).toHaveLength(2);
+
+      // The internal container must NOT be a pivot-incident target
+      expect(pivotIncident.map(e => e.data.target)).not.toContain(String(internalContainer.id));
+    });
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Change 2 — unattached nodes fully disconnected (no pivot fallback, no peer edges)
+    // ────────────────────────────────────────────────────────────────────────
+
+    it('change2: single unattached DOCKER_BRIDGE device (no docker-net gateway in /24) gets zero edges', () => {
+      // A DOCKER_BRIDGE device that is not a gateway and whose /24 has no docker-net gateway.
+      // Old behaviour: anti-orphan fallback → docker-bridge edge to pivot.
+      // New behaviour (Change 2): ZERO edges — fully disconnected node.
+      const pivotDevice = makeDevice(50, '192.168.68.51', 'HOME', null, false);
+      const unattached = makeDevice(51, '172.20.0.5', 'DOCKER_BRIDGE', null, false);
+      // No docker-net:* gateway on 172.20.0/24
+
+      const devices = [pivotDevice, unattached];
+      const edges = buildGatewayEdges(devices);
+
+      const allEdgesForUnattached = edges.filter(
+        e =>
+          e.data.source === String(unattached.id) ||
+          e.data.target === String(unattached.id),
+      );
+      expect(
+        allEdgesForUnattached,
+        'unattached DOCKER_BRIDGE device with no gateway in its /24 must have zero edges',
+      ).toHaveLength(0);
+    });
+
+    it('change2: two unattached DOCKER_BRIDGE devices in the same /24 get NO edges between them', () => {
+      // Two DOCKER_BRIDGE devices (172.18.0.2, 172.18.0.3) share a /24 but have no
+      // docker-net:* gateway device.  They are unattached.
+      // Old behaviour: a 'gateway'-kind edge was emitted between them (peer→lowest-IP).
+      // New behaviour (Change 2): NO edge between them whatsoever.
+      const pivotDevice = makeDevice(37, '192.168.68.51', 'HOME', null, false);
+      const unattached1 = makeDevice(38, '172.18.0.2', 'DOCKER_BRIDGE', null, false);
+      const unattached2 = makeDevice(39, '172.18.0.3', 'DOCKER_BRIDGE', null, false);
+      // No docker-net:* gateway on 172.18.0/24
+
+      const devices = [pivotDevice, unattached1, unattached2];
+      const edges = buildGatewayEdges(devices);
+
+      // No gateway-kind edge between the two unattached devices
+      const peerEdge = edges.find(
+        e =>
+          (e.data.source === String(unattached1.id) || e.data.target === String(unattached1.id)) &&
+          (e.data.source === String(unattached2.id) || e.data.target === String(unattached2.id)),
+      );
+      expect(
+        peerEdge,
+        'two unattached DOCKER_BRIDGE devices in the same /24 must NOT have an edge between them (Change 2)',
+      ).toBeUndefined();
+
+      // Neither device must appear in any edge at all
+      const allEdgesFor1 = edges.filter(
+        e => e.data.source === String(unattached1.id) || e.data.target === String(unattached1.id),
+      );
+      const allEdgesFor2 = edges.filter(
+        e => e.data.source === String(unattached2.id) || e.data.target === String(unattached2.id),
+      );
+      expect(allEdgesFor1, 'unattached device 1 must have zero edges total').toHaveLength(0);
+      expect(allEdgesFor2, 'unattached device 2 must have zero edges total').toHaveLength(0);
+    });
+
+    it('change2: no isolated self-edge for unattached DOCKER_BRIDGE device', () => {
+      // An unattached DOCKER_BRIDGE device must NOT receive a synthetic isolated self-edge
+      // — it should simply have zero edges (fully disconnected from the graph).
+      const pivotDevice = makeDevice(60, '192.168.68.51', 'HOME', null, false);
+      const unattached = makeDevice(61, '172.21.0.7', 'DOCKER_BRIDGE', null, false);
+
+      const devices = [pivotDevice, unattached];
+      const edges = buildGatewayEdges(devices);
+
+      const isolatedEdges = edges.filter(e => e.data.kind === 'isolated');
+      expect(isolatedEdges.map(e => e.data.source)).not.toContain(String(unattached.id));
+
+      // Confirm truly zero edges for this device
+      const allEdgesForUnattached = edges.filter(
+        e => e.data.source === String(unattached.id) || e.data.target === String(unattached.id),
+      );
+      expect(allEdgesForUnattached).toHaveLength(0);
     });
   });
 });

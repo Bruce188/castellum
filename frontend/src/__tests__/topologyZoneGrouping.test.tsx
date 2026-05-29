@@ -55,6 +55,7 @@ function makeDevice(
   id: number,
   ip: string,
   scope: DiscoveryScope,
+  publishesHostPort = false,
 ): Device {
   return {
     id,
@@ -71,7 +72,7 @@ function makeDevice(
     osName: null,
     osAccuracy: null,
     osCpe: null,
-    publishesHostPort: false,
+    publishesHostPort,
   };
 }
 
@@ -272,12 +273,13 @@ describe('TopologyView cross-zone edge styling (AC2)', () => {
   });
 
   it('zoneGrouping_crossZoneEdgeHasCrossZoneKind', () => {
-    // HOME device (docker host at 192.168.68.51) + DOCKER_BRIDGE device →
-    // the docker-bridge synthetic edge crosses zone boundaries → kind should be
-    // 'cross-zone' OR carry a crossZone flag.
-    // We test via buildGatewayEdges directly then simulate the TopologyView render.
+    // HOME device (docker host at 192.168.68.51) + a PUBLISHED-PORT DOCKER_BRIDGE
+    // container → the docker-bridge synthetic edge (container → pivot) crosses zone
+    // boundaries → kind should be 'cross-zone' OR carry a crossZone flag.
+    // (An internal-only container with no docker-net gateway is intentionally left
+    // unattached and gets no pivot edge per AC4 — so we use a published container.)
     const homeDevice = makeDevice(1, '192.168.68.51', 'HOME');
-    const dockerDevice = makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE');
+    const dockerDevice = makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE', true);
     render(
       <TopologyView
         devices={[homeDevice, dockerDevice]}
@@ -441,10 +443,12 @@ describe('TopologyView layout options with zones (AC4)', () => {
 
 describe('buildGatewayEdges cross-zone annotation (AC2 / AC5)', () => {
   it('crossZone_dockerBridgeEdge_isFlaggedCrossZone', () => {
-    // docker-bridge edge crosses HOME → DOCKER_BRIDGE zone boundary.
+    // A published-port docker-bridge edge (container → pivot) crosses the
+    // HOME → DOCKER_BRIDGE zone boundary. (An internal-only container with no
+    // docker-net gateway is intentionally unattached per AC4 — no pivot edge.)
     const devices: Device[] = [
       makeDevice(1, '192.168.68.51', 'HOME'),
-      makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE'),
+      makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE', true),
     ];
     const edges = buildGatewayEdges(devices);
     const dbEdge = edges.find(e => e.data.kind === 'docker-bridge');
