@@ -98,4 +98,40 @@ class NvdSyncRunnerTest {
             "cause must be DateTimeParseException, was: " + ex.getCause()
         );
     }
+
+    // ── AC3: --full flag ──────────────────────────────────────────────────────
+
+    /**
+     * AC3: {@code --full} flag must call {@code fullBackfillPull()}, not
+     * {@code incrementalPull()} or {@code bulkPull()}.
+     * This is the CLI fix for the silent-incremental footgun.
+     */
+    @Test
+    void runner_fullFlag_invokesFullBackfillPull() throws Exception {
+        NvdSyncService.SyncSummary summary = new NvdSyncService.SyncSummary(73, 800, 250000, 3000);
+        when(syncService.fullBackfillPull()).thenReturn(summary);
+
+        runner.run(new DefaultApplicationArguments("--nvd-sync", "--full"));
+
+        verify(syncService, times(1)).fullBackfillPull();
+        verify(syncService, never()).incrementalPull();
+        verify(syncService, never()).bulkPull(any(), any());
+    }
+
+    /**
+     * AC3: {@code --full} takes priority even when {@code --since} is also provided
+     * (explicit full wins over conflicting --since).
+     */
+    @Test
+    void runner_fullFlagOverridesSince() throws Exception {
+        NvdSyncService.SyncSummary summary = new NvdSyncService.SyncSummary(73, 800, 250000, 3000);
+        when(syncService.fullBackfillPull()).thenReturn(summary);
+
+        runner.run(new DefaultApplicationArguments(
+            "--nvd-sync", "--full", "--since=2026-04-01T00:00:00Z"));
+
+        verify(syncService, times(1)).fullBackfillPull();
+        verify(syncService, never()).bulkPull(any(), any());
+        verify(syncService, never()).incrementalPull();
+    }
 }

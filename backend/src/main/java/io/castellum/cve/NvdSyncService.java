@@ -45,6 +45,19 @@ public class NvdSyncService {
         return doPull(since, until, "BULK_PULL");
     }
 
+    /**
+     * Forces a full-corpus pull from {@code Instant.EPOCH} to now, unconditionally —
+     * regardless of whether the CVE table already contains rows.
+     *
+     * <p>This method deliberately does NOT call {@link #incrementalPull()} and does NOT
+     * consult {@code findMaxLastModified}.  It is the implementation of AC1/AC2: an
+     * explicit operator-triggered backfill that bypasses the incremental short-circuit.
+     */
+    public SyncSummary fullBackfillPull() throws IOException {
+        Instant until = Instant.now();
+        return doPull(Instant.EPOCH, until, "FULL_BACKFILL");
+    }
+
     public SyncSummary incrementalPull() throws IOException {
         Instant until = Instant.now();
         Instant since = cveRepository.findMaxLastModified()

@@ -155,7 +155,7 @@ class InitialSyncServiceTest {
     void trigger_explicitWindow_passesExactInstants() throws Exception {
         Instant since = Instant.parse("2024-01-01T00:00:00Z");
         Instant until = Instant.parse("2025-01-01T00:00:00Z");
-        InitialSyncRequest req = new InitialSyncRequest(since, until);
+        InitialSyncRequest req = new InitialSyncRequest(since, until, false);
 
         service.trigger(req, "admin");
         Thread.sleep(200);
@@ -327,5 +327,55 @@ class InitialSyncServiceTest {
                 "lastError must be 'interrupted' when triggered but no completion exists");
         assertNull(freshService.getLastCompletedAt(),
                 "lastCompletedAt must be null when sync was interrupted");
+    }
+
+    // ── AC1/AC3: full-backfill routing tests ──────────────────────────────────
+
+    /**
+     * AC1 (core regression): when fullBackfill=true AND the table is non-empty,
+     * the service must call {@code fullBackfillPull()}, NOT {@code bulkPull()},
+     * so the incremental {@code findMaxLastModified} short-circuit is bypassed.
+     */
+    @Test
+    void trigger_fullBackfill_callsFullBackfillPull_notBulkPull() throws Exception {
+        InitialSyncRequest req = new InitialSyncRequest(null, null, true);
+
+        service.trigger(req, "admin");
+        Thread.sleep(200);
+
+        verify(nvdSyncService).fullBackfillPull();
+        verify(nvdSyncService, never()).bulkPull(any(), any());
+        verify(nvdSyncService, never()).incrementalPull();
+    }
+
+    /**
+     * AC3: when fullBackfill=false (default), the service must use the regular
+     * bulkPull path — the force flag must not change incremental behaviour.
+     */
+    @Test
+    void trigger_noFullBackfill_callsBulkPull_asUsual() throws Exception {
+        InitialSyncRequest req = InitialSyncRequest.defaults(); // fullBackfill=false
+
+        service.trigger(req, "admin");
+        Thread.sleep(200);
+
+        verify(nvdSyncService).bulkPull(eq(Instant.EPOCH), any(Instant.class));
+        verify(nvdSyncService, never()).fullBackfillPull();
+    }
+
+    /**
+     * AC1: even when fullBackfill pull throws, EPSS+KEV still run (resilience contract).
+     */
+    @Test
+    void trigger_fullBackfill_epssAndKevStillRunEvenOnNvdFailure() throws Exception {
+        doThrow(new java.io.IOException("NVD down"))
+            .when(nvdSyncService).fullBackfillPull();
+
+        InitialSyncRequest req = new InitialSyncRequest(null, null, true);
+        service.trigger(req, "admin");
+        Thread.sleep(200);
+
+        verify(epssIngestionService).ingest();
+        verify(kevIngestionService).ingest();
     }
 }

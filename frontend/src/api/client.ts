@@ -206,6 +206,22 @@ export const api = {
       method: 'POST',
       body: body ? JSON.stringify(body) : '{}',
     }),
+  /**
+   * POST /api/admin/full-backfill — ADMIN-only.
+   *
+   * Forces a full historical corpus pull from EPOCH to now, bypassing the
+   * incremental findMaxLastModified short-circuit even when the CVE table
+   * already has rows.  Returns 202 immediately; the ingest runs in the background.
+   *
+   * Operational trigger:
+   *   POST /api/admin/full-backfill  (no body required)
+   *   Authorization: Bearer <ADMIN-JWT>
+   */
+  triggerFullBackfill: () =>
+    request<InitialSyncResponse>('/api/admin/full-backfill', {
+      method: 'POST',
+      body: '{}',
+    }),
   syncStatus: () =>
     request<SyncStatusResponse>('/api/admin/sync/status'),
   listAudit: (filters: AuditFilters) => {
