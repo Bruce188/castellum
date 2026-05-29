@@ -141,9 +141,12 @@ describe('buildGatewayEdges', () => {
     });
 
     it('routes docker-bridge edges from the overridden IP', () => {
+      // Device 2 is a published container (publishesHostPort:true) so the pivot→published
+      // docker-bridge edge is emitted. No docker-net gateway in 172.18.0/24, so the only
+      // docker-bridge edge is pivot→published — we assert its source is the overridden IP.
       const devices: Device[] = [
         makeDevice(1, '192.168.68.99', 'HOME'),
-        makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+        makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE', null, true),
       ];
       const edges = buildGatewayEdges(devices);
       const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
@@ -158,10 +161,13 @@ describe('buildGatewayEdges', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it('ac4_docker_host_with_alias_hostname_detected_by_ip_not_hostname', () => {
-    // Post-fix: device at docker-host IP with a real hostname (alias was filtered by backend)
+    // Post-fix: device at docker-host IP with a real hostname (alias was filtered by backend).
+    // Device 2 is a published container (publishesHostPort:true) so a pivot→published
+    // docker-bridge edge is emitted. The signal: detection works by IP despite the alias
+    // hostname — the pivot (source) is device 1 at the docker-host IP, not by hostname.
     const devices: Device[] = [
       makeDevice(1, '192.168.68.51', 'HOME', 'operators-laptop'),
-      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE', null, true),
     ];
     const edges = buildGatewayEdges(devices);
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
@@ -170,10 +176,13 @@ describe('buildGatewayEdges', () => {
   });
 
   it('ac4_docker_host_null_hostname_detected_by_ip', () => {
-    // Bridge alias was filtered → hostname is null; IP-based detection must still work
+    // Bridge alias was filtered → hostname is null; IP-based detection must still work.
+    // Device 2 is a published container (publishesHostPort:true) so a pivot→published
+    // docker-bridge edge is emitted. The signal: detection works by IP even when
+    // hostname is null — the pivot (source) is device 1.
     const devices: Device[] = [
       makeDevice(1, '192.168.68.51', 'HOME', null),
-      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE', null, true),
     ];
     const edges = buildGatewayEdges(devices);
     const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');

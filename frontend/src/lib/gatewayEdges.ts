@@ -108,14 +108,14 @@ function findDockerHost(devices: Device[]): Device | null {
  *   <li>Group devices by /24 (reuses {@link ipv4Slash24}).</li>
  *   <li>For each group with {@code >= 2} devices, pick a gateway and emit
  *       one edge per non-gateway peer → gateway with
- *       {@code kind: 'gateway'}.</li>
+ *       {@code kind: 'gateway'}. DOCKER_BRIDGE /24s with no docker-net
+ *       gateway (unattached) are excluded from this step entirely.</li>
  *   <li>Singleton groups that are NOT rescued by the docker-bridge path emit
  *       a self-anchored {@code kind: 'isolated'} edge (source === target ===
  *       device id) so lone nodes (e.g. APIPA/LINK_LOCAL) carry an explicit
  *       unrouted affordance rather than floating with no context.</li>
  *   <li>If a docker host can be identified AND any DOCKER_BRIDGE device exists,
- *       emit one synthetic edge per DOCKER_BRIDGE peer from docker host →
- *       DOCKER_BRIDGE device with {@code kind: 'docker-bridge'}.</li>
+ *       emit synthetic docker-bridge edges per the AC3 routing rules.</li>
  * </ol>
  */
 export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
@@ -130,6 +130,26 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
   // check whether a DOCKER_BRIDGE device will be rescued by a db- edge.
   const dockerHost = findDockerHost(devices);
 
+  // Pre-compute /24 → docker-net gateway map.  This is needed both in Step 3
+  // (docker-bridge routing) and in Step 1+2 (to exclude unattached DOCKER_BRIDGE
+  // /24s from the general gateway-kind edge generation).
+  const slash24ToDockerGateway = new Map<string, Device>();
+  for (const d of devices) {
+    if (!isDockerNetGateway(d)) continue;
+    const slash24 = ipv4Slash24(d.ipAddress);
+    if (slash24 !== null && !slash24ToDockerGateway.has(slash24)) {
+      slash24ToDockerGateway.set(slash24, d);
+    }
+  }
+
+  // A /24 is "unattached-docker" when ALL devices in it are DOCKER_BRIDGE but
+  // none is a docker-net gateway.  Peers in such a /24 must not receive
+  // gateway-kind edges between them (Change 2).
+  function isUnattachedDockerSlash24(slash24: string, group: Device[]): boolean {
+    if (slash24ToDockerGateway.has(slash24)) return false; // has a gateway → normal
+    return group.every(d => d.discoveryScope === 'DOCKER_BRIDGE');
+  }
+
   // Step 1+2: gateway edges per /24.
   const groups = new Map<string, Device[]>();
   for (const d of devices) {
@@ -139,7 +159,12 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
     list.push(d);
     groups.set(key, list);
   }
-  for (const group of groups.values()) {
+  for (const [slash24, group] of groups.entries()) {
+    // Change 2: skip entire /24 for gateway-kind edges when it is an unattached
+    // docker /24 (all DOCKER_BRIDGE, no docker-net gateway).  These nodes render
+    // as muted/disconnected; they get zero edges from the gateway-kind step.
+    if (isUnattachedDockerSlash24(slash24, group)) continue;
+
     if (group.length < 2) {
       // Singleton /24 group: emit an isolated self-anchor unless the device is
       // a DOCKER_BRIDGE device that will be rescued by the docker-bridge path
@@ -180,20 +205,11 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
   // Routing rules (per AC3):
   //   a) docker-net gateway devices (isDockerNetGateway) → pivot (HOME docker host)
   //   b) published-port containers (publishesHostPort === true) → pivot directly
+  //      AND (Change 1) also → their docker-net gateway when one exists for the /24
   //   c) internal-only containers (DOCKER_BRIDGE, not a gateway, publishesHostPort !== true)
-  //      → edge from the container to its network's docker-net gateway;
-  //      fall back to a pivot edge if no gateway exists for that /24 (avoid orphaning).
+  //      → edge from the container to its network's docker-net gateway (when one exists).
+  //      If no gateway exists (unattached), emit NO edge — no anti-orphan fallback (Change 2).
   if (dockerHost) {
-    // Build a /24 → gateway-device map from the docker-net gateways present.
-    const slash24ToGateway = new Map<string, Device>();
-    for (const d of devices) {
-      if (!isDockerNetGateway(d)) continue;
-      const slash24 = ipv4Slash24(d.ipAddress);
-      if (slash24 !== null && !slash24ToGateway.has(slash24)) {
-        slash24ToGateway.set(slash24, d);
-      }
-    }
-
     const pivotDevice = deviceById.get(dockerHost.id);
     const pivotZoneId = pivotDevice ? scopeToZoneId(pivotDevice.discoveryScope) : null;
 
@@ -202,8 +218,8 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
 
       const tgtZoneId = scopeToZoneId(d.discoveryScope);
 
-      if (isDockerNetGateway(d) || d.publishesHostPort === true) {
-        // (a) gateway nodes and (b) published-port containers → pivot
+      if (isDockerNetGateway(d)) {
+        // (a) docker-net gateway nodes → pivot
         const crossZone = pivotZoneId !== null ? pivotZoneId !== tgtZoneId : true;
         edges.push({
           data: {
@@ -214,10 +230,40 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
             ...(crossZone ? { crossZone: true } : {}),
           },
         });
-      } else {
-        // (c) internal-only container → its docker-net gateway (or pivot as fallback)
+      } else if (d.publishesHostPort === true) {
+        // (b) published-port containers → pivot (existing behaviour)
+        const crossZone = pivotZoneId !== null ? pivotZoneId !== tgtZoneId : true;
+        edges.push({
+          data: {
+            id: `db-${dockerHost.id}-${d.id}`,
+            source: String(dockerHost.id),
+            target: String(d.id),
+            kind: 'docker-bridge',
+            ...(crossZone ? { crossZone: true } : {}),
+          },
+        });
+
+        // Change 1: ALSO wire published container → its docker-net gateway when one exists.
         const slash24 = ipv4Slash24(d.ipAddress);
-        const networkGateway = slash24 !== null ? slash24ToGateway.get(slash24) : undefined;
+        const networkGateway = slash24 !== null ? slash24ToDockerGateway.get(slash24) : undefined;
+        if (networkGateway) {
+          const gwZoneId = scopeToZoneId(networkGateway.discoveryScope);
+          const crossZoneGw = tgtZoneId !== gwZoneId;
+          edges.push({
+            data: {
+              id: `db-${d.id}-${networkGateway.id}`,
+              source: String(d.id),
+              target: String(networkGateway.id),
+              kind: 'docker-bridge',
+              ...(crossZoneGw ? { crossZone: true } : {}),
+            },
+          });
+        }
+      } else {
+        // (c) internal-only container → its docker-net gateway (when one exists).
+        // Change 2: if no gateway found, emit nothing (remove anti-orphan fallback).
+        const slash24 = ipv4Slash24(d.ipAddress);
+        const networkGateway = slash24 !== null ? slash24ToDockerGateway.get(slash24) : undefined;
 
         if (networkGateway) {
           const gwZoneId = scopeToZoneId(networkGateway.discoveryScope);
@@ -231,19 +277,8 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
               ...(crossZone ? { crossZone: true } : {}),
             },
           });
-        } else {
-          // Fallback: no gateway for this network — route to pivot to avoid orphaning.
-          const crossZone = pivotZoneId !== null ? pivotZoneId !== tgtZoneId : true;
-          edges.push({
-            data: {
-              id: `db-${dockerHost.id}-${d.id}`,
-              source: String(dockerHost.id),
-              target: String(d.id),
-              kind: 'docker-bridge',
-              ...(crossZone ? { crossZone: true } : {}),
-            },
-          });
         }
+        // Change 2: no else — unattached internal containers get zero edges.
       }
     }
   }
