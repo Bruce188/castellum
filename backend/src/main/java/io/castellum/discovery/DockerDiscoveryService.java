@@ -115,7 +115,8 @@ public class DockerDiscoveryService {
                 c.name(),                   // container name → hostname (topology label)
                 DiscoverySource.DOCKER,
                 observedAt,
-                null);                      // no host iface for a container address
+                null,                       // no host iface for a container address
+                c.publishesHostPort());     // propagate host-port flag from parsed container
             Device saved = upsertService.upsertWithScope(disc, scope);
             deviceIds.add(saved.getId());
             containerCount++;
@@ -145,7 +146,8 @@ public class DockerDiscoveryService {
                 "docker-net:" + networkName,
                 DiscoverySource.DOCKER,
                 observedAt,
-                null);
+                null,
+                false);                     // synthetic gateway never publishes a host port
             Device saved = upsertService.upsertWithScope(disc, DiscoveryScope.HOME);
             deviceIds.add(saved.getId());
             gatewayCount++;

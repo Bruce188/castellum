@@ -1,0 +1,1 @@
+ALTER TABLE device ADD COLUMN publishes_host_port BOOLEAN NOT NULL DEFAULT FALSE;

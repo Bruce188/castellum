@@ -10,7 +10,8 @@ public record Discovery(
     String hostname,
     DiscoverySource source,
     Instant observedAt,
-    String iface
+    String iface,
+    boolean publishesHostPort
 ) {
     public Discovery {
         Objects.requireNonNull(ipAddress, "ipAddress must not be null");

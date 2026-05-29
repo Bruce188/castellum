@@ -225,7 +225,7 @@ class DockerDiscoveryServiceTest {
 
         // 2. A passive ARP sweep re-observes the same IP — must NOT overwrite to HOME
         Discovery passive = new Discovery(
-            "172.18.0.2", "02:42:ac:12:00:02", null, DiscoverySource.ARP, FIXED_NOW.plusSeconds(60), null);
+            "172.18.0.2", "02:42:ac:12:00:02", null, DiscoverySource.ARP, FIXED_NOW.plusSeconds(60), null, false);
         upsertService.upsert(passive);
 
         Device after = repo.findByIpAddress("172.18.0.2").orElseThrow();
@@ -476,6 +476,82 @@ class DockerDiscoveryServiceTest {
         assertThat(after.getName()).isEqualTo("MySQL");
         // Timestamp must have been refreshed (observedAt updated to FIXED_NOW)
         assertThat(after.getObservedAt()).isEqualTo(FIXED_NOW);
+    }
+
+    // -----------------------------------------------------------------------
+    // T1.1 — publishesHostPort propagation from DockerContainer to Device
+    // -----------------------------------------------------------------------
+
+    /**
+     * A container parsed with publishesHostPort=true (i.e. at least one Ports entry has a
+     * non-empty HostPort binding) must result in a Device with publishesHostPort=true.
+     *
+     * Uses the reference fixture: pingpay-frontend (c1) publishes port 1071→80.
+     */
+    @Test
+    void discover_publishedContainer_deviceHasPublishesHostPortTrue() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c1")).discover();
+
+        // c1 = pingpay-frontend at 172.18.0.4 — publishes host port 1071
+        Device frontend = repo.findByIpAddress("172.18.0.4").orElseThrow();
+        assertThat(frontend.isPublishesHostPort())
+            .as("container with a published host port must have publishesHostPort=true")
+            .isTrue();
+    }
+
+    /**
+     * A container that exposes only internal ports (no HostPort binding) must result in a
+     * Device with publishesHostPort=false.
+     *
+     * Uses the reference fixture: pingpay-db (c3) exposes 3306 internally only (Ports null).
+     */
+    @Test
+    void discover_internalOnlyContainer_deviceHasPublishesHostPortFalse() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        // c3 = pingpay-db at 172.18.0.2 — no host port binding
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.isPublishesHostPort())
+            .as("internal-only container must have publishesHostPort=false")
+            .isFalse();
+    }
+
+    /**
+     * AC2: synthetic docker-net gateway devices must be upserted with DiscoveryScope.DOCKER_BRIDGE,
+     * not DiscoveryScope.HOME.
+     *
+     * The gateway represents the docker network's .1 address and must appear in the topology as
+     * a DOCKER_BRIDGE device (bridged to the host pivot), not a HOME device.
+     */
+    @Test
+    void discover_syntheticGateway_isDockerBridgeScope() throws Exception {
+        newService(fixture("inspect-reference.json"),
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8")).discover();
+
+        // pingpay gateway — must be DOCKER_BRIDGE after T1.1 implementation
+        Device gw18 = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(gw18.getDiscoveryScope())
+            .as("synthetic docker-net gateway must be DOCKER_BRIDGE (AC2)")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+
+        // supabase gateway — same expectation
+        Device gw19 = repo.findByIpAddress("172.19.0.1").orElseThrow();
+        assertThat(gw19.getDiscoveryScope())
+            .as("second synthetic gateway must also be DOCKER_BRIDGE (AC2)")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+    }
+
+    /**
+     * AC2: synthetic gateway must have publishesHostPort=false (gateways never publish host ports).
+     */
+    @Test
+    void discover_syntheticGateway_hasPublishesHostPortFalse() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        Device gw = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(gw.isPublishesHostPort())
+            .as("synthetic gateway must have publishesHostPort=false")
+            .isFalse();
     }
 
     @Test

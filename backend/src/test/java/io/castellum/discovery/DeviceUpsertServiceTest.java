@@ -33,7 +33,7 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_newIp_insertsNewRow() {
-        Discovery d = new Discovery("10.0.0.1", "aa:bb:cc:dd:ee:01", "host1", DiscoverySource.ARP, T1, null);
+        Discovery d = new Discovery("10.0.0.1", "aa:bb:cc:dd:ee:01", "host1", DiscoverySource.ARP, T1, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.1");
@@ -49,7 +49,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // Upsert with a different MAC — existing MAC must be preserved
-        Discovery d = new Discovery("10.0.0.2", "11:22:33:44:55:66", null, DiscoverySource.ARP, T2, null);
+        Discovery d = new Discovery("10.0.0.2", "11:22:33:44:55:66", null, DiscoverySource.ARP, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.2").orElseThrow();
@@ -62,7 +62,7 @@ class DeviceUpsertServiceTest {
         Device seed = new Device(null, "10.0.0.3", null, null, T1, T1);
         repo.save(seed);
 
-        Discovery d = new Discovery("10.0.0.3", "ca:fe:ba:be:00:01", null, DiscoverySource.ARP, T2, null);
+        Discovery d = new Discovery("10.0.0.3", "ca:fe:ba:be:00:01", null, DiscoverySource.ARP, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.3").orElseThrow();
@@ -74,7 +74,7 @@ class DeviceUpsertServiceTest {
         Device seed = new Device(null, "10.0.0.4", null, null, T1, T1);
         repo.save(seed);
 
-        Discovery d = new Discovery("10.0.0.4", null, "new-hostname", DiscoverySource.MDNS, T2, null);
+        Discovery d = new Discovery("10.0.0.4", null, "new-hostname", DiscoverySource.MDNS, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.0.4").orElseThrow();
@@ -83,9 +83,9 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_idempotent_sameInputTwice_oneRow() {
-        Discovery d = new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T1, null);
+        Discovery d = new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T1, null, false);
         service.upsert(d);
-        service.upsert(new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T2, null));
+        service.upsert(new Discovery("10.0.0.5", "aa:00:00:00:00:05", null, DiscoverySource.ARP, T2, null, false));
 
         assertThat(repo.count()).isEqualTo(1L);
         var found = repo.findByIpAddress("10.0.0.5").orElseThrow();
@@ -94,7 +94,7 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_newIp_setsDiscoveryScopeFromClassifier() {
-        Discovery d = new Discovery("172.17.0.2", "aa:bb:cc:dd:ee:11", "docker-sibling", DiscoverySource.ARP, T1, null);
+        Discovery d = new Discovery("172.17.0.2", "aa:bb:cc:dd:ee:11", "docker-sibling", DiscoverySource.ARP, T1, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("172.17.0.2").orElseThrow();
@@ -108,7 +108,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // Upsert with a brand-new MAC + hostname. Update path must NOT touch scope.
-        Discovery d = new Discovery("169.254.73.152", "11:22:33:44:55:66", "renamed-host", DiscoverySource.ARP, T2, null);
+        Discovery d = new Discovery("169.254.73.152", "11:22:33:44:55:66", "renamed-host", DiscoverySource.ARP, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("169.254.73.152").orElseThrow();
@@ -134,7 +134,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // NMAP-sourced rescan carries no iface (null) — must NOT overwrite the prior value.
-        Discovery nmap = new Discovery("10.0.7.1", null, "nmap-hostname", DiscoverySource.NMAP_SCAN, T2, null);
+        Discovery nmap = new Discovery("10.0.7.1", null, "nmap-hostname", DiscoverySource.NMAP_SCAN, T2, null, false);
         service.upsert(nmap);
 
         var after = repo.findByIpAddress("10.0.7.1").orElseThrow();
@@ -149,7 +149,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // ARP rescan with a different iface — must overwrite (cable swap / reattach).
-        Discovery arp = new Discovery("10.0.7.2", "aa:bb:cc:dd:ee:71", null, DiscoverySource.ARP, T2, "docker0");
+        Discovery arp = new Discovery("10.0.7.2", "aa:bb:cc:dd:ee:71", null, DiscoverySource.ARP, T2, "docker0", false);
         service.upsert(arp);
 
         var after = repo.findByIpAddress("10.0.7.2").orElseThrow();
@@ -158,7 +158,7 @@ class DeviceUpsertServiceTest {
 
     @Test
     void upsert_newIp_setsLastSeenIfaceFromDiscovery() {
-        Discovery d = new Discovery("10.0.7.3", "aa:bb:cc:dd:ee:72", null, DiscoverySource.ARP, T1, "wlan0");
+        Discovery d = new Discovery("10.0.7.3", "aa:bb:cc:dd:ee:72", null, DiscoverySource.ARP, T1, "wlan0", false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.7.3").orElseThrow();
@@ -182,7 +182,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         // Re-observe the same IP WITH a MAC via the batch path
-        service.upsertAll(List.of(new Discovery("10.0.9.1", "aa:bb:cc:dd:ee:99", null, DiscoverySource.ARP, T2, "eth0")));
+        service.upsertAll(List.of(new Discovery("10.0.9.1", "aa:bb:cc:dd:ee:99", null, DiscoverySource.ARP, T2, "eth0", false)));
 
         // Must be exactly one row — UPDATE, not INSERT
         assertThat(repo.count()).isEqualTo(1L);
@@ -199,7 +199,7 @@ class DeviceUpsertServiceTest {
     /** AC2: single upsert INSERT path persists the discovery source. */
     @Test
     void upsert_persistsSource_onInsert() {
-        Discovery d = new Discovery("10.0.10.1", null, null, DiscoverySource.NMAP_SCAN, T1, null);
+        Discovery d = new Discovery("10.0.10.1", null, null, DiscoverySource.NMAP_SCAN, T1, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("10.0.10.1").orElseThrow();
@@ -210,11 +210,11 @@ class DeviceUpsertServiceTest {
     @Test
     void upsert_overwritesSource_onUpdate() {
         // Seed with ARP source
-        Discovery first = new Discovery("10.0.10.2", "aa:bb:cc:dd:ee:a2", null, DiscoverySource.ARP, T1, null);
+        Discovery first = new Discovery("10.0.10.2", "aa:bb:cc:dd:ee:a2", null, DiscoverySource.ARP, T1, null, false);
         service.upsert(first);
 
         // Re-observe via NMAP_SCAN — source must be overwritten
-        Discovery second = new Discovery("10.0.10.2", null, null, DiscoverySource.NMAP_SCAN, T2, null);
+        Discovery second = new Discovery("10.0.10.2", null, null, DiscoverySource.NMAP_SCAN, T2, null, false);
         service.upsert(second);
 
         var found = repo.findByIpAddress("10.0.10.2").orElseThrow();
@@ -237,8 +237,8 @@ class DeviceUpsertServiceTest {
 
         // Batch: ARP observation of existing device (UPDATE path) + new device (INSERT path)
         List<Discovery> batch = List.of(
-            new Discovery("10.0.11.1", "aa:bb:cc:dd:ee:b1", null, DiscoverySource.ARP, T2, "eth0"),
-            new Discovery("10.0.11.2", null, null, DiscoverySource.NMAP_SCAN, T2, null)
+            new Discovery("10.0.11.1", "aa:bb:cc:dd:ee:b1", null, DiscoverySource.ARP, T2, "eth0", false),
+            new Discovery("10.0.11.2", null, null, DiscoverySource.NMAP_SCAN, T2, null, false)
         );
         service.upsertAll(batch);
 
@@ -262,7 +262,7 @@ class DeviceUpsertServiceTest {
      */
     @Test
     void upsertWithScope_insert_usesExplicitScope_overridingClassifier() {
-        Discovery d = new Discovery("172.18.0.2", null, "pingpay-db", DiscoverySource.DOCKER, T1, null);
+        Discovery d = new Discovery("172.18.0.2", null, "pingpay-db", DiscoverySource.DOCKER, T1, null, false);
         service.upsertWithScope(d, DiscoveryScope.HOME);
 
         var found = repo.findByIpAddress("172.18.0.2").orElseThrow();
@@ -279,12 +279,12 @@ class DeviceUpsertServiceTest {
     void upsertWithScope_update_overwritesScope() {
         // Seed the same IP as HOME (internal-only container)
         service.upsertWithScope(
-            new Discovery("172.18.0.5", null, "svc", DiscoverySource.DOCKER, T1, null),
+            new Discovery("172.18.0.5", null, "svc", DiscoverySource.DOCKER, T1, null, false),
             DiscoveryScope.HOME);
 
         // Re-observe now publishing a port → DOCKER_BRIDGE
         service.upsertWithScope(
-            new Discovery("172.18.0.5", null, "svc", DiscoverySource.DOCKER, T2, null),
+            new Discovery("172.18.0.5", null, "svc", DiscoverySource.DOCKER, T2, null, false),
             DiscoveryScope.DOCKER_BRIDGE);
 
         var found = repo.findByIpAddress("172.18.0.5").orElseThrow();
@@ -301,7 +301,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         service.upsertWithScope(
-            new Discovery("172.18.0.9", null, "renamed-container", DiscoverySource.DOCKER, T2, null),
+            new Discovery("172.18.0.9", null, "renamed-container", DiscoverySource.DOCKER, T2, null, false),
             DiscoveryScope.DOCKER_BRIDGE);
 
         var found = repo.findByIpAddress("172.18.0.9").orElseThrow();
@@ -313,7 +313,7 @@ class DeviceUpsertServiceTest {
     /** INSERT path: upsertWithScope(DOCKER_BRIDGE) must set osName="Linux". */
     @Test
     void upsertWithScope_insert_setsOsLinuxForDockerBridge() {
-        Discovery d = new Discovery("172.21.0.3", null, "pingpay-db-custom", DiscoverySource.DOCKER, T1, null);
+        Discovery d = new Discovery("172.21.0.3", null, "pingpay-db-custom", DiscoverySource.DOCKER, T1, null, false);
         service.upsertWithScope(d, DiscoveryScope.DOCKER_BRIDGE);
 
         var found = repo.findByIpAddress("172.21.0.3").orElseThrow();
@@ -332,7 +332,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         service.upsertWithScope(
-            new Discovery("172.21.0.4", null, "svc", DiscoverySource.DOCKER, T2, null),
+            new Discovery("172.21.0.4", null, "svc", DiscoverySource.DOCKER, T2, null, false),
             DiscoveryScope.DOCKER_BRIDGE);
 
         var found = repo.findByIpAddress("172.21.0.4").orElseThrow();
@@ -356,7 +356,7 @@ class DeviceUpsertServiceTest {
 
         // Docker sweep re-observes the same container
         service.upsertWithScope(
-            new Discovery("172.21.0.10", null, "enriched-svc", DiscoverySource.DOCKER, T2, null),
+            new Discovery("172.21.0.10", null, "enriched-svc", DiscoverySource.DOCKER, T2, null, false),
             DiscoveryScope.DOCKER_BRIDGE);
 
         var found = repo.findByIpAddress("172.21.0.10").orElseThrow();
@@ -369,7 +369,7 @@ class DeviceUpsertServiceTest {
     /** HOME-scoped upsertWithScope (synthetic gateway) must NOT set osName. */
     @Test
     void upsertWithScope_home_doesNotSetOsName() {
-        Discovery d = new Discovery("172.18.0.1", null, "docker-net:pingpay_default", DiscoverySource.DOCKER, T1, null);
+        Discovery d = new Discovery("172.18.0.1", null, "docker-net:pingpay_default", DiscoverySource.DOCKER, T1, null, false);
         service.upsertWithScope(d, DiscoveryScope.HOME);
 
         var found = repo.findByIpAddress("172.18.0.1").orElseThrow();
@@ -388,11 +388,11 @@ class DeviceUpsertServiceTest {
     void upsert_doesNotDowngradeDockerBridgeScope() {
         // Seed as DOCKER_BRIDGE (as docker discovery would)
         service.upsertWithScope(
-            new Discovery("172.21.0.3", null, "pingpay-db-custom", DiscoverySource.DOCKER, T1, null),
+            new Discovery("172.21.0.3", null, "pingpay-db-custom", DiscoverySource.DOCKER, T1, null, false),
             DiscoveryScope.DOCKER_BRIDGE);
 
         // Passive ARP re-observes same IP — on 172.21.x classifier would return HOME
-        service.upsert(new Discovery("172.21.0.3", "02:42:ac:15:00:03", null, DiscoverySource.ARP, T2, null));
+        service.upsert(new Discovery("172.21.0.3", "02:42:ac:15:00:03", null, DiscoverySource.ARP, T2, null, false));
 
         var found = repo.findByIpAddress("172.21.0.3").orElseThrow();
         assertThat(found.getDiscoveryScope())
@@ -409,7 +409,7 @@ class DeviceUpsertServiceTest {
         seed.setDiscoveryScope(DiscoveryScope.HOME);
         repo.save(seed);
 
-        service.upsert(new Discovery("192.168.1.1", "aa:bb:cc:dd:ee:01", "router", DiscoverySource.ARP, T2, null));
+        service.upsert(new Discovery("192.168.1.1", "aa:bb:cc:dd:ee:01", "router", DiscoverySource.ARP, T2, null, false));
 
         var found = repo.findByIpAddress("192.168.1.1").orElseThrow();
         assertThat(found.getDiscoveryScope())
@@ -429,7 +429,7 @@ class DeviceUpsertServiceTest {
     @Test
     void upsert_bridgeAliasHostname_notStoredOnInsert() {
         Discovery d = new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
-            "host.docker.internal", DiscoverySource.MDNS, T1, null);
+            "host.docker.internal", DiscoverySource.MDNS, T1, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
@@ -448,7 +448,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         Discovery d = new Discovery("192.168.68.51", null,
-            "host.docker.internal", DiscoverySource.MDNS, T2, null);
+            "host.docker.internal", DiscoverySource.MDNS, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
@@ -467,7 +467,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         Discovery d = new Discovery("192.168.68.51", null,
-            "operators-laptop", DiscoverySource.MDNS, T2, null);
+            "operators-laptop", DiscoverySource.MDNS, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
@@ -486,7 +486,7 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         Discovery d = new Discovery("192.168.68.51", null,
-            "host.docker.internal", DiscoverySource.MDNS, T2, null);
+            "host.docker.internal", DiscoverySource.MDNS, T2, null, false);
         service.upsert(d);
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
@@ -503,12 +503,12 @@ class DeviceUpsertServiceTest {
     void upsert_sequence_aliasFirst_thenRealHostname_finalIsReal() {
         // Step 1: ARP/mDNS observes bridge alias
         Discovery aliasObs = new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
-            "host.docker.internal", DiscoverySource.MDNS, T1, null);
+            "host.docker.internal", DiscoverySource.MDNS, T1, null, false);
         service.upsert(aliasObs);
 
         // Step 2: mDNS later resolves the real hostname
         Discovery realObs = new Discovery("192.168.68.51", null,
-            "operators-laptop.local", DiscoverySource.MDNS, T2, null);
+            "operators-laptop.local", DiscoverySource.MDNS, T2, null, false);
         service.upsert(realObs);
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
@@ -521,11 +521,11 @@ class DeviceUpsertServiceTest {
     @Test
     void upsert_bridgeAliasOnly_hostnameRemainsNull() {
         Discovery d1 = new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
-            "host.docker.internal", DiscoverySource.ARP, T1, null);
+            "host.docker.internal", DiscoverySource.ARP, T1, null, false);
         service.upsert(d1);
 
         Discovery d2 = new Discovery("192.168.68.51", null,
-            "host.docker.internal", DiscoverySource.MDNS, T2, null);
+            "host.docker.internal", DiscoverySource.MDNS, T2, null, false);
         service.upsert(d2);
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
@@ -540,7 +540,7 @@ class DeviceUpsertServiceTest {
     @Test
     void upsertAll_bridgeAliasHostname_notStoredOnInsert() {
         service.upsertAll(List.of(new Discovery("192.168.68.51", "aa:bb:cc:dd:ee:51",
-            "host.docker.internal", DiscoverySource.ARP, T1, null)));
+            "host.docker.internal", DiscoverySource.ARP, T1, null, false)));
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
         assertThat(found.getHostname()).isNull();
@@ -555,9 +555,88 @@ class DeviceUpsertServiceTest {
         repo.save(seed);
 
         service.upsertAll(List.of(new Discovery("192.168.68.51", null,
-            "host.docker.internal", DiscoverySource.MDNS, T2, null)));
+            "host.docker.internal", DiscoverySource.MDNS, T2, null, false)));
 
         var found = repo.findByIpAddress("192.168.68.51").orElseThrow();
         assertThat(found.getHostname()).isNull();
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // T1.1 — publishesHostPort persistence via upsertWithScope (last-writer-wins)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * INSERT path: upsertWithScope with publishesHostPort=true must persist true on the Device.
+     * The DB column publishes_host_port (added in V24) must be written on insert.
+     */
+    @Test
+    void upsertWithScope_insert_persistsPublishesHostPort_true() {
+        Discovery d = new Discovery("172.18.0.20", null, "published-svc", DiscoverySource.DOCKER, T1, null, true);
+        service.upsertWithScope(d, DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.20").orElseThrow();
+        assertThat(found.isPublishesHostPort())
+            .as("INSERT with publishesHostPort=true must persist true")
+            .isTrue();
+    }
+
+    /**
+     * INSERT path: upsertWithScope with publishesHostPort=false must persist false on the Device.
+     */
+    @Test
+    void upsertWithScope_insert_persistsPublishesHostPort_false() {
+        Discovery d = new Discovery("172.18.0.21", null, "internal-svc", DiscoverySource.DOCKER, T1, null, false);
+        service.upsertWithScope(d, DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.21").orElseThrow();
+        assertThat(found.isPublishesHostPort())
+            .as("INSERT with publishesHostPort=false must persist false")
+            .isFalse();
+    }
+
+    /**
+     * UPDATE path: upsertWithScope with publishesHostPort=true must overwrite a previously-false
+     * value (last-writer-wins — a container that starts publishing a host port must flip the flag).
+     */
+    @Test
+    void upsertWithScope_update_overwritesPublishesHostPort_falseToTrue() {
+        // First upsert — internal-only container (false)
+        service.upsertWithScope(
+            new Discovery("172.18.0.22", null, "svc", DiscoverySource.DOCKER, T1, null, false),
+            DiscoveryScope.DOCKER_BRIDGE);
+        assertThat(repo.findByIpAddress("172.18.0.22").orElseThrow().isPublishesHostPort()).isFalse();
+
+        // Second upsert — container now publishes a host port (true) — must overwrite
+        service.upsertWithScope(
+            new Discovery("172.18.0.22", null, "svc", DiscoverySource.DOCKER, T2, null, true),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.22").orElseThrow();
+        assertThat(found.isPublishesHostPort())
+            .as("UPDATE must flip publishesHostPort false→true (last-writer-wins)")
+            .isTrue();
+        assertThat(repo.count()).isEqualTo(1L); // still a single row
+    }
+
+    /**
+     * UPDATE path: last-writer-wins — a subsequent upsert with publishesHostPort=false must
+     * overwrite a previously-true value (port unpublished between sweeps).
+     */
+    @Test
+    void upsertWithScope_update_overwritesPublishesHostPort_trueToFalse() {
+        // First upsert — published container (true)
+        service.upsertWithScope(
+            new Discovery("172.18.0.23", null, "svc", DiscoverySource.DOCKER, T1, null, true),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        // Second upsert — port no longer published (false)
+        service.upsertWithScope(
+            new Discovery("172.18.0.23", null, "svc", DiscoverySource.DOCKER, T2, null, false),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.23").orElseThrow();
+        assertThat(found.isPublishesHostPort())
+            .as("UPDATE must flip publishesHostPort true→false (last-writer-wins)")
+            .isFalse();
     }
 }

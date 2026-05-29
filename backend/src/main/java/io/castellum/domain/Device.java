@@ -44,6 +44,9 @@ public class Device {
     @Column(name = "discovery_source")
     private DiscoverySource discoverySource;
 
+    @Column(name = "publishes_host_port", nullable = false)
+    private boolean publishesHostPort = false;
+
     @Column(name = "os_name")
     private String osName;
 
@@ -112,6 +115,9 @@ public class Device {
 
     public DiscoverySource getDiscoverySource() { return discoverySource; }
     public void setDiscoverySource(DiscoverySource discoverySource) { this.discoverySource = discoverySource; }
+
+    public boolean isPublishesHostPort() { return publishesHostPort; }
+    public void setPublishesHostPort(boolean publishesHostPort) { this.publishesHostPort = publishesHostPort; }
 
     public String getOsName() { return osName; }
     public void setOsName(String osName) { this.osName = osName; }
