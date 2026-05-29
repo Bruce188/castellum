@@ -36,6 +36,12 @@ export interface Device {
   osAccuracy: number | null;
   /** Optional raw cpe:/o: OS CPE from nmap osclass; null when absent. */
   osCpe: string | null;
+  /**
+   * True when this DOCKER_BRIDGE container publishes at least one host port
+   * (i.e. the container's port is bound to 0.0.0.0 or a specific host interface).
+   * False for internal-only containers. Always false for non-DOCKER_BRIDGE devices.
+   */
+  publishesHostPort: boolean;
 }
 
 export interface NetworkService {
