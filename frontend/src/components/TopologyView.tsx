@@ -6,6 +6,7 @@ import type { Device, DeviceRiskDto, DiscoveryScope, DiscoverySource } from '../
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
+import { buildDockerNetworkGroups, isDockerNetGateway, dockerNetworkName } from '../lib/dockerNetworkGroups';
 import {
   scopeToZoneId,
   ZONE_DEFINITIONS,
@@ -140,6 +141,26 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           height: 'label' as unknown as number,
           padding: '20' as unknown as undefined,
         } },
+        // ── Docker-network sub-box compound nodes ────────────────────────────
+        // Nested one level deeper than zone boxes. Use a slightly more opaque
+        // fill from the Docker zone color so the nesting is visually clear.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { selector: 'node[?dockerNetwork]', style: {
+          shape: 'roundrectangle' as const,
+          label: 'data(label)',
+          'font-size': 9,
+          'text-valign': 'top' as const,
+          'text-halign': 'center' as const,
+          'background-color': ZONE_COLORS['zone-docker'],
+          'background-opacity': 0.25,
+          'border-width': 1,
+          'border-style': 'solid' as const,
+          'border-color': ZONE_BORDER_COLORS['zone-docker'],
+          color: ZONE_LABEL_COLORS['zone-docker'],
+          width: 'label' as unknown as number,
+          height: 'label' as unknown as number,
+          padding: '14' as unknown as undefined,
+        } },
         // Per-zone fill + border colors (inherit from ZONE_COLORS/ZONE_BORDER_COLORS).
         { selector: 'node.zone-zone-home',   style: { 'background-color': ZONE_COLORS['zone-home'],   'border-color': ZONE_BORDER_COLORS['zone-home'],   color: ZONE_LABEL_COLORS['zone-home'] } },
         { selector: 'node.zone-zone-docker', style: { 'background-color': ZONE_COLORS['zone-docker'], 'border-color': ZONE_BORDER_COLORS['zone-docker'], color: ZONE_LABEL_COLORS['zone-docker'] } },
@@ -220,6 +241,32 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       classes: `zone-${zid}`,
     }));
 
+    // ── Docker-network sub-box compound nodes ──────────────────────────────
+    // Within the Docker zone, render one compound box per docker network
+    // (compose project). Each box's parent is zone-docker; DOCKER_BRIDGE
+    // devices then parent to their network box instead of directly to zone-docker.
+    // Containers with no matching docker-net gateway go to the fallback
+    // "Docker (unattached)" sub-box so the graph never crashes.
+    const dockerNetGroups = buildDockerNetworkGroups(visibleDevices);
+    // Build a quick lookup: device id → network group id
+    const deviceToNetworkGroup = new Map<number, string>();
+    for (const g of dockerNetGroups) {
+      for (const memberId of g.memberIds) {
+        deviceToNetworkGroup.set(memberId, g.groupId);
+      }
+    }
+    // Network sub-box compound nodes (parent = zone-docker).
+    // Only emit these if zone-docker is present (i.e. there are visible DOCKER_BRIDGE devices).
+    const dockerNetworkBoxNodes = dockerNetGroups.map(g => ({
+      data: {
+        id: g.groupId,
+        label: g.label,
+        parent: 'zone-docker',
+        dockerNetwork: true as const,
+      },
+      classes: 'docker-network-box',
+    }));
+
     const nodes = visibleDevices.map(d => {
       const risk = risksById.get(d.id);
       const score = risk ? Number(risk.score) : null;
@@ -235,12 +282,18 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const isBridgeAlias = (h: string | null) =>
         h != null && (h === 'host.docker.internal' || h.endsWith('.docker.internal'));
       const hostname = isBridgeAlias(d.hostname) ? null : d.hostname;
-      const baseName = hostname ?? d.ipAddress;
+      // For docker-net gateway nodes strip the raw `docker-net:<name>` prefix so
+      // the leaf label reads as the clean network name + "(gw)", not the raw hostname.
+      const baseName = isDockerNetGateway(d) && d.hostname !== null
+        ? `${dockerNetworkName(d.hostname)} (gw)`
+        : hostname ?? d.ipAddress;
       return {
         data: {
           id: String(d.id),
-          // Assign each device to its zone compound parent node.
-          parent: scopeToZoneId(d.discoveryScope),
+          // Assign each device to its compound parent node.
+          // DOCKER_BRIDGE devices go to their per-network sub-box (if grouping
+          // data is available); all other devices go directly to their zone.
+          parent: deviceToNetworkGroup.get(d.id) ?? scopeToZoneId(d.discoveryScope),
           label: d.serviceCount > 0 ? `${baseName} · ${d.serviceCount} svc` : baseName,
           ip: d.ipAddress,
           riskTier: tier,
@@ -276,9 +329,12 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     }
 
     cy.elements().remove();
-    // Zone parent nodes must be added BEFORE device nodes so cytoscape can
-    // resolve the parent references when child nodes are added.
-    cy.add([...zoneNodes, ...nodes, ...edges, ...extraEdges]);
+    // Nodes must be added in parent-before-child order so cytoscape can
+    // resolve parent references when child nodes are added:
+    //   1. Zone compound nodes (zone-home, zone-docker, …)
+    //   2. Docker-network sub-box compound nodes (parent = zone-docker)
+    //   3. Device leaf nodes (parent = network-box or zone)
+    cy.add([...zoneNodes, ...dockerNetworkBoxNodes, ...nodes, ...edges, ...extraEdges]);
     // randomize:true prevents collinear collapse on sparse graphs — without it
     // cose-bilkent starts from degenerate (0,0) seed positions and converges
     // to a straight line when the fleet is small.
