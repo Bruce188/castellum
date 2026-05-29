@@ -5,6 +5,7 @@ import io.castellum.discovery.DockerImageCpe;
 import io.castellum.discovery.Discovery;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.discovery.DeviceUpsertService;
+import io.castellum.discovery.probe.DockerHostProbeService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -61,6 +62,7 @@ public class ScanExecutionService {
     private final RiskCacheEvictor riskCacheEvictor;
     private final DeviceRepository deviceRepository;
     private final AliveHostResolver aliveHostResolver;
+    private final DockerHostProbeService dockerHostProbeService;
 
     public ScanExecutionService(
             NmapRunner nmapRunner,
@@ -72,7 +74,8 @@ public class ScanExecutionService {
             ScanRetryService scanRetryService,
             RiskCacheEvictor riskCacheEvictor,
             DeviceRepository deviceRepository,
-            AliveHostResolver aliveHostResolver) {
+            AliveHostResolver aliveHostResolver,
+            DockerHostProbeService dockerHostProbeService) {
         this.nmapRunner = nmapRunner;
         this.scanRepository = scanRepository;
         this.nmapOutputParser = nmapOutputParser;
@@ -83,6 +86,7 @@ public class ScanExecutionService {
         this.riskCacheEvictor = riskCacheEvictor;
         this.deviceRepository = deviceRepository;
         this.aliveHostResolver = aliveHostResolver;
+        this.dockerHostProbeService = dockerHostProbeService;
     }
 
     /**
@@ -149,6 +153,7 @@ public class ScanExecutionService {
 
             // 6. Persist discovered hosts → devices
             Instant now = Instant.now();
+            List<String> probeTargets = new ArrayList<>();
             for (NmapOutputParser.DiscoveredHost host : parsed.hosts()) {
                 // Collect this host's open services up-front.
                 List<NmapOutputParser.DiscoveredService> hostServices = new ArrayList<>();
@@ -179,6 +184,7 @@ public class ScanExecutionService {
                     false
                 );
                 Device device = deviceUpsertService.upsert(discovery, scanId);
+                probeTargets.add(host.ipAddress());
 
                 if (type == ScanType.OS_FINGERPRINT && host.os() != null) {
                     device.setOsName(host.os().name());
@@ -202,6 +208,22 @@ public class ScanExecutionService {
                     ns.setObservedAt(now);
                     networkServiceRepository.save(ns);
                 }
+            }
+
+            // 7.5. Docker Host Probe — runs after discovery, before COMPLETE so that
+            // riskCacheEvictor.onScanComplete() (step 10) invalidates risk for new findings.
+            // Probe failures are isolated — a failure must NOT abort the scan.
+            try {
+                dockerHostProbeService.probeHosts(probeTargets);
+            } catch (Exception probeEx) {
+                log.warn("executeAsync: docker host probe failed for scan {} — scan continues: {}",
+                    scanId, probeEx.getMessage());
+            }
+            try {
+                dockerHostProbeService.runSelfCheck();
+            } catch (Exception selfCheckEx) {
+                log.warn("executeAsync: docker self-check failed for scan {} — scan continues: {}",
+                    scanId, selfCheckEx.getMessage());
             }
 
             // 8. COMPLETE

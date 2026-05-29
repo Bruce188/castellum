@@ -2,6 +2,7 @@ package io.castellum.scan;
 
 import io.castellum.audit.AuditService;
 import io.castellum.discovery.DeviceUpsertService;
+import io.castellum.discovery.probe.DockerHostProbeService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkServiceRepository;
@@ -41,6 +42,7 @@ class ScanExecutionServiceTest {
     @Mock io.castellum.risk.RiskCacheEvictor riskCacheEvictor;
     @Mock DeviceRepository deviceRepository;
     @Mock AliveHostResolver aliveHostResolver;
+    @Mock DockerHostProbeService dockerHostProbeService;
 
     ScanExecutionService service;
 
@@ -49,7 +51,8 @@ class ScanExecutionServiceTest {
         service = new ScanExecutionService(
             nmapRunner, scanRepository, nmapOutputParser,
             deviceUpsertService, networkServiceRepository, auditService,
-            scanRetryService, riskCacheEvictor, deviceRepository, aliveHostResolver);
+            scanRetryService, riskCacheEvictor, deviceRepository, aliveHostResolver,
+            dockerHostProbeService);
     }
 
     // -----------------------------------------------------------------------
@@ -528,6 +531,68 @@ class ScanExecutionServiceTest {
                 && "9.6.0".equals(ns.getVersion())
                 && "cpe:2.3:a:postgresql:postgresql:9.6.0:*:*:*:*:*:*:*".equals(ns.getCpe())));
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (4.2.a) Happy path invokes probeHosts + runSelfCheck before SCAN_COMPLETE
+    // -----------------------------------------------------------------------
+
+    @Test
+    void executeAsync_happyPath_invokesProbeWithScannedHostsBeforeComplete() throws Exception {
+        Scan scan = stubScan(100L, "10.0.10.0/24", "PING_SWEEP");
+        when(scanRepository.findById(100L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.10.5", "myhost", null);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(100L);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
+
+        service.executeAsync(100L);
+
+        // probeHosts and runSelfCheck must have been called
+        verify(dockerHostProbeService).probeHosts(argThat(ips ->
+            ips.contains("10.0.10.5")));
+        verify(dockerHostProbeService).runSelfCheck();
+
+        // Scan still completes
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+        verify(auditService).recordEvent(eq("system"), eq("SCAN_COMPLETE"), eq("scan"), eq("100"), any());
+    }
+
+    // -----------------------------------------------------------------------
+    // (4.2.b) probeHosts throws → scan still COMPLETE + SCAN_COMPLETE audit
+    // -----------------------------------------------------------------------
+
+    @Test
+    void executeAsync_probeThrows_scanStillCompletes() throws Exception {
+        Scan scan = stubScan(101L, "10.0.11.0/24", "PING_SWEEP");
+        when(scanRepository.findById(101L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(List.of(), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        // probe throws
+        doThrow(new RuntimeException("probe failure")).when(dockerHostProbeService).probeHosts(any());
+
+        service.executeAsync(101L);
+
+        // Scan still reaches COMPLETE (probe failure isolated)
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+        verify(auditService).recordEvent(eq("system"), eq("SCAN_COMPLETE"), eq("scan"), eq("101"), any());
+        verify(auditService, never()).recordEvent(eq("system"), eq("SCAN_FAILED"), any(), any(), any());
     }
 
     // -----------------------------------------------------------------------

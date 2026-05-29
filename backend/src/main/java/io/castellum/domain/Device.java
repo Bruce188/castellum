@@ -8,14 +8,19 @@ import jakarta.persistence.*;
 import java.time.Instant;
 
 @Entity
-@Table(name = "device")
+@Table(name = "device",
+    uniqueConstraints = @UniqueConstraint(
+        name = "device_ip_origin_unique",
+        columnNames = {"ip_address", "origin_host_ip"}
+    )
+)
 public class Device {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "ip_address", nullable = false, unique = true)
+    @Column(name = "ip_address", nullable = false)
     private String ipAddress;
 
     private String hostname;
@@ -73,6 +78,24 @@ public class Device {
     /** Scan that most recently observed this device. Set on INSERT and UPDATE during a scan; last-writer-wins. NULL for pre-V25 and non-scan devices. */
     @Column(name = "last_seen_by_scan_id")
     private Long lastSeenByScanId;
+
+    /**
+     * IP address of the host from which this device was discovered.
+     * Value {@code "local"} means the device was observed by the local castellum agent (the
+     * default for all ARP/NMAP/Docker-CLI/passive discovery paths). A remote docker probe
+     * writes the probed host's IP so the same container IP (e.g. 172.17.0.2) from two different
+     * hosts becomes two distinct device rows under the composite UNIQUE(ip_address, origin_host_ip).
+     * NOT NULL — entity default {@code "local"} keeps all existing insert paths safe.
+     */
+    @Column(name = "origin_host_ip", nullable = false)
+    private String originHostIp = "local";
+
+    /**
+     * Human-readable hostname of the origin host (optional). Null for local discovery and
+     * when the hostname is unknown at probe time.
+     */
+    @Column(name = "origin_host_name")
+    private String originHostName;
 
     /**
      * Count of network services observed on this device. Computed at entity-load
@@ -154,6 +177,12 @@ public class Device {
 
     public Long getLastSeenByScanId() { return lastSeenByScanId; }
     public void setLastSeenByScanId(Long lastSeenByScanId) { this.lastSeenByScanId = lastSeenByScanId; }
+
+    public String getOriginHostIp() { return originHostIp; }
+    public void setOriginHostIp(String originHostIp) { this.originHostIp = originHostIp; }
+
+    public String getOriginHostName() { return originHostName; }
+    public void setOriginHostName(String originHostName) { this.originHostName = originHostName; }
 
     public long getServiceCount() { return serviceCount; }
 

@@ -12,6 +12,14 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
 
     Optional<Device> findByIpAddress(String ipAddress);
 
+    /**
+     * Origin-aware single-device lookup used by the origin-aware upsert paths (Task 1.2).
+     * Replaces {@link #findByIpAddress(String)} in {@code upsertWithScope} and
+     * {@code upsert(Discovery, Long)} so two devices sharing the same internal IP but
+     * discovered from different origin hosts are correctly identified.
+     */
+    Optional<Device> findByIpAddressAndOriginHostIp(String ipAddress, String originHostIp);
+
     List<Device> findByIpAddressIn(Collection<String> ipAddresses);
 
     List<Device> findByMacAddressIn(Collection<String> macAddresses);

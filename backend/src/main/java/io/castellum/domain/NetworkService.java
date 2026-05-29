@@ -48,6 +48,16 @@ public class NetworkService {
     @Column(name = "cpe")
     private String cpe;
 
+    /**
+     * Posture severity for this service row when it represents a known exposure finding
+     * (e.g. an exposed Docker Engine API on port 2375). Values follow the standard severity
+     * vocabulary: CRITICAL, HIGH, MEDIUM, LOW, INFO. Null for normal service rows without a
+     * posture finding — scoring falls back entirely to CVE-derived risk in DeviceRiskService.
+     * Set by the Docker Host Probe (Phase 4). ADDITIVE — not a parallel findings store.
+     */
+    @Column(name = "posture_severity")
+    private String postureSeverity;
+
     public NetworkService() {}
 
     public NetworkService(Long id, Long deviceId, Integer port, String protocol, String name, String version, Instant observedAt) {
@@ -92,4 +102,7 @@ public class NetworkService {
 
     public String getCpe() { return cpe; }
     public void setCpe(String cpe) { this.cpe = cpe; }
+
+    public String getPostureSeverity() { return postureSeverity; }
+    public void setPostureSeverity(String postureSeverity) { this.postureSeverity = postureSeverity; }
 }

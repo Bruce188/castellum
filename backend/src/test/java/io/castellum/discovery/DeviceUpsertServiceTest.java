@@ -3,6 +3,7 @@ package io.castellum.discovery;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.discovery.DeviceRole;
+import io.castellum.discovery.OriginContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -810,6 +811,31 @@ class DeviceUpsertServiceTest {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // Task 1.1 — originHostIp entity default round-trip
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A fresh ARP upsert (non-remote, no origin set explicitly) must reload with
+     * originHostIp == "local". Verifies entity default + Hibernate column round-trip
+     * in the @DataJpaTest profile (Flyway disabled, Hibernate creates schema).
+     * Origin-aware repo method is NOT used here — that is Task 1.2.
+     */
+    @Test
+    void upsert_newDevice_defaultsOriginHostIpLocal() {
+        Discovery d = new Discovery("10.99.1.1", "aa:bb:cc:dd:99:01", "plain-host",
+            DiscoverySource.ARP, T1, null, false);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("10.99.1.1").orElseThrow();
+        assertThat(found.getOriginHostIp())
+            .as("fresh ARP upsert must have originHostIp='local' (entity default)")
+            .isEqualTo("local");
+        assertThat(found.getOriginHostName())
+            .as("originHostName must be null for local discovery")
+            .isNull();
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // Task 2.1 — DeviceRoleClassifier wiring (all six upsert branches)
     // ────────────────────────────────────────────────────────────────────────
 
@@ -940,6 +966,77 @@ class DeviceUpsertServiceTest {
         assertThat(afterResweep.getDeviceRole())
             .as("non-downgrade guard: known CONTAINER must survive a signal-less ARP re-sweep")
             .isEqualTo(DeviceRole.CONTAINER);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Task 1.2 — origin-aware upsert (OriginContext + 3-arg upsertWithScope)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 3-arg upsertWithScope with a remote OriginContext must persist originHostIp and
+     * originHostName on the device row (both INSERT and UPDATE paths prove origin is written).
+     */
+    @Test
+    void upsertWithScope_remoteOrigin_writesOriginColumns() {
+        OriginContext remote = OriginContext.of("192.168.68.51", "laptop");
+        Discovery d = new Discovery("172.18.0.100", null, "remote-ctr",
+            DiscoverySource.DOCKER, T1, null, false);
+
+        service.upsertWithScope(d, DiscoveryScope.DOCKER_BRIDGE, remote);
+
+        var found = repo.findByIpAddressAndOriginHostIp("172.18.0.100", "192.168.68.51").orElseThrow();
+        assertThat(found.getOriginHostIp()).isEqualTo("192.168.68.51");
+        assertThat(found.getOriginHostName()).isEqualTo("laptop");
+    }
+
+    /**
+     * 2-arg upsertWithScope (local delegate) must write originHostIp='local', originHostName=null.
+     * The delegate is the byte-identical safety net for existing Docker discovery callers.
+     */
+    @Test
+    void upsertWithScope_localDelegate_writesLocalOrigin() {
+        Discovery d = new Discovery("172.18.0.101", null, "local-ctr",
+            DiscoverySource.DOCKER, T1, null, false);
+
+        service.upsertWithScope(d, DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.101").orElseThrow();
+        assertThat(found.getOriginHostIp()).isEqualTo("local");
+        assertThat(found.getOriginHostName()).isNull();
+    }
+
+    /**
+     * Headline two-origins-share-IP assertion: the same internal IP at two different origins
+     * must produce TWO distinct device rows (composite uniqueness enforced by the entity).
+     */
+    @Test
+    void upsertWithScope_sameIpTwoOrigins_createsTwoRows() {
+        Discovery d1 = new Discovery("172.18.0.2", null, "ctr-local",
+            DiscoverySource.DOCKER, T1, null, false);
+        Discovery d2 = new Discovery("172.18.0.2", null, "ctr-remote",
+            DiscoverySource.DOCKER, T1, null, false);
+
+        service.upsertWithScope(d1, DiscoveryScope.DOCKER_BRIDGE, OriginContext.local());
+        service.upsertWithScope(d2, DiscoveryScope.DOCKER_BRIDGE,
+            OriginContext.of("192.168.68.51", "laptop"));
+
+        assertThat(repo.count()).isEqualTo(2L);
+        var local = repo.findByIpAddressAndOriginHostIp("172.18.0.2", "local").orElseThrow();
+        var remote = repo.findByIpAddressAndOriginHostIp("172.18.0.2", "192.168.68.51").orElseThrow();
+        assertThat(local.getId()).isNotEqualTo(remote.getId());
+    }
+
+    /**
+     * upsert(d, scanId) — scan path — must write originHostIp='local'.
+     */
+    @Test
+    void upsert_scanPath_originLocal() {
+        Discovery d = new Discovery("10.0.99.1", "aa:bb:cc:dd:99:01", "scan-host",
+            DiscoverySource.NMAP_SCAN, T1, null, false);
+        service.upsert(d, 7L);
+
+        var found = repo.findByIpAddress("10.0.99.1").orElseThrow();
+        assertThat(found.getOriginHostIp()).isEqualTo("local");
     }
 
     // ────────────────────────────────────────────────────────────────────────

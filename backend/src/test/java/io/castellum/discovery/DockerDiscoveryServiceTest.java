@@ -591,4 +591,94 @@ class DockerDiscoveryServiceTest {
         assertThat(after.getName()).isEqualTo("MySQL");
         assertThat(after.getVersion()).isEqualTo("8.0.46-1.el9");
     }
+
+    // -----------------------------------------------------------------------
+    // Task 3.1 — shared ingest() extracts remote-origin attribution
+    // -----------------------------------------------------------------------
+
+    /**
+     * ingest() called with a remote OriginContext must write originHostIp = the probed host's IP
+     * on every device it upserts, so that a same-IP container (172.18.0.4) from two different
+     * docker hosts becomes two distinct Device rows under composite uniqueness.
+     */
+    @Test
+    void ingest_remoteOrigin_attributesDevices() throws Exception {
+        DockerDiscoveryService svc = newService(fixture("inspect-reference.json"),
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"));
+
+        OriginContext remote = OriginContext.of("192.168.68.51", "laptop");
+        List<io.castellum.discovery.DockerContainer> containers =
+            parser.parse(fixture("inspect-reference.json"));
+        svc.ingest(containers, remote, FIXED_NOW);
+
+        // Every container row must carry the remote origin.
+        Device frontend = repo.findByIpAddressAndOriginHostIp("172.18.0.4", "192.168.68.51").orElseThrow();
+        assertThat(frontend.getOriginHostIp()).isEqualTo("192.168.68.51");
+        assertThat(frontend.getOriginHostName()).isEqualTo("laptop");
+
+        // A same-IP local row can coexist (composite uniqueness allows it).
+        // Seed a local row for the same IP.
+        svc.discover(); // discovers with origin='local'
+        long localRows = repo.findAll().stream()
+            .filter(d -> "172.18.0.4".equals(d.getIpAddress()) && "local".equals(d.getOriginHostIp()))
+            .count();
+        long remoteRows = repo.findAll().stream()
+            .filter(d -> "172.18.0.4".equals(d.getIpAddress()) && "192.168.68.51".equals(d.getOriginHostIp()))
+            .count();
+        assertThat(localRows).isEqualTo(1);
+        assertThat(remoteRows).isEqualTo(1);
+    }
+
+    /**
+     * discover() result must be byte-identical to calling ingest() with OriginContext.local() and
+     * the same containers/timestamp — same device counts, same rows.
+     */
+    @Test
+    void discover_delegatesToIngestLocal() throws Exception {
+        DockerDiscoveryService svc = newService(fixture("inspect-reference.json"),
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"));
+
+        // discover() call
+        DockerDiscoveryResponse discoverResult = svc.discover();
+
+        // Verify rows written by discover() are origin='local'
+        assertThat(repo.findAll().stream()
+            .allMatch(d -> "local".equals(d.getOriginHostIp())))
+            .as("all rows from discover() must have originHostIp='local'")
+            .isTrue();
+
+        // counts should match
+        assertThat(discoverResult.containers()).isEqualTo(8);
+        assertThat(discoverResult.gateways()).isEqualTo(2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 1.2 — local docker-CLI path writes origin='local' (R6 regression)
+    // -----------------------------------------------------------------------
+
+    /**
+     * R6 regression: the local Docker CLI discovery path (discover()) must write
+     * originHostIp='local' on every device it upserts. This proves the 2-arg delegate
+     * (upsertWithScope(d, scope) → upsertWithScope(d, scope, OriginContext.local())) is
+     * wired correctly and that local discovery is byte-identical to the pre-V27 behaviour.
+     */
+    @Test
+    void discover_localPath_originLocal() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        // pingpay-db at 172.18.0.2 — container row must have origin='local'.
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.getOriginHostIp())
+            .as("local Docker CLI discovery must write originHostIp='local'")
+            .isEqualTo("local");
+        assertThat(db.getOriginHostName())
+            .as("local Docker CLI discovery must write originHostName=null")
+            .isNull();
+
+        // The gateway at 172.18.0.1 must also be local.
+        Device gw = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(gw.getOriginHostIp())
+            .as("local Docker CLI gateway must also have originHostIp='local'")
+            .isEqualTo("local");
+    }
 }

@@ -78,34 +78,29 @@ public class DeviceUpsertService {
     }
 
     /**
-     * Scope-explicit upsert for sources whose {@link DiscoveryScope} is determined by
-     * runtime metadata rather than the IP-range heuristic in {@link DiscoveryScopeClassifier}.
+     * Origin-aware, scope-explicit upsert. The full 3-argument form carrying an
+     * {@link OriginContext} that determines which device row to find/create.
      *
-     * <p>The Docker discovery path uses this: all containers get
-     * {@link DiscoveryScope#DOCKER_BRIDGE} — Docker source is authoritative for scope,
-     * regardless of network subnet (custom docker networks can use any RFC1918 range).
-     * Synthetic gateways still use {@link DiscoveryScope#DOCKER_BRIDGE}.
+     * <p>The {@code originContext} is written to {@code origin_host_ip} and
+     * {@code origin_host_name} on BOTH the insert and update paths. Local discovery passes
+     * {@link OriginContext#local()} ({@code "local"}/null) so the dedup semantics are
+     * byte-identical to the pre-V27 behaviour. A remote docker probe passes
+     * {@link OriginContext#of(String, String)} with the probed host's IP so the same internal
+     * container IP (e.g. {@code 172.17.0.2}) from two docker hosts becomes two separate rows
+     * under the composite {@code UNIQUE(ip_address, origin_host_ip)} constraint.
      *
-     * <p>When scope is {@link DiscoveryScope#DOCKER_BRIDGE} the device {@code osName} is filled
-     * with {@code "Linux"} if and only if {@code osName} is currently {@code null} or blank:
-     * every Docker container runs on a Linux kernel, but a prior OS_FINGERPRINT nmap scan may
-     * have already set a more-specific name (e.g. {@code "Linux 5.15"}) that must not be
-     * overwritten. The INSERT branch always sets {@code "Linux"} (fresh rows have null OS).
-     * This is the same fill-when-null semantic used for {@code macAddress} and {@code hostname}.
+     * <p>All other field semantics (mac/hostname fill-when-null, scope authoritative
+     * last-writer-wins, osName fill-when-null, publishesHostPort last-writer-wins,
+     * role non-downgrade) are unchanged from the 2-arg variant.
      *
-     * <p>Unlike {@link #upsert(Discovery)}, the explicit scope is authoritative and is
-     * written on BOTH the insert and update paths (last-writer-wins, mirroring lastSeen): a
-     * container that starts publishing a port between sweeps must flip HOME → DOCKER_BRIDGE in
-     * place. All other field semantics (mac/hostname fill-when-null, iface
-     * overwrite-when-non-null, source last-writer-wins) match {@link #upsert(Discovery)}.
-     *
-     * @param d     the observation (its {@link Discovery#source()} is persisted as-is)
-     * @param scope the authoritative scope to write, overriding the IP-range classifier
+     * @param d      the observation
+     * @param scope  authoritative scope, overriding the IP-range classifier
+     * @param origin origin context for the discovering host
      * @return the persisted device
      */
     @Transactional
-    public Device upsertWithScope(Discovery d, DiscoveryScope scope) {
-        Optional<Device> existing = repo.findByIpAddress(d.ipAddress());
+    public Device upsertWithScope(Discovery d, DiscoveryScope scope, OriginContext origin) {
+        Optional<Device> existing = repo.findByIpAddressAndOriginHostIp(d.ipAddress(), origin.originHostIp());
         if (existing.isPresent()) {
             Device e = existing.get();
             e.setLastSeen(d.observedAt());
@@ -138,6 +133,9 @@ public class DeviceUpsertService {
                     && (e.getOsName() == null || e.getOsName().isBlank())) {
                 e.setOsName("Linux");
             }
+            // Origin: update both columns so a row can move origin if needed (last-writer-wins).
+            e.setOriginHostIp(origin.originHostIp());
+            e.setOriginHostName(origin.originHostName());
             // Non-downgrade role write (UPDATE branch): classify after all other fields are set.
             // Never overwrite a known role with UNKNOWN — a signal-less re-sweep must not flap.
             DeviceRole newRoleU = roleClassifier.classify(e);
@@ -167,6 +165,9 @@ public class DeviceUpsertService {
             if (scope == DiscoveryScope.DOCKER_BRIDGE) {
                 fresh.setOsName("Linux");
             }
+            // Origin: set on insert.
+            fresh.setOriginHostIp(origin.originHostIp());
+            fresh.setOriginHostName(origin.originHostName());
             // Non-downgrade role write (INSERT branch): fresh device starts at entity default UNKNOWN,
             // so the guard always permits the first classification.
             DeviceRole newRoleI = roleClassifier.classify(fresh);
@@ -175,6 +176,28 @@ public class DeviceUpsertService {
             }
             return repo.save(fresh);
         }
+    }
+
+    /**
+     * Scope-explicit upsert for sources whose {@link DiscoveryScope} is determined by
+     * runtime metadata rather than the IP-range heuristic in {@link DiscoveryScopeClassifier}.
+     *
+     * <p>The Docker discovery path uses this: all containers get
+     * {@link DiscoveryScope#DOCKER_BRIDGE} — Docker source is authoritative for scope,
+     * regardless of network subnet (custom docker networks can use any RFC1918 range).
+     * Synthetic gateways still use {@link DiscoveryScope#DOCKER_BRIDGE}.
+     *
+     * <p>Delegates to {@link #upsertWithScope(Discovery, DiscoveryScope, OriginContext)} with
+     * {@link OriginContext#local()} — all local-discovery callers use this overload and get
+     * byte-identical dedup semantics (origin='local').
+     *
+     * @param d     the observation (its {@link Discovery#source()} is persisted as-is)
+     * @param scope the authoritative scope to write, overriding the IP-range classifier
+     * @return the persisted device
+     */
+    @Transactional
+    public Device upsertWithScope(Discovery d, DiscoveryScope scope) {
+        return upsertWithScope(d, scope, OriginContext.local());
     }
 
     /**
@@ -191,7 +214,8 @@ public class DeviceUpsertService {
     @Transactional
     public Device upsert(Discovery d, Long scanId) {
         String incomingHostname = sanitizeHostname(d.hostname());
-        Optional<Device> existing = repo.findByIpAddress(d.ipAddress());
+        // Origin-aware lookup: scan/ARP/NMAP/passive callers are always 'local'.
+        Optional<Device> existing = repo.findByIpAddressAndOriginHostIp(d.ipAddress(), "local");
         if (existing.isPresent()) {
             Device e = existing.get();
             e.setLastSeen(d.observedAt());
@@ -217,6 +241,8 @@ public class DeviceUpsertService {
             }
             // discoverySource: overwrite always (last-writer-wins, mirrors lastSeen).
             e.setDiscoverySource(d.source());
+            // Origin: local rows always have origin='local'/null; ensure column is set on update.
+            e.setOriginHostIp("local");
             // Scan attribution (UPDATE path):
             //   lastSeenByScanId: last-writer-wins — always set when scanId is present.
             //   discoveredByScanId: insert-once — only fill when currently null (first-discovery sticky).
@@ -247,6 +273,8 @@ public class DeviceUpsertService {
             fresh.setLastSeenIface(d.iface());
             // discoverySource: last-writer-wins (mirrors lastSeen; see update branch above).
             fresh.setDiscoverySource(d.source());
+            // Origin: local path — entity default "local" is already set, confirm explicitly.
+            fresh.setOriginHostIp("local");
             // Scan attribution (INSERT path): set both columns when scanId is present.
             if (scanId != null) {
                 fresh.setDiscoveredByScanId(scanId);
@@ -324,10 +352,16 @@ public class DeviceUpsertService {
             }
         }
 
+        // Key by (ip, 'local') — all upsertAll callers are local-discovery paths.
+        // fetch candidates by IP, then re-key by ip to match below (all are origin='local').
         Map<String, Device> existingByIp = new HashMap<>();
         if (!ipSet.isEmpty()) {
             for (Device d : repo.findByIpAddressIn(ipSet)) {
-                existingByIp.put(d.getIpAddress(), d);
+                // Only consider local rows — remote-origin rows with the same IP must not match
+                // here (they are a different device row under composite uniqueness).
+                if ("local".equals(d.getOriginHostIp())) {
+                    existingByIp.put(d.getIpAddress(), d);
+                }
             }
         }
 
@@ -370,6 +404,8 @@ public class DeviceUpsertService {
                 }
                 // discoverySource: last-writer-wins (mirrors lastSeen; see upsert single-path).
                 existing.setDiscoverySource(d.source());
+                // Origin: local batch — confirm local origin on update.
+                existing.setOriginHostIp("local");
                 // Non-downgrade role write (UPDATE branch).
                 DeviceRole newRoleAllU = roleClassifier.classify(existing);
                 if (newRoleAllU != DeviceRole.UNKNOWN || existing.getDeviceRole() == DeviceRole.UNKNOWN) {
@@ -385,6 +421,8 @@ public class DeviceUpsertService {
                 fresh.setLastSeenIface(d.iface());
                 // discoverySource: last-writer-wins (mirrors lastSeen; see upsert single-path).
                 fresh.setDiscoverySource(d.source());
+                // Origin: local batch — entity default "local" is already set, confirm explicitly.
+                fresh.setOriginHostIp("local");
                 // Non-downgrade role write (INSERT branch).
                 DeviceRole newRoleAllI = roleClassifier.classify(fresh);
                 if (newRoleAllI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {

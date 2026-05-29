@@ -73,7 +73,11 @@ public class DockerDiscoveryService {
     }
 
     /**
-     * Runs one discovery pass.
+     * Runs one discovery pass using the local Docker CLI.
+     *
+     * <p>Parses running containers via the CLI, then delegates to
+     * {@link #ingest(List, OriginContext, Instant)} with {@link OriginContext#local()}.
+     * The local path is byte-identical to the pre-refactor behaviour.
      *
      * @return a summary of containers + synthetic gateways upserted
      * @throws DiscoveryUnavailableException if the docker CLI is absent/unreachable or fails
@@ -82,13 +86,30 @@ public class DockerDiscoveryService {
         List<String> ids = cli.listRunningContainerIds();
         String json = cli.inspect(ids);
         List<DockerContainer> containers = parser.parse(json);
+        return ingest(containers, OriginContext.local(), clock.instant());
+    }
 
-        // Persistence note: each container/gateway upsert + service save commits independently
-        // (discover() is intentionally NOT @Transactional — the inverse of the all-or-nothing
-        // sweep DeviceUpsertService#upsertAll documents). A pass is fully idempotent — devices are
-        // keyed on IP, services on (deviceId, port, protocol) — so a mid-pass failure is healed by
-        // simply re-running discovery rather than leaving a half-written, un-replayable batch.
-        Instant observedAt = clock.instant();
+    /**
+     * Shared ingest: persists a pre-parsed list of {@link DockerContainer}s attributed to the
+     * given {@link OriginContext}.
+     *
+     * <p>Used by BOTH the local CLI path ({@link #discover()} passes {@link OriginContext#local()})
+     * and the remote Docker Host Probe (Phase 4, passes {@link OriginContext#of(String, String)}
+     * with the probed host's IP and hostname). The local path is byte-identical to the
+     * pre-refactor behaviour — origin='local' dedup semantics are unchanged.
+     *
+     * <p>Intentionally NOT {@code @Transactional}: each container/gateway upsert + service save
+     * commits independently. A pass is fully idempotent — devices keyed on (ip, origin), services
+     * on (deviceId, port, protocol) — so a mid-pass failure is healed by re-running.
+     *
+     * @param containers the parsed list of containers (e.g. from {@link DockerInspectParser#parse})
+     * @param origin     the origin context: local discovery or remote-probe host
+     * @param observedAt the observation timestamp
+     * @return a summary of containers + synthetic gateways upserted
+     */
+    public DockerDiscoveryResponse ingest(List<DockerContainer> containers,
+                                          OriginContext origin,
+                                          Instant observedAt) {
         List<Long> deviceIds = new ArrayList<>();
 
         // Dedupe synthetic gateways by gateway-IP so one network with N containers yields a
@@ -117,7 +138,7 @@ public class DockerDiscoveryService {
                 observedAt,
                 null,                       // no host iface for a container address
                 c.publishesHostPort());     // propagate host-port flag from parsed container
-            Device saved = upsertService.upsertWithScope(disc, scope);
+            Device saved = upsertService.upsertWithScope(disc, scope, origin);
             deviceIds.add(saved.getId());
             containerCount++;
 
@@ -148,7 +169,7 @@ public class DockerDiscoveryService {
                 observedAt,
                 null,
                 false);                     // synthetic gateway never publishes a host port
-            Device saved = upsertService.upsertWithScope(disc, DiscoveryScope.DOCKER_BRIDGE);
+            Device saved = upsertService.upsertWithScope(disc, DiscoveryScope.DOCKER_BRIDGE, origin);
             deviceIds.add(saved.getId());
             gatewayCount++;
         }
