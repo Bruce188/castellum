@@ -267,4 +267,63 @@ describe('<RelatedCvesPanel />', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(api.cveDetail).toHaveBeenCalledTimes(1);
   });
+
+  // ---------------------------------------------------------------------------
+  // feat/threats-cve-detail-drawer: onCveSelect callback
+  // ---------------------------------------------------------------------------
+
+  it('onCveSelect_calledWithCveId_whenRowIsClicked', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-SEL', '8.0', false)]),
+    );
+    const onCveSelect = vi.fn();
+    render(
+      <RelatedCvesPanel
+        deviceId={5}
+        hostname="host-5"
+        ipAddress="10.0.0.5"
+        onCveSelect={onCveSelect}
+      />,
+    );
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-SEL');
+    fireEvent.click(row);
+    expect(onCveSelect).toHaveBeenCalledWith('CVE-2024-SEL');
+  });
+
+  it('onCveSelect_calledOnKeyboardEnter', async () => {
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-KEY', '6.0', false)]),
+    );
+    const onCveSelect = vi.fn();
+    render(
+      <RelatedCvesPanel
+        deviceId={6}
+        hostname="host-6"
+        ipAddress="10.0.0.6"
+        onCveSelect={onCveSelect}
+      />,
+    );
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-KEY');
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(onCveSelect).toHaveBeenCalledWith('CVE-2024-KEY');
+  });
+
+  it('onCveSelect_notRequired_fallsBackToInlineExpand', async () => {
+    // When onCveSelect is absent the existing inline-expand behaviour still works
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-INL', '7.0', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeDetail('CVE-2024-INL', 'Inline detail'),
+    );
+    render(
+      <RelatedCvesPanel deviceId={7} hostname="host-7" ipAddress="10.0.0.7" />,
+    );
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-INL');
+    fireEvent.click(row);
+    // Inline expand still renders the detail sub-row
+    const detail = await screen.findByTestId('related-cves-detail-CVE-2024-INL');
+    expect(detail).toBeInTheDocument();
+  });
 });
+

@@ -25,6 +25,7 @@ vi.mock('../api/client', () => ({
     feedsStatus: vi.fn(),
     listFleetCves: vi.fn(),
     cveDetail: vi.fn(),
+    listAffectedDevices: vi.fn(),
   },
 }));
 
@@ -733,7 +734,187 @@ describe('<ThreatsDashboard />', () => {
     await waitFor(() => {
       const probe = screen.getByTestId('location-probe').textContent ?? '';
       expect(probe).not.toContain('crit=');
+      expect(probe).not.toContain('crit=');
       expect(probe).not.toContain('host=');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // feat/threats-cve-detail-drawer: CVE click opens full CveDetailPanel drawer
+  // ---------------------------------------------------------------------------
+
+  it('cveDetail_clickingCveRowOpensCveDetailPanel', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 99, hostname: 'host-99', ipAddress: '10.0.0.99', criticality: 'HIGH', score: '9.00', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-9999', '8.5', true)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      cveId: 'CVE-2024-9999',
+      published: '2024-01-01T00:00:00Z',
+      lastModified: '2024-01-02T00:00:00Z',
+      vulnStatus: 'Analyzed',
+      description: 'Test CVE detail description',
+      cvssV31Score: '8.5',
+      cvssV31Vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      cvssV30Score: null,
+      cvssV30Vector: null,
+      cvssV2Score: null,
+      cvssV2Vector: null,
+      fetchedAt: null,
+      rawJson: null,
+      kev: true,
+      epssScore: '0.5',
+      compositeScore: '8.5',
+    });
+    (api.listAffectedDevices as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWith();
+    const threatRow = await screen.findByTestId('threats-row-99');
+    fireEvent.click(threatRow);
+
+    // Wait for the CVE row to appear inside the related panel
+    const cveRow = await screen.findByTestId('related-cves-row-CVE-2024-9999');
+
+    // Click the CVE row → should open the CveDetailPanel drawer
+    fireEvent.click(cveRow);
+
+    const panel = await screen.findByTestId('cve-detail-panel');
+    expect(panel).toBeInTheDocument();
+    expect(panel).toHaveTextContent('CVE-2024-9999');
+  });
+
+  it('cveDetail_closingDrawer_keepsThreatRowExpanded', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 88, hostname: 'host-88', ipAddress: '10.0.0.88', criticality: 'HIGH', score: '9.00', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-0088', '7.5', false)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      cveId: 'CVE-2024-0088',
+      published: '2024-01-01T00:00:00Z',
+      lastModified: '2024-01-02T00:00:00Z',
+      vulnStatus: 'Analyzed',
+      description: 'Detail for 0088',
+      cvssV31Score: '7.5',
+      cvssV31Vector: null,
+      cvssV30Score: null,
+      cvssV30Vector: null,
+      cvssV2Score: null,
+      cvssV2Vector: null,
+      fetchedAt: null,
+      rawJson: null,
+      kev: false,
+      epssScore: null,
+      compositeScore: '7.5',
+    });
+    (api.listAffectedDevices as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWith();
+    const threatRow = await screen.findByTestId('threats-row-88');
+    fireEvent.click(threatRow);
+
+    const cveRow = await screen.findByTestId('related-cves-row-CVE-2024-0088');
+    fireEvent.click(cveRow);
+
+    const panel = await screen.findByTestId('cve-detail-panel');
+    expect(panel).toBeInTheDocument();
+
+    // Close the drawer
+    fireEvent.click(screen.getByRole('button', { name: /close cve panel/i }));
+
+    // CveDetailPanel should be gone
+    await waitFor(() => expect(screen.queryByTestId('cve-detail-panel')).toBeNull());
+
+    // But the related-CVEs panel for device 88 must still be visible
+    expect(screen.getByTestId('threats-related-panel-88')).toBeInTheDocument();
+    expect(screen.getByTestId('related-cves-row-CVE-2024-0088')).toBeInTheDocument();
+  });
+
+  it('cveDetail_secondCveClick_swapsDrawerContent', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 77, hostname: 'host-77', ipAddress: '10.0.0.77', criticality: 'CRITICAL', score: '9.50', kevCount: 2 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([
+        makeSummary('CVE-2024-AAA', '9.0', true),
+        makeSummary('CVE-2024-BBB', '7.0', false),
+      ]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        cveId: 'CVE-2024-AAA',
+        published: '2024-01-01T00:00:00Z',
+        lastModified: '2024-01-02T00:00:00Z',
+        vulnStatus: 'Analyzed',
+        description: 'Detail for AAA',
+        cvssV31Score: '9.0',
+        cvssV31Vector: null,
+        cvssV30Score: null,
+        cvssV30Vector: null,
+        cvssV2Score: null,
+        cvssV2Vector: null,
+        fetchedAt: null,
+        rawJson: null,
+        kev: true,
+        epssScore: null,
+        compositeScore: '9.0',
+      })
+      .mockResolvedValueOnce({
+        cveId: 'CVE-2024-BBB',
+        published: '2024-01-01T00:00:00Z',
+        lastModified: '2024-01-02T00:00:00Z',
+        vulnStatus: 'Analyzed',
+        description: 'Detail for BBB',
+        cvssV31Score: '7.0',
+        cvssV31Vector: null,
+        cvssV30Score: null,
+        cvssV30Vector: null,
+        cvssV2Score: null,
+        cvssV2Vector: null,
+        fetchedAt: null,
+        rawJson: null,
+        kev: false,
+        epssScore: null,
+        compositeScore: '7.0',
+      });
+    (api.listAffectedDevices as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWith();
+    const threatRow = await screen.findByTestId('threats-row-77');
+    fireEvent.click(threatRow);
+
+    // Click first CVE
+    const cveRowA = await screen.findByTestId('related-cves-row-CVE-2024-AAA');
+    fireEvent.click(cveRowA);
+
+    const panel = await screen.findByTestId('cve-detail-panel');
+    expect(panel).toHaveTextContent('CVE-2024-AAA');
+
+    // Click second CVE — drawer should swap to BBB without doubling
+    const cveRowB = await screen.findByTestId('related-cves-row-CVE-2024-BBB');
+    fireEvent.click(cveRowB);
+
+    await waitFor(() => expect(screen.getByTestId('cve-detail-panel')).toHaveTextContent('CVE-2024-BBB'));
+    // Only one panel should exist
+    expect(screen.getAllByTestId('cve-detail-panel')).toHaveLength(1);
+  });
 });
+
