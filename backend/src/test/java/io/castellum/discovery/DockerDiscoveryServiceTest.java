@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * </ul>
  */
 @DataJpaTest
-@Import({DeviceUpsertService.class, DiscoveryScopeClassifier.class, DockerInspectParser.class})
+@Import({DeviceUpsertService.class, DiscoveryScopeClassifier.class, DeviceRoleClassifier.class, DockerInspectParser.class})
 class DockerDiscoveryServiceTest {
 
     static final Instant FIXED_NOW = Instant.parse("2026-05-28T12:00:00Z");

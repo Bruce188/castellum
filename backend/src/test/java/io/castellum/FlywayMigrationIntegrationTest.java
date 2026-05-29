@@ -394,6 +394,31 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v26DeviceRoleColumnRoundTrip() {
+        // (a) Confirm column existence via INFORMATION_SCHEMA.
+        Number colCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'DEVICE_ROLE'",
+            Number.class);
+        assertNotNull(colCount, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(colCount.intValue() > 0,
+            "device_role column must exist in device table after V26 migration");
+
+        // (b) Round-trip via raw JDBC — INSERT a device row carrying device_role='SERVER', SELECT back.
+        Instant now = Instant.now();
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, device_role) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            "10.99.26.1", now, now, "MEDIUM", "HOME", "SERVER"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT device_role FROM device WHERE ip_address = '10.99.26.1'"
+        );
+        assertEquals("SERVER", row.get("device_role"),
+            "device_role must round-trip after V26 migration");
+    }
+
+    @Test
     void v18DeviceLastSeenIfaceRoundTrip() {
         // Confirm column existence via INFORMATION_SCHEMA.
         Number colCount = jdbcTemplate.queryForObject(

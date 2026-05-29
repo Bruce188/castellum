@@ -38,6 +38,7 @@ import static org.mockito.Mockito.*;
     OtFingerprintService.class,
     DeviceUpsertService.class,
     DiscoveryScopeClassifier.class,
+    io.castellum.discovery.DeviceRoleClassifier.class,
     AuditService.class,
     JacksonAutoConfiguration.class
 })

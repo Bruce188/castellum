@@ -1,5 +1,6 @@
 package io.castellum.domain;
 
+import io.castellum.discovery.DeviceRole;
 import io.castellum.discovery.DiscoveryScope;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.risk.Criticality;
@@ -43,6 +44,15 @@ public class Device {
     @Enumerated(EnumType.STRING)
     @Column(name = "discovery_source")
     private DiscoverySource discoverySource;
+
+    /**
+     * Functional role classification populated by {@code DeviceRoleClassifier} at upsert time.
+     * Default {@code UNKNOWN} covers rows inserted before V26 and devices whose signals are
+     * ambiguous. NOT NULL — the entity default keeps manual POST safe without a controller change.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "device_role", nullable = false)
+    private DeviceRole deviceRole = DeviceRole.UNKNOWN;
 
     @Column(name = "publishes_host_port", nullable = false)
     private boolean publishesHostPort = false;
@@ -123,6 +133,9 @@ public class Device {
 
     public DiscoverySource getDiscoverySource() { return discoverySource; }
     public void setDiscoverySource(DiscoverySource discoverySource) { this.discoverySource = discoverySource; }
+
+    public DeviceRole getDeviceRole() { return deviceRole; }
+    public void setDeviceRole(DeviceRole deviceRole) { this.deviceRole = deviceRole; }
 
     public boolean isPublishesHostPort() { return publishesHostPort; }
     public void setPublishesHostPort(boolean publishesHostPort) { this.publishesHostPort = publishesHostPort; }

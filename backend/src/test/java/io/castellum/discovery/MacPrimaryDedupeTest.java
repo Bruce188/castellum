@@ -58,7 +58,7 @@ class MacPrimaryDedupeTest {
     @BeforeEach
     void setUp() {
         Clock clock = Clock.fixed(Instant.parse("2026-04-30T00:00:00Z"), ZoneOffset.UTC);
-        upsertService = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier());
+        upsertService = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier(), new DeviceRoleClassifier());
         service = new PassiveDiscoveryService(
             arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
             upsertService, auditService, recorder,
