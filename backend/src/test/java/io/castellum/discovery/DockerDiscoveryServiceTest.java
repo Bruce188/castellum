@@ -139,14 +139,14 @@ class DockerDiscoveryServiceTest {
         newService(fixture("inspect-reference.json"),
             List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8")).discover();
 
-        // pingpay gateway 172.18.0.1, supabase gateway 172.19.0.1 — both HOME, named after network
+        // pingpay gateway 172.18.0.1, supabase gateway 172.19.0.1 — both DOCKER_BRIDGE, named after network
         Device gw18 = repo.findByIpAddress("172.18.0.1").orElseThrow();
-        assertThat(gw18.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(gw18.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
         assertThat(gw18.getHostname()).isEqualTo("docker-net:pingpay_default");
         assertThat(gw18.getDiscoverySource()).isEqualTo(DiscoverySource.DOCKER);
 
         Device gw19 = repo.findByIpAddress("172.19.0.1").orElseThrow();
-        assertThat(gw19.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(gw19.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
         assertThat(gw19.getHostname()).isEqualTo("docker-net:supabase_network_pingpay");
     }
 
@@ -237,15 +237,17 @@ class DockerDiscoveryServiceTest {
     // ── AC5: non-container HOME devices unaffected ────────────────────────────────────────────
 
     @Test
-    void discover_syntheticGateway_isHomeAndHasNoOs() throws Exception {
-        // Synthetic gateways are HOME-scope and should NOT get os="Linux"
+    void discover_syntheticGateway_isDockerBridgeAndLinuxOs() throws Exception {
+        // Synthetic gateways are DOCKER_BRIDGE-scope and get os="Linux" because
+        // DeviceUpsertService.upsertWithScope(DOCKER_BRIDGE) fills osName for null/blank values —
+        // the docker bridge gateway IS the Linux host's bridge interface.
         newService(fixture("inspect-reference.json"), List.of("c3")).discover();
 
         Device gw = repo.findByIpAddress("172.18.0.1").orElseThrow();
-        assertThat(gw.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(gw.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
         assertThat(gw.getOsName())
-            .as("synthetic gateway is not a container — must have null osName")
-            .isNull();
+            .as("synthetic gateway upserted with DOCKER_BRIDGE scope must have osName='Linux'")
+            .isEqualTo("Linux");
     }
 
     // -----------------------------------------------------------------------
