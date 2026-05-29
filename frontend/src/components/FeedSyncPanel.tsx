@@ -27,6 +27,8 @@ export function FeedSyncPanel({ isAdmin }: Props) {
   const [coverage, setCoverage] = useState<CveCoverageDto | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cronInput, setCronInput] = useState<string>('');
+  const [cronError, setCronError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function stopPoll() {
@@ -62,7 +64,12 @@ export function FeedSyncPanel({ isAdmin }: Props) {
       .catch(() => { /* tolerate errors — coverage hint is advisory */ });
     if (isAdmin) {
       api.getFeedSchedule()
-        .then(s => { if (!cancelled) setSchedule(s); })
+        .then(s => {
+          if (!cancelled) {
+            setSchedule(s);
+            setCronInput(s.cron);
+          }
+        })
         .catch(() => { /* tolerate 403/non-admin — leave schedule null */ });
     }
     return () => {
@@ -81,8 +88,33 @@ export function FeedSyncPanel({ isAdmin }: Props) {
       }
       const updated = await api.getFeedSchedule();
       setSchedule(updated);
+      setCronInput(updated.cron);
     } catch {
       /* ignore — schedule toggle errors are non-fatal */
+    }
+  }
+
+  async function handleCronSave() {
+    if (!schedule) return;
+    setCronError(null);
+    try {
+      const updated = await api.updateFeedSchedule({ enabled: schedule.enabled, cron: cronInput });
+      setSchedule(updated);
+      setCronInput(updated.cron);
+    } catch (err) {
+      setCronError(err instanceof Error ? err.message : 'invalid cron expression');
+    }
+  }
+
+  async function handleCronReset() {
+    if (!schedule) return;
+    setCronError(null);
+    try {
+      const updated = await api.resetFeedSchedule();
+      setSchedule(updated);
+      setCronInput(updated.cron);
+    } catch (err) {
+      setCronError(err instanceof Error ? err.message : 'reset failed');
     }
   }
 
@@ -176,7 +208,7 @@ export function FeedSyncPanel({ isAdmin }: Props) {
 
       {/* Schedule sub-block (only when loaded) */}
       {schedule && (
-        <div className="mb-3 text-xs text-gray-600 space-y-0.5">
+        <div className="mb-3 text-xs text-gray-600 space-y-1">
           <p data-testid="schedule-cron">
             Schedule: <span className="font-mono">{schedule.cron}</span>
           </p>
@@ -187,16 +219,52 @@ export function FeedSyncPanel({ isAdmin }: Props) {
           <p data-testid="schedule-next-run">
             Next run: <span className="font-mono">{schedule.nextRunAt ? schedule.nextRunAt.substring(0, 10) : '—'}</span>
           </p>
-          {isAdmin && (
-            <button
-              type="button"
-              data-testid="schedule-toggle"
-              onClick={handleScheduleToggle}
-              className="mt-1 px-2 py-0.5 text-xs rounded border border-gray-300 bg-gray-50 hover:bg-gray-100"
-            >
-              {schedule.enabled ? 'Disable' : 'Enable'}
-            </button>
-          )}
+
+          {isAdmin ? (
+            <>
+              {/* Cron editor — ADMIN only */}
+              <div className="flex items-center gap-2 flex-wrap mt-1">
+                <input
+                  type="text"
+                  data-testid="cron-input"
+                  value={cronInput}
+                  onChange={e => { setCronInput(e.target.value); setCronError(null); }}
+                  className="font-mono text-xs border border-gray-300 rounded px-2 py-0.5 w-36"
+                  aria-label="Cron expression"
+                />
+                <button
+                  type="button"
+                  data-testid="cron-save-btn"
+                  onClick={handleCronSave}
+                  className="px-2 py-0.5 text-xs rounded border border-blue-400 bg-blue-50 hover:bg-blue-100"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  data-testid="cron-reset-btn"
+                  onClick={handleCronReset}
+                  className="px-2 py-0.5 text-xs rounded border border-gray-300 bg-gray-50 hover:bg-gray-100"
+                  title="Reset to default (0 0 6 * * *)"
+                >
+                  Reset to default
+                </button>
+              </div>
+              {cronError && (
+                <p data-testid="cron-error" className="text-red-600 text-xs mt-0.5">
+                  {cronError}
+                </p>
+              )}
+              <button
+                type="button"
+                data-testid="schedule-toggle"
+                onClick={handleScheduleToggle}
+                className="mt-1 px-2 py-0.5 text-xs rounded border border-gray-300 bg-gray-50 hover:bg-gray-100"
+              >
+                {schedule.enabled ? 'Disable' : 'Enable'}
+              </button>
+            </>
+          ) : null}
         </div>
       )}
 

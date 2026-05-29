@@ -15,6 +15,8 @@ import java.time.Instant;
 public class FeedSyncSchedule {
 
     public static final long SINGLETON_ID = 1L;
+    /** Default cron — mirrors the V23 migration seed value; reset-to-default uses this constant. */
+    public static final String DEFAULT_CRON = "0 0 6 * * *";
 
     @Id
     private Long id;

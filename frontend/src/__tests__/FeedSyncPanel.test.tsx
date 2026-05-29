@@ -13,6 +13,7 @@ vi.mock('../api/client', () => ({
     updateFeedSchedule: vi.fn(),
     enableFeedSchedule: vi.fn(),
     disableFeedSchedule: vi.fn(),
+    resetFeedSchedule: vi.fn(),
     cveCoverage: vi.fn(),
   },
 }));
@@ -25,6 +26,7 @@ const getFeedSchedule = vi.mocked(api.getFeedSchedule);
 const updateFeedSchedule = vi.mocked(api.updateFeedSchedule);
 const enableFeedSchedule = vi.mocked(api.enableFeedSchedule);
 const disableFeedSchedule = vi.mocked(api.disableFeedSchedule);
+const resetFeedSchedule = vi.mocked(api.resetFeedSchedule);
 const cveCoverage = vi.mocked(api.cveCoverage);
 
 const FULL_CORPUS_FEEDS = {
@@ -81,6 +83,7 @@ beforeEach(() => {
   updateFeedSchedule.mockReset();
   enableFeedSchedule.mockReset();
   disableFeedSchedule.mockReset();
+  resetFeedSchedule.mockReset();
   cveCoverage.mockReset();
 
   feedsStatus.mockResolvedValue(FULL_CORPUS_FEEDS);
@@ -90,6 +93,7 @@ beforeEach(() => {
   getFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
   disableFeedSchedule.mockResolvedValue(SCHEDULE_DISABLED);
   enableFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
+  resetFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
   cveCoverage.mockResolvedValue(FULL_COVERAGE);
 });
 
@@ -343,5 +347,79 @@ describe('<FeedSyncPanel />', () => {
     expect(screen.queryByTestId('corpus-coverage')).not.toBeInTheDocument();
     // panel must not have crashed
     expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument();
+  });
+
+  // --- Cron editor (feat/feed-schedule-cron-editor) ---
+
+  it('admin sees cron input field populated with current cron', async () => {
+    render(<FeedSyncPanel isAdmin={true} />);
+    const input = await screen.findByTestId('cron-input');
+    expect(input).toHaveValue('0 0 6 * * *');
+  });
+
+  it('admin can edit cron and Save calls updateFeedSchedule with new cron', async () => {
+    const updated = { ...SCHEDULE_ENABLED, cron: '0 0 3 * * *', nextRunAt: '2026-05-28T03:00:00Z' };
+    updateFeedSchedule.mockResolvedValueOnce(updated);
+    getFeedSchedule.mockResolvedValueOnce(updated);
+
+    render(<FeedSyncPanel isAdmin={true} />);
+    const input = await screen.findByTestId('cron-input');
+    fireEvent.change(input, { target: { value: '0 0 3 * * *' } });
+    const saveBtn = screen.getByTestId('cron-save-btn');
+    fireEvent.click(saveBtn);
+
+    await waitFor(() =>
+      expect(updateFeedSchedule).toHaveBeenCalledWith(
+        expect.objectContaining({ cron: '0 0 3 * * *' })
+      )
+    );
+    // UI reflects new value after save
+    await waitFor(() => expect(input).toHaveValue('0 0 3 * * *'));
+  });
+
+  it('invalid cron shows inline error and does NOT call updateFeedSchedule', async () => {
+    updateFeedSchedule.mockRejectedValueOnce(
+      Object.assign(new Error('invalid cron expression: bad'), { status: 400 })
+    );
+
+    render(<FeedSyncPanel isAdmin={true} />);
+    const input = await screen.findByTestId('cron-input');
+    fireEvent.change(input, { target: { value: 'not-a-cron' } });
+    const saveBtn = screen.getByTestId('cron-save-btn');
+    fireEvent.click(saveBtn);
+
+    // updateFeedSchedule was called (backend rejects it)
+    await waitFor(() => expect(updateFeedSchedule).toHaveBeenCalledTimes(1));
+    // Error hint shown to the user
+    await waitFor(() => expect(screen.getByTestId('cron-error')).toBeInTheDocument());
+    // Schedule state unchanged — cron display still shows original
+    expect(screen.getByTestId('schedule-cron')).toHaveTextContent('0 0 6 * * *');
+  });
+
+  it('admin reset calls resetFeedSchedule and reverts input to default', async () => {
+    const custom = { ...SCHEDULE_ENABLED, cron: '0 0 3 * * *' };
+    getFeedSchedule.mockResolvedValue(custom);
+    resetFeedSchedule.mockResolvedValueOnce(SCHEDULE_ENABLED);
+
+    render(<FeedSyncPanel isAdmin={true} />);
+    const resetBtn = await screen.findByTestId('cron-reset-btn');
+    fireEvent.click(resetBtn);
+
+    await waitFor(() => expect(resetFeedSchedule).toHaveBeenCalledTimes(1));
+    // Input and schedule display revert to default
+    await waitFor(() =>
+      expect(screen.getByTestId('cron-input')).toHaveValue('0 0 6 * * *')
+    );
+    expect(screen.getByTestId('schedule-cron')).toHaveTextContent('0 0 6 * * *');
+  });
+
+  it('viewer sees cron as read-only text (no cron-input, no cron-save-btn, no cron-reset-btn)', async () => {
+    render(<FeedSyncPanel isAdmin={false} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('cron-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cron-save-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cron-reset-btn')).not.toBeInTheDocument();
   });
 });

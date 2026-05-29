@@ -270,4 +270,52 @@ class FeedScheduleControllerTest {
                         .content("{\"enabled\":true,\"cron\":\"0 0 6 * * *\"}"))
                 .andExpect(status().isUnauthorized());
     }
+
+    // -----------------------------------------------------------------------
+    // Case 8 — ADMIN PUT /reset restores DEFAULT_CRON + audits
+    // -----------------------------------------------------------------------
+
+    @Test
+    @WithMockUser(roles = "ADMIN", username = "admin")
+    void admin_reset_restoresDefaultCron_andAudits() throws Exception {
+        FeedSyncSchedule existing = seededRow();
+        existing.setCronExpression("0 0 3 * * *"); // some custom cron
+        when(repository.findById(FeedSyncSchedule.SINGLETON_ID))
+                .thenReturn(Optional.of(existing));
+        when(repository.save(any(FeedSyncSchedule.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        mockMvc.perform(put("/api/admin/feed-schedule/reset"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cron").value(FeedSyncSchedule.DEFAULT_CRON));
+
+        verify(repository).save(argThat(row ->
+                FeedSyncSchedule.DEFAULT_CRON.equals(row.getCronExpression())));
+        verify(auditService).recordEvent(
+                eq("admin"),
+                eq("FEED_SCHEDULE_RESET"),
+                eq("feed_schedule"),
+                eq("1"),
+                any());
+    }
+
+    // -----------------------------------------------------------------------
+    // Case 9 — VIEWER → 403 on reset
+    // -----------------------------------------------------------------------
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewer_reset_returns403() throws Exception {
+        mockMvc.perform(put("/api/admin/feed-schedule/reset"))
+                .andExpect(status().isForbidden());
+    }
+
+    // -----------------------------------------------------------------------
+    // Case 10 — anonymous → 401 on reset
+    // -----------------------------------------------------------------------
+
+    @Test
+    void anon_reset_returns401() throws Exception {
+        mockMvc.perform(put("/api/admin/feed-schedule/reset").with(anonymous()))
+                .andExpect(status().isUnauthorized());
+    }
 }
