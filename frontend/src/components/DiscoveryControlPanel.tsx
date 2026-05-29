@@ -2,12 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type {
   DiscoverySource,
+  DockerDiscoveryResponse,
   InterfaceInfo,
   PassiveDiscoveryResponse,
 } from '../api/types';
 
 interface Props {
   isAdmin: boolean;
+  /**
+   * Optional callback fired after a successful Docker discovery so the caller can refresh
+   * its device list / topology. The discovered/updated count is passed for convenience.
+   */
+  onDiscovered?: (updated: number) => void;
 }
 
 const ALL_SOURCES: DiscoverySource[] = ['ARP', 'MDNS', 'PCAP'];
@@ -28,7 +34,7 @@ const FALLBACK_INTERFACES: InterfaceInfo[] = [
  * AC2: collapsed Advanced section holds the iface select + source checkboxes + window input.
  * AC3: active/inactive state via in-flight submitting flag; deactivate via AbortController.abort().
  */
-export function DiscoveryControlPanel({ isAdmin }: Props) {
+export function DiscoveryControlPanel({ isAdmin, onDiscovered }: Props) {
   const [interfaces, setInterfaces] = useState<InterfaceInfo[]>(FALLBACK_INTERFACES);
   const [iface, setIface] = useState<string>('');
   const [windowSeconds, setWindowSeconds] = useState<number>(30);
@@ -37,6 +43,11 @@ export function DiscoveryControlPanel({ isAdmin }: Props) {
   const [result, setResult] = useState<PassiveDiscoveryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Docker discovery — independent button + state (no iface/sources knobs).
+  const [dockerSubmitting, setDockerSubmitting] = useState(false);
+  const [dockerResult, setDockerResult] = useState<DockerDiscoveryResponse | null>(null);
+  const [dockerError, setDockerError] = useState<string | null>(null);
 
   // AbortController ref for the in-flight request (AC3)
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -107,6 +118,30 @@ export function DiscoveryControlPanel({ isAdmin }: Props) {
 
   function handleDeactivate() {
     abortControllerRef.current?.abort();
+  }
+
+  async function handleDiscoverDocker() {
+    if (!isAdmin || dockerSubmitting) return;
+    setDockerSubmitting(true);
+    setDockerError(null);
+    setDockerResult(null);
+    try {
+      const out = await api.discoverDocker();
+      if (mountedRef.current) {
+        setDockerResult(out);
+      }
+      // Fire the refresh callback outside the mounted guard — the caller owns its own
+      // lifecycle and may want the count even if this panel has since unmounted.
+      onDiscovered?.(out.updated);
+    } catch (err) {
+      if (mountedRef.current) {
+        setDockerError(err instanceof Error ? err.message : 'docker discovery failed');
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDockerSubmitting(false);
+      }
+    }
   }
 
   // Derive scan scope label for display
@@ -180,6 +215,26 @@ export function DiscoveryControlPanel({ isAdmin }: Props) {
         )}
         {error && (
           <span role="alert" className="text-sm text-red-600">{error}</span>
+        )}
+
+        {/* Docker discovery — separate one-shot button (no in-flight cancel needed). */}
+        <button
+          type="button"
+          data-testid="docker-discover-btn"
+          disabled={!isAdmin || dockerSubmitting}
+          onClick={handleDiscoverDocker}
+          className="px-3 py-1 text-sm rounded bg-sky-700 text-white hover:bg-sky-800 disabled:bg-sky-300 disabled:cursor-not-allowed"
+        >
+          {dockerSubmitting ? 'Discovering containers…' : 'Discover docker containers'}
+        </button>
+        {dockerError && (
+          <span role="alert" className="text-sm text-red-600">{dockerError}</span>
+        )}
+        {dockerResult && (
+          <span data-testid="docker-discover-result" className="text-sm text-gray-600">
+            {dockerResult.containers} container{dockerResult.containers === 1 ? '' : 's'}
+            {' · '}{dockerResult.gateways} network{dockerResult.gateways === 1 ? '' : 's'}
+          </span>
         )}
       </div>
 

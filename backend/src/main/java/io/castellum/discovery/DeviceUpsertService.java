@@ -46,6 +46,64 @@ public class DeviceUpsertService {
         this.scopeClassifier = scopeClassifier;
     }
 
+    /**
+     * Scope-explicit upsert for sources whose {@link DiscoveryScope} is determined by
+     * runtime metadata rather than the IP-range heuristic in {@link DiscoveryScopeClassifier}.
+     *
+     * <p>The Docker discovery path uses this: a container's scope is
+     * {@link DiscoveryScope#DOCKER_BRIDGE} iff it publishes a host port, else
+     * {@link DiscoveryScope#HOME} — a signal orthogonal to the container's bridge-subnet IP
+     * (compose stacks land on {@code 172.18+}, {@code 172.19+}, … which the classifier would
+     * mislabel). Unlike {@link #upsert(Discovery)}, the explicit scope is authoritative and is
+     * written on BOTH the insert and update paths (last-writer-wins, mirroring lastSeen): a
+     * container that starts publishing a port between sweeps must flip HOME → DOCKER_BRIDGE in
+     * place. All other field semantics (mac/hostname fill-when-null, iface
+     * overwrite-when-non-null, source last-writer-wins) match {@link #upsert(Discovery)}.
+     *
+     * @param d     the observation (its {@link Discovery#source()} is persisted as-is)
+     * @param scope the authoritative scope to write, overriding the IP-range classifier
+     * @return the persisted device
+     */
+    @Transactional
+    public Device upsertWithScope(Discovery d, DiscoveryScope scope) {
+        Optional<Device> existing = repo.findByIpAddress(d.ipAddress());
+        if (existing.isPresent()) {
+            Device e = existing.get();
+            e.setLastSeen(d.observedAt());
+            if (e.getMacAddress() == null && d.macAddress() != null) {
+                e.setMacAddress(d.macAddress());
+            }
+            // hostname: overwrite-always for the scope-explicit path. A container's name is a
+            // stable, authoritative identifier (re-create keeps the same name); refreshing it
+            // keeps the topology label current if a prior null/stale source seeded the row.
+            if (d.hostname() != null) {
+                e.setHostname(d.hostname());
+            }
+            if (d.iface() != null) {
+                e.setLastSeenIface(d.iface());
+            }
+            e.setDiscoverySource(d.source());
+            // Authoritative scope — written on update too (see method Javadoc).
+            e.setDiscoveryScope(scope);
+            return repo.save(e);
+        } else {
+            Instant now = d.observedAt();
+            Device fresh = new Device(
+                null,
+                d.ipAddress(),
+                d.hostname(),
+                d.macAddress(),
+                now,
+                now,
+                Criticality.MEDIUM
+            );
+            fresh.setDiscoveryScope(scope);
+            fresh.setLastSeenIface(d.iface());
+            fresh.setDiscoverySource(d.source());
+            return repo.save(fresh);
+        }
+    }
+
     @Transactional
     public Device upsert(Discovery d) {
         Optional<Device> existing = repo.findByIpAddress(d.ipAddress());

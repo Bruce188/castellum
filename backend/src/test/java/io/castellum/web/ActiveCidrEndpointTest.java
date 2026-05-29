@@ -4,6 +4,7 @@ import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.discovery.ActiveNetworkDetector;
 import io.castellum.discovery.ActiveNetworkDetector.ActiveNetwork;
+import io.castellum.discovery.DockerDiscoveryService;
 import io.castellum.discovery.DiscoverySweepRepository;
 import io.castellum.discovery.PassiveDiscoveryService;
 import io.castellum.security.CastellumUserDetailsService;
@@ -60,6 +61,7 @@ class ActiveCidrEndpointTest {
     @MockBean private JwtService jwtService;
     @MockBean private UserRepository userRepository;
     @MockBean private ActiveNetworkDetector detector;
+    @MockBean private DockerDiscoveryService dockerDiscoveryService;
 
     // -----------------------------------------------------------------------
     // Case 1 — anon → 401

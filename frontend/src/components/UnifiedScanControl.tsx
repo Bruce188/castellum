@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../api/client';
 import { runUnifiedScan } from '../lib/unifiedScan';
-import type { UnifiedScanProgress, StageId, StageState } from '../lib/unifiedScan';
+import type { UnifiedScanProgress, StageId, StageState, StageContext } from '../lib/unifiedScan';
 import { makeNmapStage } from '../lib/nmapScanStage';
 import { runOtSweep, DEFAULT_SWEEP_CONFIG } from '../lib/otSweep';
 import { OT_PROTOCOLS } from '../lib/otProtocols';
@@ -12,7 +12,14 @@ interface Props {
   isAdmin?: boolean;
 }
 
-const STAGE_IDS: StageId[] = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT', 'OT_ICS_SWEEP'];
+const STAGE_IDS: StageId[] = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT', 'OT_ICS_SWEEP', 'DOCKER_DISCOVERY'];
+
+/** Map a stage id to its runner kind (drives the per-stage status display). */
+function kindFor(id: StageId): 'nmap' | 'ot' | 'docker' {
+  if (id === 'OT_ICS_SWEEP') return 'ot';
+  if (id === 'DOCKER_DISCOVERY') return 'docker';
+  return 'nmap';
+}
 
 export function UnifiedScanControl({ isAdmin = true }: Props) {
   const [cidr, setCidr] = useState('192.168.1.0/24');
@@ -95,19 +102,26 @@ export function UnifiedScanControl({ isAdmin = true }: Props) {
           run: otStageRunner,
           dependsOn: ['PING_SWEEP' as StageId],
         },
+        {
+          // Docker discovery is host-local (ignores CIDR): it enumerates running containers
+          // off the local daemon so the "Scan this network" button surfaces them too.
+          id: 'DOCKER_DISCOVERY' as StageId,
+          kind: 'docker' as const,
+          run: async (ctx: StageContext) => { await api.discoverDocker(ctx.signal); },
+        },
       ],
     };
 
     // Initialize progress with all stages pending so rows render immediately.
     const initialStages: StageState[] = STAGE_IDS.map((id) => ({
       id,
-      kind: id === 'OT_ICS_SWEEP' ? 'ot' : 'nmap',
+      kind: kindFor(id),
       status: 'pending',
     }));
     setProgress({
       stages: initialStages,
       completedStages: 0,
-      totalStages: 4,
+      totalStages: STAGE_IDS.length,
       overall: 0,
     });
 
@@ -128,7 +142,7 @@ export function UnifiedScanControl({ isAdmin = true }: Props) {
   const overall = progress?.overall ?? 0;
   const stages = progress?.stages ?? STAGE_IDS.map((id) => ({
     id,
-    kind: (id === 'OT_ICS_SWEEP' ? 'ot' : 'nmap') as 'nmap' | 'ot',
+    kind: kindFor(id),
     status: 'pending' as const,
   }));
 

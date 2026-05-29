@@ -48,6 +48,7 @@ vi.mock('../api/client', () => ({
     getActiveCidr: vi.fn(),
     // OtProbePanel also calls probeOt for single-protocol advanced form
     probeOt: vi.fn(),
+    discoverDocker: vi.fn(),
   },
 }));
 
@@ -57,6 +58,7 @@ const mockListDevices = vi.mocked(api.listDevices);
 const mockProbeOtOnce = vi.mocked(api.probeOtOnce);
 const mockGetActiveCidr = vi.mocked(api.getActiveCidr);
 const mockProbeOt = vi.mocked(api.probeOt);
+const mockDiscoverDocker = vi.mocked(api.discoverDocker);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,6 +134,9 @@ beforeEach(() => {
   mockProbeOtOnce.mockReset();
   mockGetActiveCidr.mockReset();
   mockProbeOt.mockReset();
+  mockDiscoverDocker.mockReset();
+  // Docker stage resolves to an empty discovery by default (host-local, no CIDR).
+  mockDiscoverDocker.mockResolvedValue({ containers: 0, gateways: 0, updated: 0, deviceIds: [] });
 
   // Safe default: getActiveCidr returns the test CIDR so the input is pre-filled
   mockGetActiveCidr.mockResolvedValue({
@@ -256,7 +261,7 @@ describe('<UnifiedScanControl /> — AC3 progress renders', () => {
     expect(val).toBe(1);
 
     // All 4 per-stage rows must exist
-    const stageIds = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT', 'OT_ICS_SWEEP'];
+    const stageIds = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT', 'OT_ICS_SWEEP', 'DOCKER_DISCOVERY'];
     for (const id of stageIds) {
       expect(screen.getByTestId(`unified-stage-${id}`)).toBeInTheDocument();
     }
@@ -401,7 +406,7 @@ describe('<UnifiedScanControl /> — partial-failure isolation', () => {
     expect(screen.getByTestId('unified-scan-btn')).toBeInTheDocument();
 
     // All 4 stage rows must be present
-    const stageIds = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT', 'OT_ICS_SWEEP'];
+    const stageIds = ['PING_SWEEP', 'SERVICE_DETECT', 'OS_FINGERPRINT', 'OT_ICS_SWEEP', 'DOCKER_DISCOVERY'];
     for (const id of stageIds) {
       expect(screen.getByTestId(`unified-stage-${id}`)).toBeInTheDocument();
     }

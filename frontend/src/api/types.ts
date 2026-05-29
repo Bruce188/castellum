@@ -285,11 +285,12 @@ export interface AuditFilters {
 /**
  * Passive and active discovery sources — mirrors the backend {@code DiscoverySource} enum.
  *
- * @remarks Full 7-value set: ARP | MDNS | PCAP | LLDP | CDP | OT_PROBE | NMAP_SCAN.
+ * @remarks Full 8-value set: ARP | MDNS | PCAP | LLDP | CDP | OT_PROBE | NMAP_SCAN | DOCKER.
  * Previously this type omitted OT_PROBE and NMAP_SCAN; widened here so
- * {@link Device.discoverySource} is correctly typed for all backend values.
+ * {@link Device.discoverySource} is correctly typed for all backend values. DOCKER is the
+ * local Docker-daemon inventory source ({@code POST /api/discovery/docker}).
  */
-export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'OT_PROBE' | 'NMAP_SCAN';
+export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'OT_PROBE' | 'NMAP_SCAN' | 'DOCKER';
 
 export interface PassiveDiscoveryRequest {
   iface: string;
@@ -304,6 +305,18 @@ export interface PassiveDiscoveryResponse {
   /** Map of source name → count of neighbors discovered via that source. */
   perSourceCount: Record<DiscoverySource, number>;
   sweepId: number | null;
+}
+
+/** POST /api/discovery/docker — mirrors the backend {@code DockerDiscoveryResponse} record. */
+export interface DockerDiscoveryResponse {
+  /** Running containers discovered and upserted as devices. */
+  containers: number;
+  /** Synthetic docker-network gateway devices upserted (one per network). */
+  gateways: number;
+  /** Total devices upserted (containers + gateways) — the discovered/updated count. */
+  updated: number;
+  /** Ids of every upserted device (containers first, then gateways). */
+  deviceIds: number[];
 }
 
 /** GET /api/discovery/interfaces — host-visible up, non-loopback NICs. */

@@ -7,15 +7,18 @@ vi.mock('../api/client', () => ({
   api: {
     listInterfaces: vi.fn(),
     discoverPassive: vi.fn(),
+    discoverDocker: vi.fn(),
   },
 }));
 
 const listInterfaces = vi.mocked(api.listInterfaces);
 const discoverPassive = vi.mocked(api.discoverPassive);
+const discoverDocker = vi.mocked(api.discoverDocker);
 
 beforeEach(() => {
   listInterfaces.mockReset();
   discoverPassive.mockReset();
+  discoverDocker.mockReset();
 });
 
 describe('<DiscoveryControlPanel />', () => {
@@ -56,7 +59,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 3,
       deviceIds: [1, 2, 3],
-      perSourceCount: { ARP: 2, MDNS: 1, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0 },
+      perSourceCount: { ARP: 2, MDNS: 1, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
       sweepId: 9,
     });
 
@@ -103,7 +106,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0 },
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
       sweepId: null,
     });
 
@@ -134,7 +137,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0 },
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
       sweepId: null,
     });
 
@@ -164,7 +167,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0 },
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
       sweepId: null,
     });
 
@@ -275,5 +278,50 @@ describe('<DiscoveryControlPanel />', () => {
 
     // Deactivate button should no longer be present
     expect(screen.queryByTestId('passive-deactivate-btn')).not.toBeInTheDocument();
+  });
+
+  // --- Docker discovery button ---
+  it('docker-discover button is disabled for VIEWER', async () => {
+    listInterfaces.mockResolvedValueOnce([]);
+    render(<DiscoveryControlPanel isAdmin={false} />);
+    const btn = screen.getByTestId('docker-discover-btn') as HTMLButtonElement;
+    expect(btn).toBeDisabled();
+  });
+
+  it('ADMIN clicking docker-discover calls discoverDocker, shows the count, and fires onDiscovered', async () => {
+    listInterfaces.mockResolvedValueOnce([]);
+    discoverDocker.mockResolvedValueOnce({
+      containers: 8,
+      gateways: 2,
+      updated: 10,
+      deviceIds: [1, 2, 3],
+    });
+    const onDiscovered = vi.fn();
+
+    render(<DiscoveryControlPanel isAdmin={true} onDiscovered={onDiscovered} />);
+
+    fireEvent.click(screen.getByTestId('docker-discover-btn'));
+
+    await waitFor(() => {
+      expect(discoverDocker).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('docker-discover-result')).toHaveTextContent(/8 containers/);
+      expect(screen.getByTestId('docker-discover-result')).toHaveTextContent(/2 networks/);
+    });
+    expect(onDiscovered).toHaveBeenCalledWith(10);
+  });
+
+  it('docker-discover surfaces an error banner on failure', async () => {
+    listInterfaces.mockResolvedValueOnce([]);
+    discoverDocker.mockRejectedValueOnce(new Error('503 Service Unavailable'));
+
+    render(<DiscoveryControlPanel isAdmin={true} />);
+
+    fireEvent.click(screen.getByTestId('docker-discover-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/503/);
+    });
   });
 });

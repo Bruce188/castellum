@@ -250,4 +250,61 @@ class DeviceUpsertServiceTest {
         var inserted = repo.findByIpAddress("10.0.11.2").orElseThrow();
         assertThat(inserted.getDiscoverySource()).isEqualTo(DiscoverySource.NMAP_SCAN);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // upsertWithScope — explicit, classifier-overriding scope (Docker discovery)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * INSERT path: the explicit scope is written verbatim, OVERRIDING the IP-range classifier.
+     * {@code 172.18.0.2} would classify as DOCKER_BRIDGE, but an internal-only container must
+     * be persisted HOME when the caller says so.
+     */
+    @Test
+    void upsertWithScope_insert_usesExplicitScope_overridingClassifier() {
+        Discovery d = new Discovery("172.18.0.2", null, "pingpay-db", DiscoverySource.DOCKER, T1, null);
+        service.upsertWithScope(d, DiscoveryScope.HOME);
+
+        var found = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(found.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(found.getHostname()).isEqualTo("pingpay-db");
+        assertThat(found.getDiscoverySource()).isEqualTo(DiscoverySource.DOCKER);
+    }
+
+    /**
+     * UPDATE path: unlike {@link DeviceUpsertService#upsert}, the explicit scope IS written on
+     * update — a container that begins publishing a port must flip HOME → DOCKER_BRIDGE in place.
+     */
+    @Test
+    void upsertWithScope_update_overwritesScope() {
+        // Seed the same IP as HOME (internal-only container)
+        service.upsertWithScope(
+            new Discovery("172.18.0.5", null, "svc", DiscoverySource.DOCKER, T1, null),
+            DiscoveryScope.HOME);
+
+        // Re-observe now publishing a port → DOCKER_BRIDGE
+        service.upsertWithScope(
+            new Discovery("172.18.0.5", null, "svc", DiscoverySource.DOCKER, T2, null),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.5").orElseThrow();
+        assertThat(found.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+        assertThat(found.getLastSeen()).isEqualTo(T2);
+        assertThat(repo.count()).isEqualTo(1L); // idempotent — single row
+    }
+
+    /** UPDATE path: container name (hostname) is refreshed even when previously set. */
+    @Test
+    void upsertWithScope_update_refreshesHostname() {
+        Device seed = new Device(null, "172.18.0.9", "old-name", null, T1, T1);
+        seed.setDiscoveryScope(DiscoveryScope.HOME);
+        repo.save(seed);
+
+        service.upsertWithScope(
+            new Discovery("172.18.0.9", null, "renamed-container", DiscoverySource.DOCKER, T2, null),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.18.0.9").orElseThrow();
+        assertThat(found.getHostname()).isEqualTo("renamed-container");
+    }
 }

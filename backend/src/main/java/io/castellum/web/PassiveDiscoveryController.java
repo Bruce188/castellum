@@ -38,6 +38,7 @@ public class PassiveDiscoveryController {
     private final boolean lldpEnabled;
     private final boolean cdpEnabled;
     private final ActiveNetworkDetector activeNetworkDetector;
+    private final DockerDiscoveryService dockerDiscoveryService;
 
     public PassiveDiscoveryController(PassiveDiscoveryService service,
                                  DiscoverySweepRepository sweepRepo,
@@ -45,7 +46,8 @@ public class PassiveDiscoveryController {
                                  @Value("${castellum.discovery.pcap.enabled:false}") boolean pcapEnabled,
                                  @Value("${castellum.discovery.lldp.enabled:false}") boolean lldpEnabled,
                                  @Value("${castellum.discovery.cdp.enabled:false}") boolean cdpEnabled,
-                                 ActiveNetworkDetector activeNetworkDetector) {
+                                 ActiveNetworkDetector activeNetworkDetector,
+                                 DockerDiscoveryService dockerDiscoveryService) {
         this.service = service;
         this.sweepRepo = sweepRepo;
         this.clock = clock;
@@ -53,6 +55,7 @@ public class PassiveDiscoveryController {
         this.lldpEnabled = lldpEnabled;
         this.cdpEnabled = cdpEnabled;
         this.activeNetworkDetector = activeNetworkDetector;
+        this.dockerDiscoveryService = dockerDiscoveryService;
     }
 
     @PostMapping("/passive")
@@ -61,6 +64,22 @@ public class PassiveDiscoveryController {
             throws DiscoveryUnavailableException {
         PassiveDiscoveryRequest req = normalize(dto);
         return service.sweep(req);
+    }
+
+    /**
+     * Discovers running Docker containers via the local {@code docker} CLI and upserts each as
+     * a {@link io.castellum.domain.Device} so the topology renders the containers (one star per
+     * docker network, host-bridged only when a container publishes a port). Idempotent —
+     * re-running updates devices in place.
+     *
+     * <p>ADMIN-only, mirroring {@code POST /api/discovery/passive}. Returns the
+     * discovered/updated count. A {@link DiscoveryUnavailableException} (docker absent /
+     * daemon unreachable) maps to its configured HTTP status via {@link GlobalExceptionHandler}.
+     */
+    @PostMapping("/docker")
+    @PreAuthorize("hasRole('ADMIN')")
+    public DockerDiscoveryResponse docker() throws DiscoveryUnavailableException {
+        return dockerDiscoveryService.discover();
     }
 
     /**

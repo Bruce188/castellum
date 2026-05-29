@@ -4,7 +4,7 @@ import type {
   ChangePasswordRequest,
   CreateUserRequest,
   Criticality, CveAffectedDevice, CveDetailDto, CveFleetSort, CveSummaryDto,
-  Device, DeviceRiskDto, FeedScheduleDto, FeedScheduleUpdateRequest, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
+  Device, DeviceRiskDto, DockerDiscoveryResponse, FeedScheduleDto, FeedScheduleUpdateRequest, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   IntegrationConfigDto, IntegrationProbeRequest, IntegrationProbeResult,
   IntegrationPushResponse, IntegrationType,
   InterfaceInfo, NetworkService,
@@ -272,6 +272,17 @@ export const api = {
     request<PassiveDiscoveryResponse>('/api/discovery/passive', {
       method: 'POST',
       body: JSON.stringify(payload),
+      signal,
+    }),
+
+  /**
+   * POST /api/discovery/docker — ADMIN-only. Discovers running Docker containers via the
+   * backend's local docker CLI and upserts them as devices. Idempotent; returns the
+   * discovered/updated count. No body. (503 surfaces if docker is unavailable on the host.)
+   */
+  discoverDocker: (signal?: AbortSignal) =>
+    request<DockerDiscoveryResponse>('/api/discovery/docker', {
+      method: 'POST',
       signal,
     }),
 
