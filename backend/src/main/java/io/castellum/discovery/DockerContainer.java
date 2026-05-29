@@ -18,7 +18,8 @@ import java.util.Objects;
  *       name, the container's IP on that network, and that network's gateway IP. The
  *       <em>primary</em> network (first non-blank-IP attachment) supplies the device IP.</li>
  *   <li>{@code publishesHostPort} — true iff any port has a non-empty {@code HostPort}
- *       binding. Drives the {@link DiscoveryScope} mapping (DOCKER_BRIDGE vs HOME).</li>
+ *       binding. Parsed but currently unused (scope is no longer derived from it — all
+ *       discovered containers receive {@link DiscoveryScope#DOCKER_BRIDGE} unconditionally).</li>
  *   <li>{@code exposedPorts} — the {@code NetworkSettings.Ports} keys parsed to (port, protocol).
  *       The lowest-numbered one ({@link #primaryPort()}) keys the container's service row.</li>
  * </ul>

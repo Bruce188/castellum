@@ -341,6 +341,31 @@ class DeviceUpsertServiceTest {
             .isEqualTo("Linux");
     }
 
+    /**
+     * UPDATE path: upsertWithScope(DOCKER_BRIDGE) must NOT overwrite a scan-derived OS name
+     * (e.g. "Linux 5.15" set by an OS_FINGERPRINT nmap scan) with the generic "Linux" default.
+     * Fill-when-null — mirrors mac/hostname semantics.
+     */
+    @Test
+    void upsertWithScope_update_doesNotClobberScanDerivedOsName() {
+        // Seed a DOCKER_BRIDGE container whose OS was enriched by a prior nmap fingerprint
+        Device seed = new Device(null, "172.21.0.10", "enriched-svc", null, T1, T1);
+        seed.setDiscoveryScope(DiscoveryScope.DOCKER_BRIDGE);
+        seed.setOsName("Linux 5.15");
+        repo.save(seed);
+
+        // Docker sweep re-observes the same container
+        service.upsertWithScope(
+            new Discovery("172.21.0.10", null, "enriched-svc", DiscoverySource.DOCKER, T2, null),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.21.0.10").orElseThrow();
+        assertThat(found.getOsName())
+            .as("scan-derived OS must survive a docker re-sweep")
+            .isEqualTo("Linux 5.15");
+        assertThat(found.getLastSeen()).isEqualTo(T2); // sanity — upsert did run
+    }
+
     /** HOME-scoped upsertWithScope (synthetic gateway) must NOT set osName. */
     @Test
     void upsertWithScope_home_doesNotSetOsName() {

@@ -83,10 +83,12 @@ public class DeviceUpsertService {
      * regardless of network subnet (custom docker networks can use any RFC1918 range).
      * Synthetic gateways still use {@link DiscoveryScope#HOME}.
      *
-     * <p>When scope is {@link DiscoveryScope#DOCKER_BRIDGE} the device {@code osName} is set to
-     * {@code "Linux"}: every Docker container runs on a Linux kernel. If a more specific OS is
-     * ever determined (e.g. from image metadata), the caller should use a dedicated OS-update
-     * path — this method sets the default for freshly-discovered containers.
+     * <p>When scope is {@link DiscoveryScope#DOCKER_BRIDGE} the device {@code osName} is filled
+     * with {@code "Linux"} if and only if {@code osName} is currently {@code null} or blank:
+     * every Docker container runs on a Linux kernel, but a prior OS_FINGERPRINT nmap scan may
+     * have already set a more-specific name (e.g. {@code "Linux 5.15"}) that must not be
+     * overwritten. The INSERT branch always sets {@code "Linux"} (fresh rows have null OS).
+     * This is the same fill-when-null semantic used for {@code macAddress} and {@code hostname}.
      *
      * <p>Unlike {@link #upsert(Discovery)}, the explicit scope is authoritative and is
      * written on BOTH the insert and update paths (last-writer-wins, mirroring lastSeen): a
@@ -122,8 +124,12 @@ public class DeviceUpsertService {
             e.setDiscoverySource(d.source());
             // Authoritative scope — written on update too (see method Javadoc).
             e.setDiscoveryScope(scope);
-            // AC1: Docker containers run on Linux — set default OS when scope is DOCKER_BRIDGE.
-            if (scope == DiscoveryScope.DOCKER_BRIDGE) {
+            // AC1: Docker containers run on Linux — fill default OS when scope is DOCKER_BRIDGE
+            // and no OS has been determined yet. Fill-when-null mirrors mac/hostname semantics:
+            // a prior OS_FINGERPRINT nmap scan may have set a more-specific name (e.g. "Linux 5.15")
+            // that must not be overwritten back to the generic default.
+            if (scope == DiscoveryScope.DOCKER_BRIDGE
+                    && (e.getOsName() == null || e.getOsName().isBlank())) {
                 e.setOsName("Linux");
             }
             return repo.save(e);

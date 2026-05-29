@@ -27,20 +27,22 @@ import java.util.Map;
  *       builder auto-stars them around the {@code .1} gateway of that subnet. A synthetic
  *       gateway {@link Device} is upserted at each network's gateway IP to give the star a real
  *       centre node.</li>
- *   <li><b>Host bridge only when published.</b> A container's {@link DiscoveryScope} is
- *       {@link DiscoveryScope#DOCKER_BRIDGE} iff it publishes a host port, else
- *       {@link DiscoveryScope#HOME}. The edge builder draws a {@code docker-bridge} edge from
- *       {@code host.docker.internal} directly to every {@code DOCKER_BRIDGE} device — so only
- *       port-publishing containers link to the host, and that edge goes straight to the
- *       container (not via the gateway). Internal-only containers stay on their network star.</li>
+ *   <li><b>All containers are DOCKER_BRIDGE.</b> Every discovered container receives
+ *       {@link DiscoveryScope#DOCKER_BRIDGE} — the Docker source is authoritative for scope
+ *       regardless of whether the container publishes a host port. Custom docker networks
+ *       (172.18+, 172.20+, …) would be mis-classified {@link DiscoveryScope#HOME} by the
+ *       IP-range heuristic; Docker source always wins. The edge builder draws a
+ *       {@code docker-bridge} edge from {@code host.docker.internal} to every
+ *       {@code DOCKER_BRIDGE} device, linking all containers to the host pivot.</li>
  * </ul>
  *
  * <p>Idempotent: re-running upserts every device in place (keyed on IP). The run emits one
  * {@code DOCKER_DISCOVERY} audit event.
  *
- * <p><b>Scope authority.</b> The "publishes a host port" signal is orthogonal to a container's
- * bridge-subnet IP, so the IP-range {@link DiscoveryScopeClassifier} cannot derive it (compose
- * stacks land on {@code 172.18+}, {@code 172.19+}, …). The service therefore upserts via
+ * <p><b>Scope authority.</b> Custom docker networks can use any RFC1918 range, so the
+ * IP-range {@link DiscoveryScopeClassifier} cannot reliably classify containers (compose
+ * stacks land on {@code 172.18+}, {@code 172.19+}, …). The Docker source is therefore
+ * authoritative: all containers are upserted as {@link DiscoveryScope#DOCKER_BRIDGE} via
  * {@link DeviceUpsertService#upsertWithScope(Discovery, DiscoveryScope)}, which writes the
  * explicit scope authoritatively on both insert and update.
  */
