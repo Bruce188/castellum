@@ -117,7 +117,7 @@ public class ScanController {
     @GetMapping("/api/scans/{id}/report")
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
     public ScanReportDto report(@PathVariable Long id) {
-        // Stub — delegates to ScanReportService which returns null until implemented
+        // Per-scan report: metadata + summary + attributed devices with new/changed/unchanged delta.
         return scanReportService.buildReport(id);
     }
 
