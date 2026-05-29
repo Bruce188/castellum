@@ -71,6 +71,7 @@ function makeDevice(
     osName: null,
     osAccuracy: null,
     osCpe: null,
+    publishesHostPort: false,
   };
 }
 

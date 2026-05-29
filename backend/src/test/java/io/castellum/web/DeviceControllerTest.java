@@ -211,4 +211,23 @@ class DeviceControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.discoveryScope").value("DOCKER_BRIDGE"));
     }
+
+    @Test
+    void list_publishesHostPort_true_serialisesInPayload() throws Exception {
+        // NB3: guard against a future @JsonIgnore/DTO refactor silently dropping
+        // the publishesHostPort field.  A device with publishesHostPort=true must
+        // serialize the key with value true in the /api/devices list response.
+        Device d = new Device();
+        d.setId(50L);
+        d.setIpAddress("172.18.0.5");
+        d.setCriticality(Criticality.MEDIUM);
+        d.setDiscoveryScope(DiscoveryScope.DOCKER_BRIDGE);
+        d.setPublishesHostPort(true);
+        when(deviceRepository.findAll(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(d)));
+
+        mockMvc.perform(get("/api/devices"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].publishesHostPort").value(true));
+    }
 }

@@ -96,6 +96,7 @@ const sampleDevice: Device = {
   osName: null,
   osAccuracy: null,
   osCpe: null,
+  publishesHostPort: false,
 };
 
 function renderWith(initialPath = '/cves') {

@@ -161,6 +161,16 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           height: 'label' as unknown as number,
           padding: '14' as unknown as undefined,
         } },
+        // ── Muted docker-network compound nodes (stale/unattached fallback box) ─
+        // Reduced opacity and grey border signal that the group contains residual
+        // ARP entries with no running container or docker-net gateway.  Must follow
+        // the node[?dockerNetwork] block so this selector wins on specificity.
+        { selector: 'node.muted-group', style: {
+          opacity: 0.45,
+          'border-style': 'dashed' as const,
+          'border-color': '#9ca3af',
+          color: '#9ca3af',
+        } },
         // Per-zone fill + border colors (inherit from ZONE_COLORS/ZONE_BORDER_COLORS).
         { selector: 'node.zone-zone-home',   style: { 'background-color': ZONE_COLORS['zone-home'],   'border-color': ZONE_BORDER_COLORS['zone-home'],   color: ZONE_LABEL_COLORS['zone-home'] } },
         { selector: 'node.zone-zone-docker', style: { 'background-color': ZONE_COLORS['zone-docker'], 'border-color': ZONE_BORDER_COLORS['zone-docker'], color: ZONE_LABEL_COLORS['zone-docker'] } },
@@ -257,14 +267,17 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     }
     // Network sub-box compound nodes (parent = zone-docker).
     // Only emit these if zone-docker is present (i.e. there are visible DOCKER_BRIDGE devices).
+    // Muted groups (the "Docker (unattached)" stale fallback) receive a `muted` class so the
+    // stylesheet can de-emphasize them without affecting named network boxes.
     const dockerNetworkBoxNodes = dockerNetGroups.map(g => ({
       data: {
         id: g.groupId,
         label: g.label,
         parent: 'zone-docker',
         dockerNetwork: true as const,
+        ...(g.muted ? { muted: true as const } : {}),
       },
-      classes: 'docker-network-box',
+      classes: g.muted ? 'docker-network-box muted-group' : 'docker-network-box',
     }));
 
     const nodes = visibleDevices.map(d => {

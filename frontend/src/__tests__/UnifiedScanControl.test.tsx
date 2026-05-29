@@ -84,6 +84,7 @@ function makePage(ips: string[]): Page<Device> {
       osName: null,
       osAccuracy: null,
       osCpe: null,
+      publishesHostPort: false,
     })),
     totalElements: ips.length,
     totalPages: 1,

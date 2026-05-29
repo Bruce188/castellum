@@ -7,6 +7,7 @@ function makeDevice(
   ipAddress: string,
   scope: DiscoveryScope,
   hostname: string | null = null,
+  publishesHostPort = false,
 ): Device {
   return {
     id,
@@ -23,6 +24,7 @@ function makeDevice(
     osName: null,
     osAccuracy: null,
     osCpe: null,
+    publishesHostPort,
   };
 }
 
@@ -198,5 +200,170 @@ describe('buildGatewayEdges', () => {
     const edges = buildGatewayEdges(devices);
     const isolated = edges.filter(e => e.data.kind === 'isolated');
     expect(isolated.map(e => e.data.source)).not.toContain('2');
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Task 2.1 — publishesHostPort-branched gateway edge model
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('publishesHostPort branching', () => {
+    // Pivot (docker host): HOME device at default IP 192.168.68.51 (id=1)
+    // docker-net gateway for network "net_a":  172.18.0.1, DOCKER_BRIDGE, hostname="docker-net:net_a" (id=2)
+    // published-port container in net_a:       172.18.0.5, DOCKER_BRIDGE, publishesHostPort=true  (id=3)
+    // internal-only container in net_a:        172.18.0.6, DOCKER_BRIDGE, publishesHostPort=false (id=4)
+
+    const pivot = makeDevice(1, '192.168.68.51', 'HOME', null, false);
+    const netAGateway = makeDevice(2, '172.18.0.1', 'DOCKER_BRIDGE', 'docker-net:net_a', false);
+    const publishedContainer = makeDevice(3, '172.18.0.5', 'DOCKER_BRIDGE', null, true);
+    const internalContainer = makeDevice(4, '172.18.0.6', 'DOCKER_BRIDGE', null, false);
+
+    it('(a) publishesHostPort:true container gets a docker-bridge edge directly to pivot', () => {
+      const devices = [pivot, netAGateway, publishedContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // The published container must have exactly one docker-bridge edge and it must point to the pivot
+      const toPivot = dbEdges.filter(e => e.data.target === String(publishedContainer.id));
+      expect(toPivot).toHaveLength(1);
+      expect(toPivot[0].data.source).toBe(String(pivot.id));
+    });
+
+    it('(b) internal-only container routes to docker-net gateway, NOT to the pivot', () => {
+      const devices = [pivot, netAGateway, internalContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // Internal container must NOT appear as the target of a pivot-sourced docker-bridge edge
+      const pivotToInternal = dbEdges.filter(
+        e => e.data.source === String(pivot.id) && e.data.target === String(internalContainer.id),
+      );
+      expect(pivotToInternal).toHaveLength(0);
+
+      // Instead the internal container must have a docker-bridge edge whose target is the docker-net gateway
+      const toGateway = dbEdges.filter(
+        e => e.data.source === String(internalContainer.id) && e.data.target === String(netAGateway.id),
+      );
+      expect(toGateway).toHaveLength(1);
+    });
+
+    it('(c) docker-net gateway device itself gets a docker-bridge edge to the pivot', () => {
+      const devices = [pivot, netAGateway];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      const gatewayToPivot = dbEdges.filter(
+        e => e.data.source === String(pivot.id) && e.data.target === String(netAGateway.id),
+      );
+      expect(gatewayToPivot).toHaveLength(1);
+    });
+
+    it('(d) AC3: pivot-incident docker-bridge edge count == published + K networks, not N+M total', () => {
+      // 2 published containers (in net_a and net_b)
+      // 3 internal containers (2 in net_a, 1 in net_b)
+      // 2 networks (net_a: 172.18.0/24, net_b: 172.19.0/24)
+      // Expected pivot-incident docker-bridge edges: 2 (published) + 2 (gateways) = 4, NOT 2+3=5
+
+      const netBGateway = makeDevice(5, '172.19.0.1', 'DOCKER_BRIDGE', 'docker-net:net_b', false);
+      const publishedInNetA = makeDevice(6, '172.18.0.10', 'DOCKER_BRIDGE', null, true);
+      const publishedInNetB = makeDevice(7, '172.19.0.10', 'DOCKER_BRIDGE', null, true);
+      const internalInNetA1 = makeDevice(8, '172.18.0.11', 'DOCKER_BRIDGE', null, false);
+      const internalInNetA2 = makeDevice(9, '172.18.0.12', 'DOCKER_BRIDGE', null, false);
+      const internalInNetB1 = makeDevice(10, '172.19.0.11', 'DOCKER_BRIDGE', null, false);
+
+      const devices = [
+        pivot,
+        netAGateway, netBGateway,
+        publishedInNetA, publishedInNetB,
+        internalInNetA1, internalInNetA2, internalInNetB1,
+      ];
+
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // Only edges whose SOURCE is the pivot count as "pivot-incident"
+      const pivotIncident = dbEdges.filter(e => e.data.source === String(pivot.id));
+
+      // published count = 2, K = 2 networks → expected 4, not 5 (N+M)
+      expect(pivotIncident).toHaveLength(4);
+
+      // Sanity: internal containers must NOT be direct targets of the pivot
+      const internalIds = [
+        String(internalInNetA1.id),
+        String(internalInNetA2.id),
+        String(internalInNetB1.id),
+      ];
+      for (const iid of internalIds) {
+        expect(pivotIncident.map(e => e.data.target)).not.toContain(iid);
+      }
+    });
+
+    it('(e) localStorage pivot override still routes docker-bridge edges from the overridden IP', () => {
+      // Re-confirm the localStorage override path works with publishesHostPort fixtures
+      localStorage.setItem('castellum.topology.docker-host-ip', '192.168.68.99');
+      try {
+        const overridePivot = makeDevice(20, '192.168.68.99', 'HOME', null, false);
+        const gwDevice = makeDevice(21, '172.18.0.1', 'DOCKER_BRIDGE', 'docker-net:mynet', false);
+        const pubContainer = makeDevice(22, '172.18.0.5', 'DOCKER_BRIDGE', null, true);
+
+        const devices = [overridePivot, gwDevice, pubContainer];
+        const edges = buildGatewayEdges(devices);
+        const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+        // Published container → direct edge from overridden pivot
+        const fromOverridePivot = dbEdges.filter(e => e.data.source === String(overridePivot.id));
+        expect(fromOverridePivot.length).toBeGreaterThan(0);
+
+        // Specifically the published container target must be among pivot-sourced edges
+        const toPub = fromOverridePivot.filter(e => e.data.target === String(pubContainer.id));
+        expect(toPub).toHaveLength(1);
+      } finally {
+        localStorage.removeItem('castellum.topology.docker-host-ip');
+      }
+    });
+
+    it('(f) internal-only container with no docker-net gateway in /24 falls back to docker-bridge edge to pivot', () => {
+      // An internal-only container (DOCKER_BRIDGE, publishesHostPort:false, not a gateway)
+      // whose /24 contains NO docker-net gateway device.  The fallback branch in
+      // buildGatewayEdges must produce a docker-bridge edge from the pivot to the
+      // container rather than leaving it orphaned.
+      const pivotDevice = makeDevice(1, '192.168.68.51', 'HOME', null, false);
+      // Container on 172.99.0/24 — no docker-net:* gateway exists on that /24
+      const internalContainer = makeDevice(2, '172.99.0.5', 'DOCKER_BRIDGE', null, false);
+
+      const devices = [pivotDevice, internalContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // The fallback must emit exactly one docker-bridge edge targeting the container
+      const fallbackEdge = dbEdges.find(e => e.data.target === String(internalContainer.id));
+      expect(fallbackEdge, 'fallback docker-bridge edge to pivot must exist for orphan container').toBeTruthy();
+      // The source must be the pivot (docker host), confirming it is NOT orphaned
+      expect(fallbackEdge?.data.source).toBe(String(pivotDevice.id));
+      // No isolated edge must be emitted for the container (it was rescued)
+      const isolatedEdges = edges.filter(e => e.data.kind === 'isolated');
+      expect(isolatedEdges.map(e => e.data.source)).not.toContain(String(internalContainer.id));
+    });
+
+    it('(g) non-docker /24 groups still emit gateway and isolated kinds unchanged', () => {
+      // HOME-only subnet: no docker involvement → gateway kind preserved
+      const h1 = makeDevice(30, '10.0.0.1', 'HOME', null, false);
+      const h2 = makeDevice(31, '10.0.0.50', 'HOME', null, false);
+      // LINK_LOCAL singleton → isolated kind preserved
+      const ll = makeDevice(32, '169.254.100.5', 'LINK_LOCAL', null, false);
+
+      const devices = [h1, h2, ll];
+      const edges = buildGatewayEdges(devices);
+
+      const gatewayEdges = edges.filter(e => e.data.kind === 'gateway');
+      expect(gatewayEdges).toHaveLength(1);
+      expect(gatewayEdges[0].data.target).toBe(String(h1.id)); // .1 wins
+
+      const isolatedEdges = edges.filter(e => e.data.kind === 'isolated');
+      expect(isolatedEdges).toHaveLength(1);
+      expect(isolatedEdges[0].data.source).toBe(String(ll.id));
+
+      // No docker-bridge edges at all (no DOCKER_BRIDGE scope devices)
+      expect(edges.filter(e => e.data.kind === 'docker-bridge')).toHaveLength(0);
+    });
   });
 });

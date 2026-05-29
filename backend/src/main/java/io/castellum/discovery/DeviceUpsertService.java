@@ -124,6 +124,9 @@ public class DeviceUpsertService {
             e.setDiscoverySource(d.source());
             // Authoritative scope — written on update too (see method Javadoc).
             e.setDiscoveryScope(scope);
+            // publishesHostPort: last-writer-wins — a container that starts or stops publishing
+            // a host port between sweeps must reflect the latest state in place.
+            e.setPublishesHostPort(d.publishesHostPort());
             // AC1: Docker containers run on Linux — fill default OS when scope is DOCKER_BRIDGE
             // and no OS has been determined yet. Fill-when-null mirrors mac/hostname semantics:
             // a prior OS_FINGERPRINT nmap scan may have set a more-specific name (e.g. "Linux 5.15")
@@ -149,6 +152,8 @@ public class DeviceUpsertService {
             fresh.setDiscoveryScope(scope);
             fresh.setLastSeenIface(d.iface());
             fresh.setDiscoverySource(d.source());
+            // publishesHostPort: persisted on insert from the Discovery (last-writer-wins on update).
+            fresh.setPublishesHostPort(d.publishesHostPort());
             // AC1: Docker containers run on Linux — set default OS when scope is DOCKER_BRIDGE.
             if (scope == DiscoveryScope.DOCKER_BRIDGE) {
                 fresh.setOsName("Linux");

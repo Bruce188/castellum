@@ -175,7 +175,8 @@ public class ScanExecutionService {
                     host.hostname(),
                     DiscoverySource.NMAP_SCAN,
                     now,
-                    null            // iface not available from nmap XML output
+                    null,           // iface not available from nmap XML output
+                    false
                 );
                 Device device = deviceUpsertService.upsert(discovery);
 
