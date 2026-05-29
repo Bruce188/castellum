@@ -1,79 +1,53 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Device, ScanDetail } from '../api/types';
+import { exportScanReportJson } from '../lib/scanReportExport';
+import type { ScanReport } from '../api/types';
 
 type ErrorKind = 'not-found' | 'other';
+
+const DELTA_STYLE: Record<string, string> = {
+  new: 'bg-green-100 text-green-800',
+  changed: 'bg-yellow-100 text-yellow-800',
+  unchanged: 'bg-gray-100 text-gray-600',
+};
 
 export function ScanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const parsedId = id !== undefined ? Number(id) : NaN;
   const scanId = Number.isFinite(parsedId) ? parsedId : null;
 
-  const [scan, setScan] = useState<ScanDetail | null>(null);
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [report, setReport] = useState<ScanReport | null>(null);
   const [loading, setLoading] = useState<boolean>(scanId !== null);
   const [error, setError] = useState<{ kind: ErrorKind } | null>(
     scanId === null ? { kind: 'not-found' } : null,
   );
 
-  // Fetch the scan detail, then poll while the scan is still in flight so the
-  // status transitions PENDING/RUNNING → COMPLETE/FAILED without a manual reload.
   useEffect(() => {
     if (scanId === null) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const fetchScan = async (first: boolean) => {
-      if (first) {
-        setLoading(true);
-        setError(null);
-      }
-      try {
-        const data = await api.getScanDetail(scanId);
+    setLoading(true);
+    setError(null);
+
+    api.getScanReport(scanId)
+      .then((data) => {
         if (cancelled) return;
-        setScan(data);
-        setError(null);
-        if (data.status === 'PENDING' || data.status === 'RUNNING') {
-          timer = setTimeout(() => void fetchScan(false), 1500);
-        }
-      } catch (err) {
+        setReport(data);
+      })
+      .catch((err) => {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : '';
         setError({ kind: msg.startsWith('404') ? 'not-found' : 'other' });
-      } finally {
+      })
+      .finally(() => {
         if (!cancelled) setLoading(false);
-      }
-    };
+      });
 
-    void fetchScan(true);
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
     };
   }, [scanId]);
-
-  // Resolve discovered devices to (hostname, IP) rows.
-  useEffect(() => {
-    if (scan === null || scan.discoveredDeviceIds.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const results = await Promise.allSettled(
-        scan.discoveredDeviceIds.map(did => api.getDevice(did))
-      );
-      if (cancelled) return;
-      const ok = results
-        .filter((r): r is PromiseFulfilledResult<Device> => r.status === 'fulfilled')
-        .map(r => r.value);
-      setDevices(ok);
-    })();
-    return () => {
-      cancelled = true;
-      // Reset rows on cleanup so a subsequent scan-id change starts empty
-      // until the fresh device lookups resolve.
-      setDevices([]);
-    };
-  }, [scan]);
 
   if (loading) {
     return (
@@ -96,7 +70,7 @@ export function ScanDetailPage() {
     );
   }
 
-  if (error?.kind === 'other' || scan === null) {
+  if (error?.kind === 'other' || report === null) {
     return (
       <div className="p-4">
         <div role="alert" className="mb-3">Failed to load scan.</div>
@@ -107,53 +81,96 @@ export function ScanDetailPage() {
     );
   }
 
+  const { summary, devices } = report;
+
+  const durationSecs =
+    summary.durationMillis != null
+      ? (summary.durationMillis / 1000).toFixed(1) + 's'
+      : '—';
+
   return (
     <div className="p-4">
+      {/* Header */}
       <div className="mb-4 flex items-baseline justify-between">
-        <h1 className="text-xl font-semibold">Scan #{scan.id}</h1>
-        <Link to="/scans" className="text-blue-700 hover:underline text-sm">
-          ← Back to scans
-        </Link>
+        <h1 className="text-xl font-semibold">Scan #{summary.scanId}</h1>
+        <div className="flex gap-2">
+          <button
+            data-testid="report-download-json-btn"
+            onClick={() => exportScanReportJson(report)}
+            className="text-sm px-3 py-1 rounded border border-gray-300 hover:bg-gray-50"
+          >
+            Export JSON
+          </button>
+          <button
+            data-testid="report-print-btn"
+            onClick={() => window.print()}
+            className="text-sm px-3 py-1 rounded border border-gray-300 hover:bg-gray-50"
+          >
+            Print / PDF
+          </button>
+          <Link to="/scans" className="text-blue-700 hover:underline text-sm self-center">
+            ← Back to scans
+          </Link>
+        </div>
       </div>
 
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm mb-6">
-        <dt className="text-gray-500">Status</dt><dd data-testid="scan-status">{scan.status}</dd>
-        <dt className="text-gray-500">CIDR</dt><dd className="font-mono">{scan.cidr}</dd>
-        <dt className="text-gray-500">Type</dt><dd>{scan.scanType}</dd>
-        <dt className="text-gray-500">Requested at</dt><dd>{scan.requestedAt}</dd>
-        <dt className="text-gray-500">Completed at</dt><dd>{scan.completedAt ?? '—'}</dd>
-        <dt className="text-gray-500">Retry count</dt><dd>{scan.retryCount ?? 0}</dd>
-        {scan.failureReason && (
-          <>
-            <dt className="text-gray-500">Failure reason</dt>
-            <dd className="text-red-600">{scan.failureReason}</dd>
-          </>
-        )}
+      {/* Scan metadata */}
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm mb-4">
+        <dt className="text-gray-500">CIDR</dt>
+        <dd className="font-mono">{summary.cidr}</dd>
+        <dt className="text-gray-500">Type</dt>
+        <dd>{summary.scanType}</dd>
+        <dt className="text-gray-500">Status</dt>
+        <dd>{summary.status}</dd>
+        <dt className="text-gray-500">Requested at</dt>
+        <dd>{summary.requestedAt}</dd>
+        <dt className="text-gray-500">Completed at</dt>
+        <dd>{summary.completedAt ?? '—'}</dd>
+        <dt className="text-gray-500">Duration</dt>
+        <dd>{durationSecs}</dd>
       </dl>
 
+      {/* Summary counts */}
+      <div
+        data-testid="scan-summary-counts"
+        className="flex gap-6 mb-6 text-sm bg-gray-50 rounded p-3"
+      >
+        <span><strong>{summary.deviceCount}</strong> devices</span>
+        <span><strong>{summary.serviceCount}</strong> services</span>
+        <span><strong>{summary.cveCount}</strong> CVEs</span>
+      </div>
+
+      {/* Snapshot table */}
       <section>
-        <h2 className="text-lg font-semibold mb-1">
-          Devices discovered ({devices.length})
-        </h2>
-        <p className="text-xs text-gray-500 mb-2">
-          Devices first seen during the scan window. Re-discovered devices
-          are not listed.
-        </p>
+        <h2 className="text-lg font-semibold mb-2">Device snapshot</h2>
         {devices.length === 0 ? (
-          <p className="text-sm text-gray-500">No devices discovered.</p>
+          <p className="text-sm text-gray-500">No devices in this scan.</p>
         ) : (
-          <table className="w-full text-sm" data-testid="discovered-devices-table">
+          <table className="w-full text-sm" data-testid="scan-snapshot-table">
             <thead>
               <tr className="text-left text-gray-500 border-b">
                 <th className="py-1 pr-4">IP</th>
-                <th className="py-1">Hostname</th>
+                <th className="py-1 pr-4">Hostname</th>
+                <th className="py-1 pr-4">Services</th>
+                <th className="py-1 pr-4">CVEs</th>
+                <th className="py-1">Delta</th>
               </tr>
             </thead>
             <tbody>
-              {devices.map(d => (
+              {devices.map((d) => (
                 <tr key={d.id} className="border-b last:border-b-0">
                   <td className="py-1 pr-4 font-mono">{d.ipAddress}</td>
-                  <td className="py-1">{d.hostname ?? '—'}</td>
+                  <td className="py-1 pr-4">{d.hostname ?? '—'}</td>
+                  <td className="py-1 pr-4">{d.services.length}</td>
+                  <td className="py-1 pr-4">{d.cveIds.length}</td>
+                  <td className="py-1">
+                    <span
+                      data-testid={`delta-${d.delta}`}
+                      className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${DELTA_STYLE[d.delta] ?? ''}`}
+                    >
+                      {d.delta}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
