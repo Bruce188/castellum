@@ -6,6 +6,8 @@ interface RelatedCvesPanelProps {
   deviceId: number;
   hostname: string | null;
   ipAddress: string;
+  /** Optional. When provided, CVE row clicks invoke this instead of the inline expand. */
+  onCveSelect?: (cveId: string) => void;
 }
 
 type DetailState =
@@ -44,7 +46,7 @@ function severityClass(label: string): string {
  * lazy-fetches {@code GET /api/cve/{cveId}} on first activation and caches
  * the response.
  */
-export function RelatedCvesPanel({ deviceId, hostname, ipAddress }: RelatedCvesPanelProps) {
+export function RelatedCvesPanel({ deviceId, hostname, ipAddress, onCveSelect }: RelatedCvesPanelProps) {
   const [cves, setCves] = useState<CveSummaryDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +115,13 @@ export function RelatedCvesPanel({ deviceId, hostname, ipAddress }: RelatedCvesP
   }, []);
 
   const toggleRow = (cveId: string) => {
+    // When a parent-level onCveSelect handler is provided, delegate to it
+    // instead of doing the inline expand — the parent renders the full
+    // CveDetailPanel drawer.
+    if (onCveSelect) {
+      onCveSelect(cveId);
+      return;
+    }
     // Read pre-toggle state BEFORE dispatching the updater so the side effect
     // fires exactly once — even under React.StrictMode's double-invocation of
     // functional updaters in dev.
