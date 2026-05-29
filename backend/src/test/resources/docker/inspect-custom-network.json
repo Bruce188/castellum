@@ -1,0 +1,21 @@
+[
+  {
+    "Id": "c9d0e1f2a3b400000000000000000000000000000000000000000000pingdb21",
+    "Name": "/pingpay-db-custom",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "postgres:16" },
+    "NetworkSettings": {
+      "Ports": {
+        "5432/tcp": null
+      },
+      "Networks": {
+        "pingpay_custom_net": {
+          "IPAddress": "172.21.0.3",
+          "Gateway": "172.21.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:15:00:03"
+        }
+      }
+    }
+  }
+]
