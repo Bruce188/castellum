@@ -35,6 +35,12 @@ export interface DockerNetworkGroup {
   label: string;
   /** Device ids belonging to this group (gateway + containers). */
   memberIds: Set<number>;
+  /**
+   * When true the group represents stale/unattached devices (ARP residue with no
+   * running container or gateway).  Renderers should apply a muted visual style.
+   * Named network groups always carry false; the unattached fallback group carries true.
+   */
+  muted: boolean;
 }
 
 /**
@@ -96,7 +102,7 @@ export function buildDockerNetworkGroups(devices: Device[]): DockerNetworkGroup[
     const name = dockerNetworkName(gw.hostname!);
     const gid = dockerNetworkGroupId(name);
     if (!slash24ToGroup.has(slash24)) {
-      slash24ToGroup.set(slash24, { groupId: gid, label: name, memberIds: new Set() });
+      slash24ToGroup.set(slash24, { groupId: gid, label: name, memberIds: new Set(), muted: false });
     }
     // Add the gateway itself to its own group.
     slash24ToGroup.get(slash24)!.memberIds.add(gw.id);
@@ -126,6 +132,7 @@ export function buildDockerNetworkGroups(devices: Device[]): DockerNetworkGroup[
       groupId: DOCKER_UNATTACHED_GROUP_ID,
       label: 'Docker (unattached)',
       memberIds: unattachedIds,
+      muted: true,
     });
   }
   return result;
