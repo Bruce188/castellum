@@ -59,6 +59,7 @@ function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySour
     osAccuracy: null,
     osCpe: null,
     publishesHostPort: false,
+    deviceRole: 'UNKNOWN',
   };
 }
 
@@ -233,6 +234,7 @@ describe('<TopologyView /> alias-label guard (AC4)', () => {
       osAccuracy: null,
       osCpe: null,
       publishesHostPort: false,
+      deviceRole: 'UNKNOWN',
     };
   }
 
@@ -295,5 +297,57 @@ describe('<TopologyView /> risk-loading badge placement (AC#3 overlay guard)', (
     expect(badge.className).not.toContain('right-2');
     // Never intercept clicks even if visually adjacent to other overlays.
     expect(badge.className).toContain('pointer-events-none');
+  });
+});
+
+// Task 3.2 — ROLE_CLASS badge + Cytoscape style selectors + node data.deviceRole
+describe('<TopologyView /> role badge (Task 3.2)', () => {
+  beforeEach(() => {
+    factoryMock.mockClear();
+    mocks.add.mockClear();
+    mocks.elements.mockClear();
+    mocks.layout.mockClear();
+    mocks.layoutRun.mockClear();
+  });
+
+  it('topologyView_appliesRoleClassPerRole', () => {
+    const devices: Device[] = [
+      { ...makeDevice(1, '10.0.0.1', 'HOME'), deviceRole: 'CONTAINER' },
+      { ...makeDevice(2, '10.0.0.2', 'HOME'), deviceRole: 'SERVER' },
+      { ...makeDevice(3, '10.0.0.3', 'HOME'), deviceRole: 'ROUTER' },
+      { ...makeDevice(4, '10.0.0.4', 'HOME'), deviceRole: 'DESKTOP' },
+      { ...makeDevice(5, '10.0.0.5', 'HOME'), deviceRole: 'LAPTOP' },
+      { ...makeDevice(6, '10.0.0.6', 'HOME'), deviceRole: 'UNKNOWN' },
+    ];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string }; classes: string }>;
+    const byId = (id: string) => addArgs.find(e => e.data.id === id);
+
+    expect(byId('1')?.classes).toContain('role-container');
+    expect(byId('2')?.classes).toContain('role-server');
+    expect(byId('3')?.classes).toContain('role-router');
+    expect(byId('4')?.classes).toContain('role-desktop');
+    expect(byId('5')?.classes).toContain('role-laptop');
+    // UNKNOWN devices must NOT have any role-* class
+    expect(byId('6')?.classes).not.toContain('role-');
+  });
+
+  it('topologyView_nodeData_includesDeviceRole', () => {
+    const devices: Device[] = [
+      { ...makeDevice(1, '10.0.0.1', 'HOME'), deviceRole: 'SERVER' },
+      { ...makeDevice(2, '10.0.0.2', 'HOME'), deviceRole: 'UNKNOWN' },
+    ];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string; deviceRole?: string } }>;
+    const byId = (id: string) => addArgs.find(e => e.data.id === id);
+
+    expect(byId('1')?.data.deviceRole).toBe('SERVER');
+    expect(byId('2')?.data.deviceRole).toBe('UNKNOWN');
   });
 });

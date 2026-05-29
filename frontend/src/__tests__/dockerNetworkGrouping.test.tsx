@@ -82,6 +82,7 @@ function makeDevice(
     osAccuracy: null,
     osCpe: null,
     publishesHostPort: false,
+    deviceRole: 'UNKNOWN',
   };
 }
 

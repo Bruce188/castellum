@@ -143,6 +143,8 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
           )}
           <dt className="text-gray-500">discovered via</dt>
           <dd>{device.discoverySource ?? 'Unknown'}</dd>
+          <dt className="text-gray-500">device role</dt>
+          <dd data-testid="device-role">{device.deviceRole}</dd>
           <dt className="text-gray-500">OS</dt>
           <dd data-testid="device-os">
             {device.osName

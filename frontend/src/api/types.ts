@@ -3,6 +3,8 @@ export type ScanType = 'PING_SWEEP' | 'SERVICE_DETECT' | 'OS_FINGERPRINT';
 export type ScanStatus = 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED';
 export type RiskTier = 'low' | 'med' | 'high' | 'crit' | 'unknown';
 export type DiscoveryScope = 'HOME' | 'DOCKER_BRIDGE' | 'LINK_LOCAL' | 'LOOPBACK' | 'PUBLIC';
+/** Mirrors the backend {@code io.castellum.discovery.DeviceRole} enum. */
+export type DeviceRole = 'LAPTOP' | 'DESKTOP' | 'SERVER' | 'ROUTER' | 'CONTAINER' | 'UNKNOWN';
 
 export interface Device {
   id: number;
@@ -42,6 +44,12 @@ export interface Device {
    * False for internal-only containers. Always false for non-DOCKER_BRIDGE devices.
    */
   publishesHostPort: boolean;
+  /**
+   * Role classification for this device. Mirrors the backend
+   * {@code DeviceRoleClassifier} first-match rule chain.
+   * Defaults to {@code 'UNKNOWN'} for devices that have not been classified.
+   */
+  deviceRole: DeviceRole;
 }
 
 export interface NetworkService {

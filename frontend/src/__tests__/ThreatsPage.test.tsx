@@ -43,6 +43,7 @@ const makeDevice = (id: number) => ({
   serviceCount: 0,
   discoveryScope: 'HOME' as const,
   discoverySource: null,
+  deviceRole: 'UNKNOWN' as const,
 });
 
 const makeRisk = (deviceId: number) => ({

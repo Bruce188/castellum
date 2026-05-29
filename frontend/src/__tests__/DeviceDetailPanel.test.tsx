@@ -19,6 +19,7 @@ const device: Device = {
   osAccuracy: null,
   osCpe: null,
   publishesHostPort: false,
+  deviceRole: 'UNKNOWN',
 };
 
 const risk: DeviceRiskDto = {
@@ -343,5 +344,23 @@ describe('<DeviceDetailPanel />', () => {
     const aside = getByTestId('device-detail-panel');
     expect(aside.className).not.toMatch(/\bfixed\b/);
     expect(aside.className).not.toMatch(/\bright-0\b/);
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Task 3.3 — deviceRole row
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('deviceDetailPanel_rendersDeviceRole', () => {
+    render(
+      <DeviceDetailPanel device={{ ...device, deviceRole: 'CONTAINER' }} risk={risk} services={[]} onClose={() => {}} />
+    );
+    expect(screen.getByTestId('device-role')).toHaveTextContent('CONTAINER');
+  });
+
+  it('deviceDetailPanel_rendersDeviceRole_unknown', () => {
+    render(
+      <DeviceDetailPanel device={{ ...device, deviceRole: 'UNKNOWN' }} risk={risk} services={[]} onClose={() => {}} />
+    );
+    expect(screen.getByTestId('device-role')).toHaveTextContent('UNKNOWN');
   });
 });

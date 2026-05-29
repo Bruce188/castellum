@@ -46,6 +46,7 @@ function makePage(ips: string[]) {
       osAccuracy: null,
       osCpe: null,
       publishesHostPort: false,
+      deviceRole: 'UNKNOWN' as const,
     })),
     totalElements: ips.length,
     totalPages: 1,

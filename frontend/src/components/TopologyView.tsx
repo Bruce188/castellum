@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import cytoscape from 'cytoscape';
 // @ts-expect-error - cose-bilkent has no shipped types
 import coseBilkent from 'cytoscape-cose-bilkent';
-import type { Device, DeviceRiskDto, DiscoveryScope, DiscoverySource } from '../api/types';
+import type { Device, DeviceRiskDto, DeviceRole, DiscoveryScope, DiscoverySource } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
@@ -65,6 +65,17 @@ const SCOPE_CLASS: Record<DiscoveryScope, string | null> = {
   PUBLIC: 'scope-public',
 };
 
+// Per-role class map — UNKNOWN devices get no role badge (null).
+// All other roles receive a distinct CSS class for Cytoscape style selectors.
+const ROLE_CLASS: Record<DeviceRole, string | null> = {
+  UNKNOWN: null,
+  LAPTOP: 'role-laptop',
+  DESKTOP: 'role-desktop',
+  SERVER: 'role-server',
+  ROUTER: 'role-router',
+  CONTAINER: 'role-container',
+};
+
 export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClick, highlightPath, scopeVisibility, risksLoading }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
@@ -107,6 +118,14 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         { selector: 'node.scope-link-local',   style: { 'border-width': 2, 'border-color': scopeBorderColor.LINK_LOCAL } },
         { selector: 'node.scope-loopback',     style: { 'border-width': 2, 'border-color': scopeBorderColor.LOOPBACK } },
         { selector: 'node.scope-public',       style: { 'border-width': 2, 'border-color': scopeBorderColor.PUBLIC } },
+        // Per-role badge selectors — distinct channel from scope border.
+        // Role classes are applied on a separate opacity overlay so they
+        // coexist with the scope border without visual conflict.
+        { selector: 'node.role-laptop',    style: { 'text-outline-color': '#6b21a8', 'text-outline-width': 1 } },
+        { selector: 'node.role-desktop',   style: { 'text-outline-color': '#1d4ed8', 'text-outline-width': 1 } },
+        { selector: 'node.role-server',    style: { 'text-outline-color': '#065f46', 'text-outline-width': 1 } },
+        { selector: 'node.role-router',    style: { 'text-outline-color': '#92400e', 'text-outline-width': 1 } },
+        { selector: 'node.role-container', style: { 'text-outline-color': '#1e3a5f', 'text-outline-width': 1 } },
         { selector: 'edge', style: { 'line-color': EDGE_STYLES.subnet.color, 'curve-style': 'straight' as const, opacity: EDGE_STYLES.subnet.opacity, width: EDGE_STYLES.subnet.width } },
         // Gateway-hub edges (peer → gateway-of-/24) — solid, slightly heavier
         // than baseline so the hub structure reads through the layout.
@@ -286,7 +305,8 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const tier = toRiskTier(score);
       const scopeClass = SCOPE_CLASS[d.discoveryScope];
       const sourceClass = d.discoverySource ? (SOURCE_CLASS[d.discoverySource] ?? null) : null;
-      const extraClasses = [scopeClass, sourceClass].filter(Boolean).join(' ');
+      const roleClass = ROLE_CLASS[d.deviceRole];
+      const extraClasses = [scopeClass, sourceClass, roleClass].filter(Boolean).join(' ');
       // serviceCount suffix in the label surfaces the badge on the rendered graph.
       // The node style block above already renders data(label); no style change needed.
       // Guard: "host.docker.internal" and *.docker.internal are Docker bridge-gateway aliases
@@ -314,6 +334,8 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           // null when device predates V19 migration.
           discoverySource: d.discoverySource,
           serviceCount: d.serviceCount,
+          // deviceRole threaded into node data for tooltip/legend consumers.
+          deviceRole: d.deviceRole,
         },
         classes: [`risk-${tier}`, extraClasses, risksLoading ? 'risk-loading' : '']
           .filter(Boolean)
