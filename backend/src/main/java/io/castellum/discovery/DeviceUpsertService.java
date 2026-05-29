@@ -84,7 +84,7 @@ public class DeviceUpsertService {
      * <p>The Docker discovery path uses this: all containers get
      * {@link DiscoveryScope#DOCKER_BRIDGE} — Docker source is authoritative for scope,
      * regardless of network subnet (custom docker networks can use any RFC1918 range).
-     * Synthetic gateways still use {@link DiscoveryScope#HOME}.
+     * Synthetic gateways still use {@link DiscoveryScope#DOCKER_BRIDGE}.
      *
      * <p>When scope is {@link DiscoveryScope#DOCKER_BRIDGE} the device {@code osName} is filled
      * with {@code "Linux"} if and only if {@code osName} is currently {@code null} or blank:

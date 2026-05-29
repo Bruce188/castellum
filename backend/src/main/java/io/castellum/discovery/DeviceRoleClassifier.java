@@ -75,6 +75,12 @@ public class DeviceRoleClassifier {
 
     // ─── Private helpers ─────────────────────────────────────────────────────
 
+    /**
+     * Returns {@code true} when the OS signal contains a server-leaning token.
+     * Bare distro tokens ({@code centos}, {@code rhel}, {@code red hat}, {@code debian},
+     * {@code freebsd}) are treated as SERVER signals by design — a desktop running one of
+     * these distros maps to SERVER (precision tradeoff: determinism over chassis guessing).
+     */
     private static boolean hasServerOs(String signal) {
         if (signal == null || signal.isBlank()) return false;
         String lower = signal.toLowerCase(java.util.Locale.ROOT);

@@ -64,7 +64,13 @@ class DeviceRoleClassifierTest {
             Arguments.of(desktopOsWithIp("Microsoft Windows 10", "192.168.1.1"), DeviceRole.DESKTOP),
 
             // Server OS beats .1 IP
-            Arguments.of(serverOsWithIp("Windows Server 2019", "192.168.1.1"), DeviceRole.SERVER)
+            Arguments.of(serverOsWithIp("Windows Server 2019", "192.168.1.1"), DeviceRole.SERVER),
+
+            // NIT-1: bare distro token "debian" → SERVER by design (no "server" token in the string)
+            Arguments.of(withOsName("Debian GNU/Linux 11"), DeviceRole.SERVER),
+
+            // NIT-2: Rule 6 hostname tiebreaker — ARP, hostname="router", non-.1 IP → ROUTER
+            Arguments.of(arpDeviceWithHostname("router", "192.168.0.50"), DeviceRole.ROUTER)
         );
     }
 
@@ -159,6 +165,14 @@ class DeviceRoleClassifierTest {
     private static Device serverOsWithIp(String osName, String ip) {
         Device d = new Device();
         d.setOsName(osName);
+        d.setIpAddress(ip);
+        return d;
+    }
+
+    private static Device arpDeviceWithHostname(String hostname, String ip) {
+        Device d = new Device();
+        d.setDiscoverySource(DiscoverySource.ARP);
+        d.setHostname(hostname);
         d.setIpAddress(ip);
         return d;
     }
