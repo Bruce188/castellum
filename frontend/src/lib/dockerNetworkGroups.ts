@@ -62,9 +62,13 @@ export function dockerNetworkName(hostname: string): string {
 /**
  * Cytoscape compound-node id for a docker network group.
  * Uses a stable, dom-safe prefix to avoid collisions with numeric device ids.
+ * The network name is slugified (non-alphanumeric/dash/underscore → `_`) because
+ * spaces, dots, or `#` in a cytoscape id/selector can cause selector parse errors.
+ * The raw name is preserved separately as the human-readable LABEL.
  */
 export function dockerNetworkGroupId(networkName: string): string {
-  return `docker-net-group-${networkName}`;
+  const slug = networkName.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `docker-net-group-${slug}`;
 }
 
 /**
@@ -83,7 +87,9 @@ export function buildDockerNetworkGroups(devices: Device[]): DockerNetworkGroup[
   const gateways = devices.filter(isDockerNetGateway);
 
   // Step 2: map /24 prefix → group info.
-  const slash24ToGroup = new Map<string, { groupId: string; label: string; memberIds: Set<number> }>();
+  // Note: two docker networks can never share a /24 — docker guarantees distinct subnets
+  // per network, so the first gateway for a given /24 always wins if duplicates ever appear.
+  const slash24ToGroup = new Map<string, DockerNetworkGroup>();
   for (const gw of gateways) {
     const slash24 = ipv4Slash24(gw.ipAddress);
     if (slash24 === null) continue;

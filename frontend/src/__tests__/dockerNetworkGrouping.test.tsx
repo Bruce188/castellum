@@ -140,6 +140,15 @@ describe('dockerNetworkGroups helpers (AC5 – unit)', () => {
     expect(dockerNetworkGroupId('supabase_network_supabase')).toBe('docker-net-group-supabase_network_supabase');
   });
 
+  it('dockerNet_dockerNetworkGroupId_slugifiesUnsafeChars', () => {
+    // spaces, dots, hashes in a cytoscape id/selector cause parse errors → must be slugified
+    expect(dockerNetworkGroupId('my network')).toBe('docker-net-group-my_network');
+    expect(dockerNetworkGroupId('net.work')).toBe('docker-net-group-net_work');
+    expect(dockerNetworkGroupId('net#work')).toBe('docker-net-group-net_work');
+    // safe chars preserved
+    expect(dockerNetworkGroupId('my-net_work')).toBe('docker-net-group-my-net_work');
+  });
+
   it('dockerNet_prefix_constant_is_docker-net-colon', () => {
     expect(DOCKER_NET_HOSTNAME_PREFIX).toBe('docker-net:');
   });
@@ -400,6 +409,31 @@ describe('TopologyView docker-network sub-box compound nodes (AC1)', () => {
       expect(
         box.data.label,
         `network box label "${box.data.label}" must not start with "docker-net:"`
+      ).not.toMatch(/^docker-net:/);
+    }
+  });
+
+  it('dockerNet_gatewayLeafNode_label_doesNotStartWithDockerNetPrefix', () => {
+    // NB1 regression guard: the gateway leaf node's display label must not start
+    // with "docker-net:" — the raw hostname must be stripped before rendering.
+    render(
+      <TopologyView
+        devices={TWO_NETWORK_FIXTURE}
+        risksById={new Map()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+      />
+    );
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{
+      data: { id: string; label?: string; source?: string };
+    }>;
+    // Gateway device ids are 100 (supabase) and 101 (odisee)
+    for (const gwId of ['100', '101']) {
+      const gwNode = addArgs.find(e => e.data.id === gwId && !('source' in e.data));
+      expect(gwNode, `gateway node id=${gwId} must appear in elements`).toBeTruthy();
+      expect(
+        gwNode?.data.label,
+        `gateway leaf label "${gwNode?.data.label}" must not start with "docker-net:"`
       ).not.toMatch(/^docker-net:/);
     }
   });

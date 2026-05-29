@@ -6,7 +6,7 @@ import type { Device, DeviceRiskDto, DiscoveryScope, DiscoverySource } from '../
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
-import { buildDockerNetworkGroups } from '../lib/dockerNetworkGroups';
+import { buildDockerNetworkGroups, isDockerNetGateway, dockerNetworkName } from '../lib/dockerNetworkGroups';
 import {
   scopeToZoneId,
   ZONE_DEFINITIONS,
@@ -282,7 +282,11 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const isBridgeAlias = (h: string | null) =>
         h != null && (h === 'host.docker.internal' || h.endsWith('.docker.internal'));
       const hostname = isBridgeAlias(d.hostname) ? null : d.hostname;
-      const baseName = hostname ?? d.ipAddress;
+      // For docker-net gateway nodes strip the raw `docker-net:<name>` prefix so
+      // the leaf label reads as the clean network name + "(gw)", not the raw hostname.
+      const baseName = isDockerNetGateway(d) && d.hostname !== null
+        ? `${dockerNetworkName(d.hostname)} (gw)`
+        : hostname ?? d.ipAddress;
       return {
         data: {
           id: String(d.id),
