@@ -473,6 +473,9 @@ export const api = {
   disableFeedSchedule: () =>
     request<FeedScheduleDto>('/api/admin/feed-schedule/disable', { method: 'PUT' }),
 
+  resetFeedSchedule: () =>
+    request<FeedScheduleDto>('/api/admin/feed-schedule/reset', { method: 'PUT' }),
+
   /** DELETE /api/scan-policy/{id} — ADMIN-only. */
   deleteScanPolicy: async (id: number): Promise<void> => {
     const token = getToken();

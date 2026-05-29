@@ -111,6 +111,26 @@ public class FeedScheduleController {
         return FeedScheduleDto.from(row, nextRunAt);
     }
 
+    @PutMapping("/reset")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public FeedScheduleDto reset(Authentication auth) {
+        FeedSyncSchedule row = repository.findById(FeedSyncSchedule.SINGLETON_ID)
+                .orElseThrow(() -> new NoSuchElementException("feed_sync_schedule not found"));
+
+        row.setCronExpression(FeedSyncSchedule.DEFAULT_CRON);
+        row.setUpdatedAt(clock.instant());
+        repository.save(row);
+
+        String actor = auth == null || auth.getName() == null ? "system" : auth.getName();
+        auditService.recordEvent(actor, "FEED_SCHEDULE_RESET", "feed_schedule",
+                String.valueOf(FeedSyncSchedule.SINGLETON_ID),
+                Map.of("cron", FeedSyncSchedule.DEFAULT_CRON));
+
+        Instant nextRunAt = computeNextRunAt(row);
+        return FeedScheduleDto.from(row, nextRunAt);
+    }
+
     /**
      * Computes nextRunAt: min(cronNext, retryAfterAt) when a retry is pending,
      * else cronNext. Anchor is lastRunAt if set, otherwise clock.instant().
