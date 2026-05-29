@@ -1,6 +1,7 @@
 package io.castellum.scan;
 
 import io.castellum.audit.AuditService;
+import io.castellum.discovery.DockerImageCpe;
 import io.castellum.discovery.Discovery;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.discovery.DeviceUpsertService;
@@ -196,10 +197,7 @@ public class ScanExecutionService {
                         ns.setPort(svc.port());
                         ns.setProtocol(svc.protocol());
                     }
-                    ns.setName(svc.name());
-                    ns.setVersion(svc.version());
-                    ns.setProduct(svc.product());
-                    ns.setCpe(svc.cpe23());
+                    applyNmapFingerprint(ns, svc);
                     ns.setObservedAt(now);
                     networkServiceRepository.save(ns);
                 }
@@ -277,5 +275,50 @@ public class ScanExecutionService {
         return combined.length() > FAILURE_REASON_MAX_LEN
             ? combined.substring(0, FAILURE_REASON_MAX_LEN)
             : combined;
+    }
+
+    /**
+     * Apply nmap SERVICE_DETECT fingerprint data to a {@link NetworkService} row.
+     *
+     * <p>When nmap reports a non-null {@code product} (e.g. "MySQL"), that product is
+     * authoritative and supersedes whatever a prior docker-discovery pass may have written:
+     * <ul>
+     *   <li>{@code name} ← the nmap product string (human-readable display name)</li>
+     *   <li>{@code product} ← product lowercased (matches {@link DockerImageCpe#PRODUCTS} keys)</li>
+     *   <li>{@code version} ← nmap version verbatim (e.g. "8.0.46-1.el9")</li>
+     *   <li>{@code cpe} ← nmap-provided CPE 2.3 string if present; otherwise derived via
+     *       {@link DockerImageCpe#cpeForFingerprint} when the product is in the curated map</li>
+     * </ul>
+     *
+     * <p>When nmap has no product, the standard port-scan fields (protocol name, version) are
+     * written without touching an existing CPE — so a docker-derived CPE is not cleared by a
+     * no-product nmap result.
+     *
+     * <p>Either way the caller must still set {@code observedAt} and save.
+     */
+    private static void applyNmapFingerprint(NetworkService ns,
+                                              NmapOutputParser.DiscoveredService svc) {
+        String product = svc.product();
+        if (product != null && !product.isBlank()) {
+            // nmap identified the software: use the fingerprint as the authoritative source
+            ns.setName(product);   // human-readable display (e.g. "MySQL")
+            ns.setProduct(product.toLowerCase(java.util.Locale.ROOT));
+            ns.setVersion(svc.version());
+            // Prefer nmap-supplied CPE; fall back to derived CPE from the curated product map
+            String cpe = svc.cpe23() != null
+                ? svc.cpe23()
+                : DockerImageCpe.cpeForFingerprint(product, svc.version());
+            ns.setCpe(cpe);
+        } else {
+            // No product fingerprint — record protocol name + version but do not clear an
+            // existing CPE (which may have been derived from the docker image tag)
+            ns.setName(svc.name());
+            ns.setVersion(svc.version());
+            ns.setProduct(null);
+            // Preserve existing CPE; only set from nmap if it actually provided one
+            if (svc.cpe23() != null) {
+                ns.setCpe(svc.cpe23());
+            }
+        }
     }
 }

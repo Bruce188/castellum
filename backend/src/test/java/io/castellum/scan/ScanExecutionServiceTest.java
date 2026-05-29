@@ -297,7 +297,9 @@ class ScanExecutionServiceTest {
         verify(deviceUpsertService).upsert(argThat(d -> "10.0.3.7".equals(d.ipAddress())));
         verify(networkServiceRepository).save(argThat(ns ->
             ns.getPort() == 22
-                && "OpenSSH".equals(ns.getProduct())
+                // product is stored lowercased; name is the human-readable display form
+                && "openssh".equals(ns.getProduct())
+                && "OpenSSH".equals(ns.getName())
                 && "9.6p1".equals(ns.getVersion())
                 && "cpe:2.3:a:openbsd:openssh:9.6p1:*:*:*:*:*:*:*".equals(ns.getCpe())));
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
@@ -401,5 +403,137 @@ class ScanExecutionServiceTest {
         service.executeAsync(9L);
 
         verify(deviceRepository, never()).save(any());
+    }
+
+    // -----------------------------------------------------------------------
+    // (k) SERVICE_DETECT MySQL fingerprint → product=mysql, CPE derived, name "MySQL"
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_mysqlFingerprint_derivesCpeAndSetsProduct() throws Exception {
+        Scan scan = stubScan(10L, "10.0.7.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(10L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.7.0/24")).thenReturn(List.of("10.0.7.5"));
+
+        NmapResult nmapResult = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(nmapResult);
+
+        // nmap reports MySQL but emits no <cpe> element (common for MySQL)
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.7.5", "dbserver", null);
+        NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
+            "10.0.7.5", 3306, "tcp", "mysql", "8.0.46-1.el9", "MySQL", null);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of(svc));
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(40L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(40L, 3306, "tcp"))
+            .thenReturn(Optional.empty());
+
+        service.executeAsync(10L);
+
+        // AC1: product stored as lowercase nmap name, version preserved verbatim
+        // AC2: CPE derived from DockerImageCpe (mysql → oracle:mysql, version "8.0.46")
+        verify(networkServiceRepository).save(argThat(ns ->
+            ns.getPort() == 3306
+                && "mysql".equals(ns.getProduct())
+                && "8.0.46-1.el9".equals(ns.getVersion())
+                && "MySQL".equals(ns.getName())
+                && "cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*".equals(ns.getCpe())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (l) SERVICE_DETECT unknown product stays inventory-only (no fabricated CPE)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_unknownProduct_staysInventoryOnly() throws Exception {
+        Scan scan = stubScan(11L, "10.0.8.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(11L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.8.0/24")).thenReturn(List.of("10.0.8.1"));
+
+        NmapResult nmapResult = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(nmapResult);
+
+        // nmap reports unknown product "SomeProprietaryDB" with version — not in PRODUCTS map
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.8.1", "unk", null);
+        NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
+            "10.0.8.1", 9999, "tcp", "unknown-db", "3.1.4", "SomeProprietaryDB", null);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of(svc));
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(41L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(41L, 9999, "tcp"))
+            .thenReturn(Optional.empty());
+
+        service.executeAsync(11L);
+
+        // AC5: unknown product → no CPE fabricated; product stored as-is
+        verify(networkServiceRepository).save(argThat(ns ->
+            ns.getPort() == 9999
+                && ns.getCpe() == null
+                && "SomeProprietaryDB".equals(ns.getName())
+                && "3.1.4".equals(ns.getVersion())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (m) nmap fingerprint supersedes docker image-name label (AC4)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_nmapFingerprint_superseedsDockerLabel() throws Exception {
+        Scan scan = stubScan(12L, "10.0.9.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(12L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.9.0/24")).thenReturn(List.of("10.0.9.2"));
+
+        NmapResult nmapResult = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(nmapResult);
+
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.0.9.2", "pingpay-db", null);
+        NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
+            "10.0.9.2", 3306, "tcp", "mysql", "8.0.46-1.el9", "MySQL", null);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of(svc));
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(42L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+
+        // Existing service row was created by Docker discovery with generic image label
+        io.castellum.domain.NetworkService existing = new io.castellum.domain.NetworkService();
+        existing.setDeviceId(42L);
+        existing.setPort(3306);
+        existing.setProtocol("tcp");
+        existing.setName("pingpay");      // docker image base name
+        existing.setProduct(null);        // unmapped → inventory-only
+        existing.setVersion(null);
+        existing.setCpe(null);
+        when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(42L, 3306, "tcp"))
+            .thenReturn(Optional.of(existing));
+
+        service.executeAsync(12L);
+
+        // AC4: nmap wins — name becomes "MySQL", product=mysql, CPE derived, version preserved
+        verify(networkServiceRepository).save(argThat(ns ->
+            ns.getPort() == 3306
+                && "mysql".equals(ns.getProduct())
+                && "8.0.46-1.el9".equals(ns.getVersion())
+                && "MySQL".equals(ns.getName())
+                && "cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*".equals(ns.getCpe())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
     }
 }

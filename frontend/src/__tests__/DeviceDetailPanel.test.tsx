@@ -289,4 +289,36 @@ describe('<DeviceDetailPanel />', () => {
     render(<DeviceDetailPanel device={device} risk={risk} services={services} onClose={() => {}} />);
     expect(screen.queryByTestId('ot-detected-indicator')).toBeNull();
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // fix/service-fingerprint-surfacing — AC3: product shown in name column
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('service-fingerprint: shows product in name column when product is set', () => {
+    const mysqlService: NetworkService = {
+      id: 10, deviceId: 1, port: 3306, protocol: 'tcp',
+      name: 'mysql', version: '8.0.46-1.el9',
+      product: 'mysql', vendor: null, observedAt: null, protocolFamily: null,
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[mysqlService]} onClose={() => {}} />
+    );
+    // AC3: product "mysql" displayed — not the bare protocol name fallback
+    expect(screen.getByText('mysql')).toBeInTheDocument();
+    // version still shown
+    expect(screen.getByText('8.0.46-1.el9')).toBeInTheDocument();
+  });
+
+  it('service-fingerprint: falls back to name when product is null', () => {
+    const legacySvc: NetworkService = {
+      id: 11, deviceId: 1, port: 8080, protocol: 'tcp',
+      name: 'http', version: null,
+      product: null, vendor: null, observedAt: null, protocolFamily: null,
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[legacySvc]} onClose={() => {}} />
+    );
+    // no product → falls back to name
+    expect(screen.getByText('http')).toBeInTheDocument();
+  });
 });

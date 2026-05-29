@@ -10,6 +10,7 @@
 <port protocol="tcp" portid="1071"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="nginx" version="1.29.8" method="probed" conf="10"><cpe>cpe:/a:igor_sysoev:nginx:1.29.8</cpe></service></port>
 <port protocol="tcp" portid="3000"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="http" product="Node.js Express framework" method="probed" conf="10"><cpe>cpe:/a:nodejs:node.js</cpe></service></port>
 <port protocol="tcp" portid="5432"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="postgresql" product="PostgreSQL DB" version="9.6.0 or later" method="probed" conf="10"><cpe>cpe:/a:postgresql:postgresql</cpe></service></port>
+<port protocol="tcp" portid="3306"><state state="open" reason="syn-ack" reason_ttl="0"/><service name="mysql" product="MySQL" version="8.0.46-1.el9" method="probed" conf="10"></service></port>
 </ports>
 </host>
 <runstats><finished time="1779904261" timestr="Wed May 27 19:51:01 2026" summary="Nmap done" elapsed="12.00" exit="success"/><hosts up="1" down="0" total="1"/>

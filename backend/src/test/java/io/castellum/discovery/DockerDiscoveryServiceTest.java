@@ -439,4 +439,40 @@ class DockerDiscoveryServiceTest {
         assertThat(svc.getCpe()).isNull();
         assertThat(svc.getVersion()).isNull();
     }
+
+    @Test
+    void discover_doesNotOverwriteNmapFingerprint() throws Exception {
+        // Simulate nmap already populated the service with real fingerprint data.
+        // Docker discovery must NOT clobber the specific product/version/CPE with
+        // the generic image-name label.
+        String json = """
+            [ { "Id": "db1", "Name": "/pingpay-db",
+                "Config": { "Image": "pingpay:latest" },
+                "NetworkSettings": { "Ports": { "3306/tcp": null },
+                  "Networks": { "n": { "IPAddress": "172.50.0.3", "Gateway": "172.50.0.1" } } } } ]
+            """;
+        newService(json, List.of("db1")).discover();
+        Device device = repo.findByIpAddress("172.50.0.3").orElseThrow();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(device.getId(), 3306, "tcp").orElseThrow();
+        // After docker-only run: image is unmapped → inventory-only label, no CPE
+        assertThat(svc.getProduct()).isNull();
+        assertThat(svc.getCpe()).isNull();
+
+        // Simulate nmap fingerprint written after docker discovery
+        svc.setName("MySQL");
+        svc.setProduct("mysql");
+        svc.setVersion("8.0.46-1.el9");
+        svc.setCpe("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        serviceRepo.save(svc);
+
+        // Re-run docker discovery — must NOT overwrite the nmap fingerprint
+        newService(json, List.of("db1")).discover();
+        NetworkService after = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(device.getId(), 3306, "tcp").orElseThrow();
+        assertThat(after.getProduct()).isEqualTo("mysql");
+        assertThat(after.getCpe()).isEqualTo("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        assertThat(after.getName()).isEqualTo("MySQL");
+        assertThat(after.getVersion()).isEqualTo("8.0.46-1.el9");
+    }
 }

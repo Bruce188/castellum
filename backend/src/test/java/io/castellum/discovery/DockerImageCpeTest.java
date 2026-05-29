@@ -107,4 +107,39 @@ class DockerImageCpeTest {
         assertThat(DockerImageCpe.derive(null)).isNull();
         assertThat(DockerImageCpe.derive("")).isNull();
     }
+
+    // -----------------------------------------------------------------------
+    // cpeForFingerprint — nmap product+version → CPE
+    // -----------------------------------------------------------------------
+
+    @Test
+    void cpeForFingerprint_mysql_derivesCpe() {
+        assertThat(DockerImageCpe.cpeForFingerprint("MySQL", "8.0.46-1.el9"))
+            .isEqualTo("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void cpeForFingerprint_caseInsensitive() {
+        assertThat(DockerImageCpe.cpeForFingerprint("mysql", "8.0.46"))
+            .isEqualTo("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        assertThat(DockerImageCpe.cpeForFingerprint("MYSQL", "8.0.46"))
+            .isEqualTo("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void cpeForFingerprint_unknownProduct_null() {
+        assertThat(DockerImageCpe.cpeForFingerprint("SomeProprietaryDB", "3.1.4")).isNull();
+    }
+
+    @Test
+    void cpeForFingerprint_noVersion_null() {
+        assertThat(DockerImageCpe.cpeForFingerprint("MySQL", null)).isNull();
+        assertThat(DockerImageCpe.cpeForFingerprint("MySQL", "")).isNull();
+        assertThat(DockerImageCpe.cpeForFingerprint("MySQL", "some-non-numeric")).isNull();
+    }
+
+    @Test
+    void cpeForFingerprint_nullProduct_null() {
+        assertThat(DockerImageCpe.cpeForFingerprint(null, "8.0.46")).isNull();
+    }
 }

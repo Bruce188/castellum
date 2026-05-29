@@ -49,8 +49,8 @@ class NmapOutputParserTest {
         assertEquals("192.168.68.51", host.ipAddress());
         assertEquals("host.docker.internal", host.hostname());
 
-        assertEquals(4, result.services().size(),
-            "four open services must be discovered (22, 1071, 3000, 5432)");
+        assertEquals(5, result.services().size(),
+            "five open services must be discovered (22, 1071, 3000, 5432, 3306)");
     }
 
     @Test
@@ -104,6 +104,19 @@ class NmapOutputParserTest {
         assertEquals("PostgreSQL DB", pg.product());
         assertEquals("9.6.0 or later", pg.version());
         assertEquals("cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*", pg.cpe23());
+    }
+
+    @Test
+    void serviceDetect_mysqlProductAndVersionNoCpe() throws IOException {
+        NmapOutputParser.ParsedScan result =
+            parser.parse(fixture("service-detect.xml"), ScanType.SERVICE_DETECT);
+
+        NmapOutputParser.DiscoveredService mysql = byPort(result.services(), 3306);
+        assertEquals("mysql", mysql.name());
+        assertEquals("MySQL", mysql.product());
+        assertEquals("8.0.46-1.el9", mysql.version());
+        // nmap did not emit a <cpe> element — cpe23 must be null
+        assertNull(mysql.cpe23());
     }
 
     // -----------------------------------------------------------------------

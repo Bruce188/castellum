@@ -175,6 +175,11 @@ public class DockerDiscoveryService {
      * {@code postgres:16}) get a version-bearing CPE so {@link io.castellum.cve.CveMatcher}
      * range-matches real CVEs; other images record an inventory-only service (name + version, no
      * CPE). Containers exposing no port, or with a blank/unparseable image, get no service row.
+     *
+     * <p>If an existing row already has a non-null {@code product} — meaning an nmap SERVICE_DETECT
+     * run has supplied a specific fingerprint — the docker image label is NOT applied, preserving
+     * the more precise identification. The {@code observedAt} timestamp is always refreshed so the
+     * topology reflects the container is still running.
      */
     private void upsertContainerService(Device device, DockerContainer c, Instant observedAt) {
         DockerContainer.ExposedPort primary = c.primaryPort();
@@ -192,6 +197,16 @@ public class DockerDiscoveryService {
             ns.setDeviceId(device.getId());
             ns.setPort(primary.port());
             ns.setProtocol(primary.protocol());
+        }
+        // AC4: if docker cannot identify this service's product (derived.product() == null,
+        // meaning the image base name is not in the curated PRODUCTS map) but the row already
+        // carries a non-null product — set by a prior nmap SERVICE_DETECT fingerprint — do NOT
+        // overwrite the more specific identification with the generic image-name label.
+        // Only refresh the timestamp so the topology reflects the container is still running.
+        if (derived.product() == null && ns.getProduct() != null) {
+            ns.setObservedAt(observedAt);
+            networkServiceRepository.save(ns);
+            return;
         }
         ns.setName(derived.displayName());
         ns.setVersion(derived.version());

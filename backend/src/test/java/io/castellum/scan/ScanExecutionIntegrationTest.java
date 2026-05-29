@@ -171,9 +171,11 @@ class ScanExecutionIntegrationTest {
             .filter(s -> s.getPort() == 22 && "tcp".equals(s.getProtocol()))
             .findFirst()
             .orElseThrow(() -> new AssertionError("22/tcp row not found in " + services));
-        assertEquals("ssh", sshRow.getName(), "22/tcp service name must be 'ssh'");
-        assertEquals("OpenSSH", sshRow.getProduct(),
-            "22/tcp product must be 'OpenSSH'; got: " + sshRow.getProduct());
+        // When nmap fingerprints the service with product="OpenSSH", the display name becomes
+        // the product string and the stored product is lowercased for NVD-map lookup.
+        assertEquals("OpenSSH", sshRow.getName(), "22/tcp name must be the nmap product 'OpenSSH'");
+        assertEquals("openssh", sshRow.getProduct(),
+            "22/tcp product must be lowercased 'openssh'; got: " + sshRow.getProduct());
         assertEquals("8.4p1", sshRow.getVersion(),
             "22/tcp version must be nmap's verbatim string; got: " + sshRow.getVersion());
         assertEquals("cpe:2.3:a:openbsd:openssh:8.4p1:*:*:*:*:*:*:*", sshRow.getCpe(),
@@ -184,8 +186,8 @@ class ScanExecutionIntegrationTest {
             .filter(s -> s.getPort() == 80 && "tcp".equals(s.getProtocol()))
             .findFirst()
             .orElseThrow(() -> new AssertionError("80/tcp row not found in " + services));
-        assertEquals("http", httpRow.getName(), "80/tcp service name must be 'http'");
-        assertEquals("nginx", httpRow.getProduct(), "80/tcp product must be 'nginx'");
+        assertEquals("nginx", httpRow.getName(), "80/tcp name must be the nmap product 'nginx'");
+        assertEquals("nginx", httpRow.getProduct(), "80/tcp product must be lowercased 'nginx'");
         assertEquals("cpe:2.3:a:igor_sysoev:nginx:1.20.1:*:*:*:*:*:*:*", httpRow.getCpe(),
             "80/tcp cpe must be the converted CPE 2.3 string; got: " + httpRow.getCpe());
 
