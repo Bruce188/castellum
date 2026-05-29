@@ -1,0 +1,44 @@
+[
+  {
+    "Name": "pingpay_default",
+    "Id": "net1abc",
+    "Driver": "bridge",
+    "IPAM": {
+      "Config": [
+        {
+          "Subnet": "172.18.0.0/16",
+          "Gateway": "172.18.0.1"
+        }
+      ]
+    },
+    "Containers": {
+      "c1": {
+        "Name": "pingpay-frontend",
+        "IPv4Address": "172.18.0.4/16"
+      },
+      "c2": {
+        "Name": "pingpay-backend",
+        "IPv4Address": "172.18.0.3/16"
+      }
+    }
+  },
+  {
+    "Name": "supabase_network_pingpay",
+    "Id": "net2abc",
+    "Driver": "bridge",
+    "IPAM": {
+      "Config": [
+        {
+          "Subnet": "172.19.0.0/16",
+          "Gateway": "172.19.0.1"
+        }
+      ]
+    },
+    "Containers": {
+      "c3": {
+        "Name": "supabase-db",
+        "IPv4Address": "172.19.0.2/16"
+      }
+    }
+  }
+]

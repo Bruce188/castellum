@@ -1,0 +1,29 @@
+[
+  {
+    "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000pf",
+    "Names": ["/pingpay-frontend"],
+    "Image": "nginx:1.27.0",
+    "Status": "Up 2 hours",
+    "State": "running",
+    "Ports": [
+      {
+        "PrivatePort": 80,
+        "PublicPort": 1071,
+        "Type": "tcp"
+      }
+    ]
+  },
+  {
+    "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000db",
+    "Names": ["/pingpay-db"],
+    "Image": "postgres:15.6",
+    "Status": "Up 2 hours",
+    "State": "running",
+    "Ports": [
+      {
+        "PrivatePort": 5432,
+        "Type": "tcp"
+      }
+    ]
+  }
+]

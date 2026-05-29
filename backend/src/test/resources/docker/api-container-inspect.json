@@ -1,0 +1,23 @@
+[
+  {
+    "Id": "a1b2c3d4e5f600000000000000000000000000000000000000000000000000pf",
+    "Name": "/pingpay-frontend",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "nginx:1.27.0" },
+    "NetworkSettings": {
+      "Ports": {
+        "80/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "1071" }
+        ]
+      },
+      "Networks": {
+        "pingpay_default": {
+          "IPAddress": "172.18.0.4",
+          "Gateway": "172.18.0.1",
+          "IPPrefixLen": 16,
+          "MacAddress": "02:42:ac:12:00:04"
+        }
+      }
+    }
+  }
+]

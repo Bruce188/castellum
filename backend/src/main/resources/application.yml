@@ -114,6 +114,11 @@ castellum:
       read-timeout-ms: ${OT_PROBE_READ_TIMEOUT_MS:5000}
       total-timeout-ms: ${OT_PROBE_TOTAL_TIMEOUT_MS:10000}
       max-concurrent: ${OT_PROBE_MAX_CONCURRENT:8}
+  docker:
+    probe:
+      connect-timeout-ms: ${DOCKER_PROBE_CONNECT_TIMEOUT_MS:2000}
+      read-timeout-ms: ${DOCKER_PROBE_READ_TIMEOUT_MS:5000}
+      max-concurrent: ${DOCKER_PROBE_MAX_CONCURRENT:8}
   taxii:
     base-url: ${TAXII_BASE_URL:}
     collection-id: ${TAXII_COLLECTION_ID:}
