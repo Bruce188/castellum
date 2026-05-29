@@ -308,6 +308,26 @@ describe('<RelatedCvesPanel />', () => {
     expect(onCveSelect).toHaveBeenCalledWith('CVE-2024-KEY');
   });
 
+  it('onCveSelect_calledOnKeyboardSpace', async () => {
+    // Guards against Enter/Space diverging in a future refactor: Space must
+    // invoke onCveSelect just as Enter does when the callback is provided.
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-SPC', '7.0', false)]),
+    );
+    const onCveSelect = vi.fn();
+    render(
+      <RelatedCvesPanel
+        deviceId={8}
+        hostname="host-8"
+        ipAddress="10.0.0.8"
+        onCveSelect={onCveSelect}
+      />,
+    );
+    const row = await screen.findByTestId('related-cves-row-CVE-2024-SPC');
+    fireEvent.keyDown(row, { key: ' ' });
+    expect(onCveSelect).toHaveBeenCalledWith('CVE-2024-SPC');
+  });
+
   it('onCveSelect_notRequired_fallsBackToInlineExpand', async () => {
     // When onCveSelect is absent the existing inline-expand behaviour still works
     (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(

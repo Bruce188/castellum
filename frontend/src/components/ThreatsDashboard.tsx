@@ -48,6 +48,16 @@ const INITIAL: State = { loading: true, error: null, top: [], feeds: null };
  * instead of navigating to {@code /cves?deviceId=...}. The previous deep-link path
  * is preserved as a "View all in CVE explorer" anchor inside the expanded panel.
  * Only one row may be expanded at a time — expanding a second row collapses the first.
+ *
+ * <p><b>feat/threats-cve-detail-drawer:</b> {@code selectedCveId} is lifted state shared
+ * between {@link RelatedCvesPanel} (via its {@code onCveSelect} prop) and a single
+ * {@link CveDetailPanel} drawer rendered at the bottom of this component — CVE row
+ * clicks open the full detail drawer rather than an inline sub-row.
+ *
+ * <p><b>feat/threats-open-device-detail:</b> On row expand, device metadata, risk, and
+ * services are fetched lazily and rendered via {@link DeviceDetailPanel} with
+ * {@code variant="inline"} so the panel flows in the document rather than as a
+ * fixed-position overlay (which would conflict with the {@link CveDetailPanel} drawer).
  */
 export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
