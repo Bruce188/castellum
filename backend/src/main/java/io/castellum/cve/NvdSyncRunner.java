@@ -4,12 +4,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.function.IntConsumer;
 
 @Component
 public class NvdSyncRunner implements ApplicationRunner {
@@ -17,9 +20,19 @@ public class NvdSyncRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(NvdSyncRunner.class);
 
     private final NvdSyncService syncService;
+    private final ConfigurableApplicationContext ctx;
 
-    public NvdSyncRunner(NvdSyncService syncService) {
+    /**
+     * Exit strategy invoked after a one-shot CLI sync completes. Defaults to a
+     * clean Spring shutdown followed by {@link System#exit}. Tests inject a fake
+     * consumer to assert the exit code WITHOUT killing the test JVM.
+     */
+    IntConsumer exitHandler;
+
+    public NvdSyncRunner(NvdSyncService syncService, ConfigurableApplicationContext ctx) {
         this.syncService = syncService;
+        this.ctx = ctx;
+        this.exitHandler = code -> System.exit(SpringApplication.exit(ctx, () -> code));
     }
 
     @Override
@@ -72,9 +85,10 @@ public class NvdSyncRunner implements ApplicationRunner {
             }
             log.info("NVD sync complete: slices={}, pages={}, cves={}, matches={}",
                 summary.slicesProcessed(), summary.pagesFetched(), summary.cvesUpserted(), summary.matchesUpserted());
+            exitHandler.accept(0);
         } catch (IOException e) {
             log.error("NVD sync failed: {}", e.getMessage(), e);
-            throw e;
+            exitHandler.accept(1);
         }
     }
 }
