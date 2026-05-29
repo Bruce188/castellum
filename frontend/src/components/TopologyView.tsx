@@ -114,9 +114,6 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         // dashed in the DOCKER_BRIDGE scope color so they read visually as a
         // distinct overlay rather than physical L2 adjacency.
         { selector: 'edge[kind = "docker-bridge"]', style: { 'line-color': EDGE_STYLES.dockerBridge.color, 'line-style': 'dashed' as const, width: EDGE_STYLES.dockerBridge.width, opacity: EDGE_STYLES.dockerBridge.opacity } },
-        // Attack-path overlay — bright red ring on nodes, dashed red stroke on edges.
-        { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': EDGE_STYLES.attackPath.color } },
-        { selector: 'edge.path-highlight', style: { 'line-color': EDGE_STYLES.attackPath.color, 'line-style': 'dashed' as const, opacity: EDGE_STYLES.attackPath.opacity, width: EDGE_STYLES.attackPath.width } },
         // Risk-still-loading overlay — dashed blue ring + dimmed fill. Appended
         // last so it wins border resolution while the parent's deviceRisk fanout
         // is in flight. The instant scores resolve the class is dropped and the
@@ -154,6 +151,10 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           width: 2.5,
           opacity: 0.85,
         } },
+        // Attack-path overlay — defined AFTER crossZone so the attack-path style
+        // dominates for cross-zone path-highlighted edges (last selector wins).
+        { selector: 'node.path-highlight', style: { 'border-width': 3, 'border-color': EDGE_STYLES.attackPath.color } },
+        { selector: 'edge.path-highlight', style: { 'line-color': EDGE_STYLES.attackPath.color, 'line-style': 'dashed' as const, opacity: EDGE_STYLES.attackPath.opacity, width: EDGE_STYLES.attackPath.width } },
       ],
     });
 
@@ -227,7 +228,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       const sourceClass = d.discoverySource ? (SOURCE_CLASS[d.discoverySource] ?? null) : null;
       const extraClasses = [scopeClass, sourceClass].filter(Boolean).join(' ');
       // serviceCount suffix in the label surfaces the badge on the rendered graph.
-      // The style block at :79 already renders data(label); no style change needed.
+      // The node style block above already renders data(label); no style change needed.
       // Guard: "host.docker.internal" and *.docker.internal are Docker bridge-gateway aliases
       // that must never render as a node label. The backend filters them before storage, but
       // this guard ensures any legacy data or race condition never surfaces the alias in the UI.

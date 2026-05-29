@@ -176,7 +176,7 @@ describe('TopologyView zone grouping (AC1 – compound parent nodes)', () => {
   });
 
   it('zoneGrouping_devicesAssignedToCorrectZone', () => {
-    // HOME device → home zone; DOCKER_BRIDGE device → docker zone; they differ.
+    // HOME device → zone-home; DOCKER_BRIDGE device → zone-docker; they differ.
     render(
       <TopologyView
         devices={[makeDevice(10, '192.168.1.1', 'HOME'), makeDevice(20, '172.17.0.2', 'DOCKER_BRIDGE')]}
@@ -189,9 +189,45 @@ describe('TopologyView zone grouping (AC1 – compound parent nodes)', () => {
       data: { id: string; parent?: string; zone?: boolean; source?: string; target?: string };
     }>;
     const byId = (id: string) => addArgs.find(e => e.data.id === id);
-    expect(byId('10')?.data.parent).toBeTruthy();
-    expect(byId('20')?.data.parent).toBeTruthy();
-    expect(byId('10')?.data.parent).not.toBe(byId('20')?.data.parent);
+    // Exact zone-id assertions — these fail immediately if the scope→zone mapping regresses.
+    expect(byId('10')?.data.parent).toBe('zone-home');
+    expect(byId('20')?.data.parent).toBe('zone-docker');
+  });
+
+  it('zoneGrouping_publicDeviceAssignedToZonePublic', () => {
+    // PUBLIC scope → zone-public.
+    render(
+      <TopologyView
+        devices={[makeDevice(30, '8.8.8.8', 'PUBLIC')]}
+        risksById={new Map()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+      />
+    );
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{
+      data: { id: string; parent?: string; zone?: boolean; source?: string; target?: string };
+    }>;
+    const byId = (id: string) => addArgs.find(e => e.data.id === id);
+    expect(byId('30')?.data.parent).toBe('zone-public');
+  });
+
+  it('zoneGrouping_linkLocalAndLoopbackAssignedToZoneLocal', () => {
+    // LINK_LOCAL and LOOPBACK both map to zone-local.
+    render(
+      <TopologyView
+        devices={[makeDevice(40, '169.254.1.1', 'LINK_LOCAL'), makeDevice(50, '127.0.0.1', 'LOOPBACK')]}
+        risksById={new Map()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+      />
+    );
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{
+      data: { id: string; parent?: string; zone?: boolean; source?: string; target?: string };
+    }>;
+    const byId = (id: string) => addArgs.find(e => e.data.id === id);
+    // Both local-ish scopes must share zone-local, not be split.
+    expect(byId('40')?.data.parent).toBe('zone-local');
+    expect(byId('50')?.data.parent).toBe('zone-local');
   });
 
   it('zoneGrouping_emptyZonesOmitted', () => {
@@ -319,6 +355,36 @@ describe('TopologyLegend zone rows (AC3)', () => {
     render(<TopologyLegend visibility={allTrue} onChange={vi.fn()} presentScopes={new Set()} />);
     const zoneRows = screen.queryAllByTestId(/^zone-legend-row-/);
     expect(zoneRows.length).toBe(0);
+  });
+
+  it('zoneGrouping_toggleOffScopeRemovesItsZoneFromPresentSet', () => {
+    // When DOCKER_BRIDGE is toggled off, the docker zone must not appear in presentScopes.
+    // This mirrors the page-level fix: presentScopes = filtered(devices, scopeVisibility).
+    const visibilityDockerOff: Record<DiscoveryScope, boolean> = {
+      HOME: true,
+      DOCKER_BRIDGE: false,
+      LINK_LOCAL: false,
+      LOOPBACK: false,
+      PUBLIC: false,
+    };
+    // presentScopes reflects scope-filtered visible devices — only HOME survives.
+    const presentAfterToggle = new Set(
+      [
+        { discoveryScope: 'HOME' as DiscoveryScope },
+        { discoveryScope: 'DOCKER_BRIDGE' as DiscoveryScope },
+      ]
+        .filter(d => visibilityDockerOff[d.discoveryScope] ?? true)
+        .map(d => d.discoveryScope)
+    );
+    // Only HOME is visible; DOCKER_BRIDGE must not be in the set.
+    expect(presentAfterToggle.has('HOME')).toBe(true);
+    expect(presentAfterToggle.has('DOCKER_BRIDGE')).toBe(false);
+
+    // Render the legend with the filtered set — only the HOME zone row should appear.
+    render(<TopologyLegend visibility={visibilityDockerOff} onChange={vi.fn()} presentScopes={presentAfterToggle} />);
+    const zoneRows = screen.queryAllByTestId(/^zone-legend-row-/);
+    // Only zone-home should render (HOME maps to zone-home).
+    expect(zoneRows.length).toBe(1);
   });
 });
 

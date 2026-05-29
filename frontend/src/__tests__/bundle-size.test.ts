@@ -39,7 +39,7 @@ describe('bundle', () => {
     expect(cyto).not.toEqual(entry);
   });
 
-  it('main entry chunk is under 350 KiB raw', () => {
+  it('main entry chunk is under 460 KiB raw', () => {
     const files = listJsAssets();
     if (!files) {
       console.warn('dist/assets missing — skipping; run `vite build` first');
@@ -49,7 +49,7 @@ describe('bundle', () => {
     expect(entry).toBeTruthy();
     const bytes = statSync(resolve(DIST_ASSETS, entry as string)).size;
     expect(bytes,
-      `main chunk ${entry} is ${bytes} bytes; cap is ${MAX_ENTRY_BYTES} bytes (350 KiB)`)
+      `main chunk ${entry} is ${bytes} bytes; cap is ${MAX_ENTRY_BYTES} bytes (460 KiB)`)
       .toBeLessThan(MAX_ENTRY_BYTES);
   });
 });
