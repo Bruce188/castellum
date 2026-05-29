@@ -128,7 +128,9 @@ public class ScanReportService {
      * <ul>
      *   <li>"new" — discoveredByScanId == scanId (first discovered by this scan)</li>
      *   <li>"changed" — pre-existing device with at least one service whose observedAt
-     *       falls within [scan.requestedAt, scan.completedAt]</li>
+     *       falls within [scan.requestedAt, scan.completedAt]. When the scan is still
+     *       in-flight ({@code completedAt == null}) the upper-bound check is skipped:
+     *       any service observed at or after {@code requestedAt} is treated as "changed".</li>
      *   <li>"unchanged" — pre-existing device, no service observed in the scan window</li>
      * </ul>
      */
@@ -136,11 +138,14 @@ public class ScanReportService {
         if (scan.getId().equals(device.getDiscoveredByScanId())) {
             return "new";
         }
-        // Pre-existing device: check if any service was observed in [requestedAt, completedAt]
+        // Pre-existing device: check if any service was observed in [requestedAt, completedAt].
+        // completedAt may be null for an in-flight (PENDING/RUNNING) scan — skip the upper-bound
+        // check in that case so a re-observed device resolves to "changed" rather than NPE.
         boolean hasServiceInWindow = deviceServices.stream()
                 .anyMatch(svc -> svc.getObservedAt() != null
                         && !svc.getObservedAt().isBefore(scan.getRequestedAt())
-                        && !svc.getObservedAt().isAfter(scan.getCompletedAt()));
+                        && (scan.getCompletedAt() == null
+                                || !svc.getObservedAt().isAfter(scan.getCompletedAt())));
         return hasServiceInWindow ? "changed" : "unchanged";
     }
 }

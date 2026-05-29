@@ -724,6 +724,71 @@ class DeviceUpsertServiceTest {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // N2 — non-scan paths leave scan attribution columns NULL
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * N2(a): {@code upsertWithScope} is a Docker/scope-explicit path — it must NEVER set
+     * {@code discoveredByScanId} or {@code lastSeenByScanId}. Both columns must remain null
+     * after insert and after update.
+     */
+    @Test
+    void upsertWithScope_leavesAttributionNull() {
+        // INSERT path
+        Discovery d1 = new Discovery("10.5.0.1", null, "svc-a", DiscoverySource.DOCKER, T1, null, false);
+        Device inserted = service.upsertWithScope(d1, DiscoveryScope.HOME);
+
+        assertThat(inserted.getDiscoveredByScanId())
+            .as("upsertWithScope INSERT: discoveredByScanId must be null (non-scan path)")
+            .isNull();
+        assertThat(inserted.getLastSeenByScanId())
+            .as("upsertWithScope INSERT: lastSeenByScanId must be null (non-scan path)")
+            .isNull();
+
+        // UPDATE path — re-observe the same device
+        Discovery d2 = new Discovery("10.5.0.1", null, "svc-a", DiscoverySource.DOCKER, T2, null, false);
+        Device updated = service.upsertWithScope(d2, DiscoveryScope.DOCKER_BRIDGE);
+
+        assertThat(updated.getDiscoveredByScanId())
+            .as("upsertWithScope UPDATE: discoveredByScanId must remain null (non-scan path)")
+            .isNull();
+        assertThat(updated.getLastSeenByScanId())
+            .as("upsertWithScope UPDATE: lastSeenByScanId must remain null (non-scan path)")
+            .isNull();
+        assertThat(repo.count()).isEqualTo(1L);
+    }
+
+    /**
+     * N2(b): {@code upsertAll} (batch passive/ARP) is a non-scan path — it must NEVER set
+     * {@code discoveredByScanId} or {@code lastSeenByScanId}. Covers both the INSERT and
+     * UPDATE branches inside the batch method.
+     */
+    @Test
+    void upsertAll_leavesAttributionNull() {
+        // Seed one device so one slot goes through the UPDATE branch
+        Device seed = new Device(null, "10.5.1.1", null, "aa:bb:cc:dd:e0:01", T1, T1);
+        repo.save(seed);
+
+        List<Discovery> batch = List.of(
+            // UPDATE branch — known IP
+            new Discovery("10.5.1.1", "aa:bb:cc:dd:e0:01", null, DiscoverySource.ARP, T2, "eth0", false),
+            // INSERT branch — new IP
+            new Discovery("10.5.1.2", "aa:bb:cc:dd:e0:02", null, DiscoverySource.ARP, T2, null, false)
+        );
+        List<Device> results = service.upsertAll(batch);
+
+        assertThat(results).hasSize(2);
+        for (Device d : results) {
+            assertThat(d.getDiscoveredByScanId())
+                .as("upsertAll: discoveredByScanId must be null for ip=%s", d.getIpAddress())
+                .isNull();
+            assertThat(d.getLastSeenByScanId())
+                .as("upsertAll: lastSeenByScanId must be null for ip=%s", d.getIpAddress())
+                .isNull();
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // Task 1.2 — repository attribution queries
     // ────────────────────────────────────────────────────────────────────────
 

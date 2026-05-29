@@ -105,7 +105,7 @@ public class ScanController {
     public ScanDetailDto getById(@PathVariable Long id) {
         Scan scan = scanRepository.findById(id)
             .orElseThrow(NoSuchElementException::new);
-        // AC1: precise attribution via lastSeenByScanId — heuristic findIdsByFirstSeenBetween removed
+        // AC1: precise attribution via lastSeenByScanId
         List<Long> ids = deviceRepository.findIdsByLastSeenByScanId(id);
         return new ScanDetailDto(
             scan.getId(), scan.getCidr(), scan.getScanType(), scan.getStatus(),

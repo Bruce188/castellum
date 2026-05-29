@@ -285,6 +285,50 @@ class ScanReportServiceTest {
             .isInstanceOf(NoSuchElementException.class);
     }
 
+    // ── (9) NB1: in-flight scan (completedAt == null) must not NPE ───────────────
+
+    /**
+     * NB1 regression: a RUNNING/PENDING scan has {@code completedAt == null}.
+     * A pre-existing device re-observed during that scan previously caused an NPE
+     * in {@code computeDelta} because {@code scan.getCompletedAt()} was used without a
+     * null-guard. After the fix the call must complete without throwing and the delta
+     * must be a sensible value: "changed" if any service was observed at or after
+     * {@code requestedAt}, otherwise "unchanged".
+     */
+    @Test
+    void computeDelta_inFlightScan_nullCompletedAt_doesNotThrow_returnsChangedOrUnchanged() {
+        Scan inFlight = new Scan();
+        inFlight.setId(SCAN_ID);
+        inFlight.setCidr("10.0.0.0/24");
+        inFlight.setScanType("PING_SWEEP");
+        inFlight.setStatus(ScanStatus.RUNNING);
+        inFlight.setRequestedAt(REQUESTED_AT);
+        inFlight.setCompletedAt(null);   // ← in-flight: completedAt is null
+
+        when(scanRepository.findById(SCAN_ID)).thenReturn(Optional.of(inFlight));
+
+        // Pre-existing device re-observed during this scan
+        Device device = newDevice(200L, "10.0.0.100");
+        device.setDiscoveredByScanId(SCAN_ID - 1);  // pre-existing (different scan)
+        device.setLastSeenByScanId(SCAN_ID);
+
+        when(deviceRepository.findByLastSeenByScanId(SCAN_ID)).thenReturn(List.of(device));
+
+        // Service observed AFTER requestedAt — should be treated as "changed"
+        NetworkService svc = serviceInWindow(10L, 200L);
+        when(networkServiceRepository.findByDeviceIdIn(List.of(200L))).thenReturn(List.of(svc));
+        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of());
+
+        // Must not throw NPE
+        ScanReportDto report = service.buildReport(SCAN_ID);
+
+        assertThat(report).isNotNull();
+        assertThat(report.devices()).hasSize(1);
+        String delta = report.devices().get(0).delta();
+        // For an in-flight scan the service was observed >= requestedAt → "changed"
+        assertThat(delta).isEqualTo("changed");
+    }
+
     // ── (8) attribution uses findByLastSeenByScanId, NOT time-window heuristic ───
 
     @Test
