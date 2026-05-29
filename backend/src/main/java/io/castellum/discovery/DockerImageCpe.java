@@ -159,7 +159,18 @@ public final class DockerImageCpe {
         if (productName == null || productName.isBlank()) {
             return null;
         }
-        String vendorProduct = PRODUCTS.get(productName.toLowerCase(java.util.Locale.ROOT));
+        // Try the full lowercased string first (e.g. "mysql"), then fall back to the first
+        // whitespace-delimited token (e.g. "postgresql db" → "postgresql"). This handles compound
+        // nmap product strings like "PostgreSQL DB" or "nginx HTTP server" without fabricating
+        // any mapping that isn't already curated.
+        String lower = productName.toLowerCase(java.util.Locale.ROOT);
+        String vendorProduct = PRODUCTS.get(lower);
+        if (vendorProduct == null) {
+            int space = lower.indexOf(' ');
+            if (space > 0) {
+                vendorProduct = PRODUCTS.get(lower.substring(0, space));
+            }
+        }
         if (vendorProduct == null) {
             return null;
         }

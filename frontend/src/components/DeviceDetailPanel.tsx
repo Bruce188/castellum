@@ -188,7 +188,7 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
                       )}
                     </td>
                     <td>
-                      {(isOt ? s.name : (s.product ?? s.name)) ?? '—'}
+                      {(isOt ? s.name : (s.name ?? s.product)) ?? '—'}
                       {isOt && vp && <span className="block text-xs text-gray-500">{vp}</span>}
                     </td>
                     <td>{s.version ?? '—'}</td>

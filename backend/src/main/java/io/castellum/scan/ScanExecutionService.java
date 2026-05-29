@@ -296,6 +296,26 @@ public class ScanExecutionService {
      *
      * <p>Either way the caller must still set {@code observedAt} and save.
      */
+    /**
+     * Returns {@code true} when a CPE 2.3 string has a wildcard ({@code *}) or empty version
+     * component — meaning it matches all versions and would over-report CVEs.
+     *
+     * <p>CPE 2.3 format: {@code cpe:2.3:type:vendor:product:version:...}
+     * Version is the 5th colon-separated component (index 4).
+     */
+    private static boolean nmapCpeIsVersionless(String cpe) {
+        if (cpe == null) {
+            return true;
+        }
+        // CPE 2.3: cpe:2.3:a:vendor:product:version:...
+        String[] parts = cpe.split(":", -1);
+        if (parts.length < 6) {
+            return true; // malformed — treat as versionless to be safe
+        }
+        String version = parts[5];
+        return version.isEmpty() || "*".equals(version);
+    }
+
     private static void applyNmapFingerprint(NetworkService ns,
                                               NmapOutputParser.DiscoveredService svc) {
         String product = svc.product();
@@ -304,10 +324,19 @@ public class ScanExecutionService {
             ns.setName(product);   // human-readable display (e.g. "MySQL")
             ns.setProduct(product.toLowerCase(java.util.Locale.ROOT));
             ns.setVersion(svc.version());
-            // Prefer nmap-supplied CPE; fall back to derived CPE from the curated product map
-            String cpe = svc.cpe23() != null
-                ? svc.cpe23()
-                : DockerImageCpe.cpeForFingerprint(product, svc.version());
+            // Prefer nmap-supplied CPE only when it carries a concrete version; otherwise a
+            // version-less nmap CPE (version field = "*" or empty) would match every CVE filed
+            // against the product. If nmap's CPE is version-less AND we can derive a versioned
+            // CPE from the curated product map, use the derived one instead.
+            String derivedCpe = DockerImageCpe.cpeForFingerprint(product, svc.version());
+            String cpe;
+            if (svc.cpe23() != null && !nmapCpeIsVersionless(svc.cpe23()) ) {
+                cpe = svc.cpe23();
+            } else if (derivedCpe != null) {
+                cpe = derivedCpe;
+            } else {
+                cpe = svc.cpe23(); // may be null or a version-less CPE — best we have
+            }
             ns.setCpe(cpe);
         } else {
             // No product fingerprint — record protocol name + version but do not clear an

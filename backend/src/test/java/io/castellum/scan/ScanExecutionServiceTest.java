@@ -488,6 +488,49 @@ class ScanExecutionServiceTest {
     }
 
     // -----------------------------------------------------------------------
+    // (l2) nmap gives a version-less CPE + parseable version → derived versioned CPE wins
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_versionlessNmapCpe_derivedVersionedCpePreferred() throws Exception {
+        Scan scan = stubScan(13L, "10.1.0.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(13L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.1.0.0/24")).thenReturn(List.of("10.1.0.2"));
+
+        NmapResult nmapResult = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(nmapResult);
+
+        // nmap emits a version-less CPE (cpe:/a:postgresql:postgresql — no version field = "*")
+        // but also reports the version string "9.6.0"
+        NmapOutputParser.DiscoveredHost host =
+            new NmapOutputParser.DiscoveredHost("10.1.0.2", "pgserver", null);
+        NmapOutputParser.DiscoveredService svc = new NmapOutputParser.DiscoveredService(
+            "10.1.0.2", 5432, "tcp", "postgresql", "9.6.0", "PostgreSQL DB",
+            "cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*");
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
+            List.of(host), List.of(svc));
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(50L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(50L, 5432, "tcp"))
+            .thenReturn(Optional.empty());
+
+        service.executeAsync(13L);
+
+        // The stored CPE must carry the concrete version — not the version-less nmap CPE.
+        // product is stored as the lowercased nmap product string ("postgresql db" from "PostgreSQL DB").
+        verify(networkServiceRepository).save(argThat(ns ->
+            ns.getPort() == 5432
+                && "postgresql db".equals(ns.getProduct())
+                && "9.6.0".equals(ns.getVersion())
+                && "cpe:2.3:a:postgresql:postgresql:9.6.0:*:*:*:*:*:*:*".equals(ns.getCpe())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
     // (m) nmap fingerprint supersedes docker image-name label (AC4)
     // -----------------------------------------------------------------------
 

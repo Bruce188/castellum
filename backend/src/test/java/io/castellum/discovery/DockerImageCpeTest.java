@@ -142,4 +142,18 @@ class DockerImageCpeTest {
     void cpeForFingerprint_nullProduct_null() {
         assertThat(DockerImageCpe.cpeForFingerprint(null, "8.0.46")).isNull();
     }
+
+    @Test
+    void cpeForFingerprint_compoundProductName_normalizesToFirstToken() {
+        // nmap reports "PostgreSQL DB" — full string not in map; first token "postgresql" is
+        assertThat(DockerImageCpe.cpeForFingerprint("PostgreSQL DB", "9.6.0"))
+            .isEqualTo("cpe:2.3:a:postgresql:postgresql:9.6.0:*:*:*:*:*:*:*");
+    }
+
+    @Test
+    void cpeForFingerprint_compoundNginxProductName_normalizesToFirstToken() {
+        // "nginx HTTP server" → token "nginx" → f5:nginx
+        assertThat(DockerImageCpe.cpeForFingerprint("nginx HTTP server", "1.25.0"))
+            .isEqualTo("cpe:2.3:a:f5:nginx:1.25.0:*:*:*:*:*:*:*");
+    }
 }
