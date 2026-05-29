@@ -16,7 +16,8 @@ import { isDockerNetGateway } from './dockerNetworkGroups';
  *
  * {@code gatewayIp} is informational metadata for the {@code gateway} kind; it
  * is intentionally undefined on {@code docker-bridge} edges because the source
- * is identified by hostname/IP heuristic, not by being the lowest IP of a /24.
+ * is identified by the IP-based docker-host heuristic, not by being the lowest
+ * IP of a /24.
  */
 export interface GatewayEdge {
   data: {
@@ -231,7 +232,7 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
           },
         });
       } else if (d.publishesHostPort === true) {
-        // (b) published-port containers → pivot (existing behaviour)
+        // (b) published-port container → pivot directly
         const crossZone = pivotZoneId !== null ? pivotZoneId !== tgtZoneId : true;
         edges.push({
           data: {
