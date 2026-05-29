@@ -321,6 +321,29 @@ describe('buildGatewayEdges', () => {
       }
     });
 
+    it('(f) internal-only container with no docker-net gateway in /24 falls back to docker-bridge edge to pivot', () => {
+      // An internal-only container (DOCKER_BRIDGE, publishesHostPort:false, not a gateway)
+      // whose /24 contains NO docker-net gateway device.  The fallback branch in
+      // buildGatewayEdges must produce a docker-bridge edge from the pivot to the
+      // container rather than leaving it orphaned.
+      const pivotDevice = makeDevice(1, '192.168.68.51', 'HOME', null, false);
+      // Container on 172.99.0/24 — no docker-net:* gateway exists on that /24
+      const internalContainer = makeDevice(2, '172.99.0.5', 'DOCKER_BRIDGE', null, false);
+
+      const devices = [pivotDevice, internalContainer];
+      const edges = buildGatewayEdges(devices);
+      const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+      // The fallback must emit exactly one docker-bridge edge targeting the container
+      const fallbackEdge = dbEdges.find(e => e.data.target === String(internalContainer.id));
+      expect(fallbackEdge, 'fallback docker-bridge edge to pivot must exist for orphan container').toBeTruthy();
+      // The source must be the pivot (docker host), confirming it is NOT orphaned
+      expect(fallbackEdge?.data.source).toBe(String(pivotDevice.id));
+      // No isolated edge must be emitted for the container (it was rescued)
+      const isolatedEdges = edges.filter(e => e.data.kind === 'isolated');
+      expect(isolatedEdges.map(e => e.data.source)).not.toContain(String(internalContainer.id));
+    });
+
     it('(e) non-docker /24 groups still emit gateway and isolated kinds unchanged', () => {
       // HOME-only subnet: no docker involvement → gateway kind preserved
       const h1 = makeDevice(30, '10.0.0.1', 'HOME', null, false);
