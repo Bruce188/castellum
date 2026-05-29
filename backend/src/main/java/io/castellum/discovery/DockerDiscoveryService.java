@@ -175,6 +175,11 @@ public class DockerDiscoveryService {
      * {@code postgres:16}) get a version-bearing CPE so {@link io.castellum.cve.CveMatcher}
      * range-matches real CVEs; other images record an inventory-only service (name + version, no
      * CPE). Containers exposing no port, or with a blank/unparseable image, get no service row.
+     *
+     * <p>If an existing row already has a non-null {@code product} — meaning an nmap SERVICE_DETECT
+     * run has supplied a specific fingerprint — the docker image label is NOT applied, preserving
+     * the more precise identification. The {@code observedAt} timestamp is always refreshed so the
+     * topology reflects the container is still running.
      */
     private void upsertContainerService(Device device, DockerContainer c, Instant observedAt) {
         DockerContainer.ExposedPort primary = c.primaryPort();
@@ -192,6 +197,28 @@ public class DockerDiscoveryService {
             ns.setDeviceId(device.getId());
             ns.setPort(primary.port());
             ns.setProtocol(primary.protocol());
+        }
+        // AC4: preserve a more-precise fingerprint in the existing row; only refresh timestamp.
+        //
+        // Case A — nmap fingerprint guard (NB-1): if the existing row has a non-null product AND
+        // a non-null CPE, AND the incoming docker image would also produce a non-null CPE (i.e.
+        // the image has a concrete version tag that maps to a known product), the existing CPE is
+        // treated as more authoritative — nmap -sV typically yields a deeper patch version
+        // (e.g. "8.0.46-1.el9") than a docker tag (e.g. "8.0"). Requiring derived.cpe() != null
+        // ensures that a version-less re-tag (":latest") DOES clear stale CPE data rather than
+        // locking it in place.
+        if (derived.cpe() != null && ns.getProduct() != null && ns.getCpe() != null) {
+            ns.setObservedAt(observedAt);
+            networkServiceRepository.save(ns);
+            return;
+        }
+        // Case B — unmapped image guard (AC4 original): docker cannot identify this service's
+        // product (image base name not in curated map) but an nmap fingerprint already gave the
+        // row a product. Do not overwrite the more specific identification with the generic label.
+        if (derived.product() == null && ns.getProduct() != null) {
+            ns.setObservedAt(observedAt);
+            networkServiceRepository.save(ns);
+            return;
         }
         ns.setName(derived.displayName());
         ns.setVersion(derived.version());

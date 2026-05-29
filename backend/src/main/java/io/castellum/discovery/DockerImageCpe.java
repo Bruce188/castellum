@@ -137,4 +137,47 @@ public final class DockerImageCpe {
         // Unmapped image — inventory only (raw base name, no CPE).
         return new DerivedService(ref.baseName(), null, version, null);
     }
+
+    /**
+     * Derive a CPE string from an nmap service fingerprint ({@code product} + {@code version}
+     * strings as reported by {@code -sV}), or {@code null} when the product is unknown or
+     * when no concrete numeric version can be extracted.
+     *
+     * <p>The product name is lower-cased and looked up in {@link #PRODUCTS}; the version is
+     * stripped to its leading dotted-numeric run via {@link #version(String)}. Only products
+     * in the curated map produce a CPE; everything else returns {@code null} (inventory-only),
+     * consistent with {@link #derive(String)}'s conservative rule.
+     *
+     * <p>Example: {@code cpeForFingerprint("MySQL", "8.0.46-1.el9")}
+     * → {@code "cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*"}.
+     *
+     * @param productName nmap {@code product} attribute (e.g. "MySQL", "OpenSSH")
+     * @param versionStr  nmap {@code version} attribute (may be null or blank)
+     * @return CPE 2.3 formatted string, or {@code null}
+     */
+    public static String cpeForFingerprint(String productName, String versionStr) {
+        if (productName == null || productName.isBlank()) {
+            return null;
+        }
+        // Try the full lowercased string first (e.g. "mysql"), then fall back to the first
+        // whitespace-delimited token (e.g. "postgresql db" → "postgresql"). This handles compound
+        // nmap product strings like "PostgreSQL DB" or "nginx HTTP server" without fabricating
+        // any mapping that isn't already curated.
+        String lower = productName.toLowerCase(java.util.Locale.ROOT);
+        String vendorProduct = PRODUCTS.get(lower);
+        if (vendorProduct == null) {
+            int space = lower.indexOf(' ');
+            if (space > 0) {
+                vendorProduct = PRODUCTS.get(lower.substring(0, space));
+            }
+        }
+        if (vendorProduct == null) {
+            return null;
+        }
+        String ver = version(versionStr);
+        if (ver == null) {
+            return null;
+        }
+        return "cpe:2.3:a:" + vendorProduct + ":" + ver + ":*:*:*:*:*:*:*";
+    }
 }

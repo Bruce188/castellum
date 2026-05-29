@@ -439,4 +439,78 @@ class DockerDiscoveryServiceTest {
         assertThat(svc.getCpe()).isNull();
         assertThat(svc.getVersion()).isNull();
     }
+
+    @Test
+    void discover_mappedDockerImage_doesNotDowngradeNmapVersionedCpe() throws Exception {
+        // NB-1: nmap wrote product=mysql + versioned CPE (8.0.46); a later docker pass with a
+        // MAPPED image (mysql:8.0) must NOT overwrite the precise version/CPE — only timestamp.
+        String json = """
+            [ { "Id": "db2", "Name": "/app-db",
+                "Config": { "Image": "mysql:8.0" },
+                "NetworkSettings": { "Ports": { "3306/tcp": null },
+                  "Networks": { "n": { "IPAddress": "172.60.0.5", "Gateway": "172.60.0.1" } } } } ]
+            """;
+        // First docker pass seeds the row from the image (mysql → oracle:mysql, version "8.0")
+        newService(json, List.of("db2")).discover();
+        Device device = repo.findByIpAddress("172.60.0.5").orElseThrow();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(device.getId(), 3306, "tcp").orElseThrow();
+        // After docker-only run: mapped image → product + CPE from tag "8.0"
+        assertThat(svc.getProduct()).isEqualTo("mysql");
+        assertThat(svc.getCpe()).isEqualTo("cpe:2.3:a:oracle:mysql:8.0:*:*:*:*:*:*:*");
+
+        // Simulate nmap fingerprint with more precise version
+        svc.setName("MySQL");
+        svc.setProduct("mysql");
+        svc.setVersion("8.0.46-1.el9");
+        svc.setCpe("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        serviceRepo.save(svc);
+
+        // Re-run docker discovery with the same mapped image — must NOT downgrade the version/CPE
+        newService(json, List.of("db2")).discover();
+        NetworkService after = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(device.getId(), 3306, "tcp").orElseThrow();
+        assertThat(after.getProduct()).isEqualTo("mysql");
+        assertThat(after.getCpe()).isEqualTo("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        assertThat(after.getVersion()).isEqualTo("8.0.46-1.el9");
+        assertThat(after.getName()).isEqualTo("MySQL");
+        // Timestamp must have been refreshed (observedAt updated to FIXED_NOW)
+        assertThat(after.getObservedAt()).isEqualTo(FIXED_NOW);
+    }
+
+    @Test
+    void discover_doesNotOverwriteNmapFingerprint() throws Exception {
+        // Simulate nmap already populated the service with real fingerprint data.
+        // Docker discovery must NOT clobber the specific product/version/CPE with
+        // the generic image-name label.
+        String json = """
+            [ { "Id": "db1", "Name": "/pingpay-db",
+                "Config": { "Image": "pingpay:latest" },
+                "NetworkSettings": { "Ports": { "3306/tcp": null },
+                  "Networks": { "n": { "IPAddress": "172.50.0.3", "Gateway": "172.50.0.1" } } } } ]
+            """;
+        newService(json, List.of("db1")).discover();
+        Device device = repo.findByIpAddress("172.50.0.3").orElseThrow();
+        NetworkService svc = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(device.getId(), 3306, "tcp").orElseThrow();
+        // After docker-only run: image is unmapped → inventory-only label, no CPE
+        assertThat(svc.getProduct()).isNull();
+        assertThat(svc.getCpe()).isNull();
+
+        // Simulate nmap fingerprint written after docker discovery
+        svc.setName("MySQL");
+        svc.setProduct("mysql");
+        svc.setVersion("8.0.46-1.el9");
+        svc.setCpe("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        serviceRepo.save(svc);
+
+        // Re-run docker discovery — must NOT overwrite the nmap fingerprint
+        newService(json, List.of("db1")).discover();
+        NetworkService after = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(device.getId(), 3306, "tcp").orElseThrow();
+        assertThat(after.getProduct()).isEqualTo("mysql");
+        assertThat(after.getCpe()).isEqualTo("cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*");
+        assertThat(after.getName()).isEqualTo("MySQL");
+        assertThat(after.getVersion()).isEqualTo("8.0.46-1.el9");
+    }
 }

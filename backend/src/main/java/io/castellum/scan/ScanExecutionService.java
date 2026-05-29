@@ -1,6 +1,7 @@
 package io.castellum.scan;
 
 import io.castellum.audit.AuditService;
+import io.castellum.discovery.DockerImageCpe;
 import io.castellum.discovery.Discovery;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.discovery.DeviceUpsertService;
@@ -196,10 +197,7 @@ public class ScanExecutionService {
                         ns.setPort(svc.port());
                         ns.setProtocol(svc.protocol());
                     }
-                    ns.setName(svc.name());
-                    ns.setVersion(svc.version());
-                    ns.setProduct(svc.product());
-                    ns.setCpe(svc.cpe23());
+                    applyNmapFingerprint(ns, svc);
                     ns.setObservedAt(now);
                     networkServiceRepository.save(ns);
                 }
@@ -277,5 +275,79 @@ public class ScanExecutionService {
         return combined.length() > FAILURE_REASON_MAX_LEN
             ? combined.substring(0, FAILURE_REASON_MAX_LEN)
             : combined;
+    }
+
+    /**
+     * Apply nmap SERVICE_DETECT fingerprint data to a {@link NetworkService} row.
+     *
+     * <p>When nmap reports a non-null {@code product} (e.g. "MySQL"), that product is
+     * authoritative and supersedes whatever a prior docker-discovery pass may have written:
+     * <ul>
+     *   <li>{@code name} ← the nmap product string (human-readable display name)</li>
+     *   <li>{@code product} ← product lowercased (matches {@link DockerImageCpe#PRODUCTS} keys)</li>
+     *   <li>{@code version} ← nmap version verbatim (e.g. "8.0.46-1.el9")</li>
+     *   <li>{@code cpe} ← nmap-provided CPE 2.3 string if present; otherwise derived via
+     *       {@link DockerImageCpe#cpeForFingerprint} when the product is in the curated map</li>
+     * </ul>
+     *
+     * <p>When nmap has no product, the standard port-scan fields (protocol name, version) are
+     * written without touching an existing CPE — so a docker-derived CPE is not cleared by a
+     * no-product nmap result.
+     *
+     * <p>Either way the caller must still set {@code observedAt} and save.
+     */
+    /**
+     * Returns {@code true} when a CPE 2.3 string has a wildcard ({@code *}) or empty version
+     * component — meaning it matches all versions and would over-report CVEs.
+     *
+     * <p>CPE 2.3 format: {@code cpe:2.3:type:vendor:product:version:...}
+     * Version is the 5th colon-separated component (index 4).
+     */
+    private static boolean nmapCpeIsVersionless(String cpe) {
+        if (cpe == null) {
+            return true;
+        }
+        // CPE 2.3: cpe:2.3:a:vendor:product:version:...
+        String[] parts = cpe.split(":", -1);
+        if (parts.length < 6) {
+            return true; // malformed — treat as versionless to be safe
+        }
+        String version = parts[5];
+        return version.isEmpty() || "*".equals(version);
+    }
+
+    private static void applyNmapFingerprint(NetworkService ns,
+                                              NmapOutputParser.DiscoveredService svc) {
+        String product = svc.product();
+        if (product != null && !product.isBlank()) {
+            // nmap identified the software: use the fingerprint as the authoritative source
+            ns.setName(product);   // human-readable display (e.g. "MySQL")
+            ns.setProduct(product.toLowerCase(java.util.Locale.ROOT));
+            ns.setVersion(svc.version());
+            // Prefer nmap-supplied CPE only when it carries a concrete version; otherwise a
+            // version-less nmap CPE (version field = "*" or empty) would match every CVE filed
+            // against the product. If nmap's CPE is version-less AND we can derive a versioned
+            // CPE from the curated product map, use the derived one instead.
+            String derivedCpe = DockerImageCpe.cpeForFingerprint(product, svc.version());
+            String cpe;
+            if (svc.cpe23() != null && !nmapCpeIsVersionless(svc.cpe23()) ) {
+                cpe = svc.cpe23();
+            } else if (derivedCpe != null) {
+                cpe = derivedCpe;
+            } else {
+                cpe = svc.cpe23(); // may be null or a version-less CPE — best we have
+            }
+            ns.setCpe(cpe);
+        } else {
+            // No product fingerprint — record protocol name + version but do not clear an
+            // existing CPE (which may have been derived from the docker image tag)
+            ns.setName(svc.name());
+            ns.setVersion(svc.version());
+            ns.setProduct(null);
+            // Preserve existing CPE; only set from nmap if it actually provided one
+            if (svc.cpe23() != null) {
+                ns.setCpe(svc.cpe23());
+            }
+        }
     }
 }
