@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Criticality, FeedsStatusDto, TopRiskDeviceDto } from '../api/types';
 import { freshnessTier, FRESHNESS_BADGE_CLASSES, FRESHNESS_DOT_CLASSES } from '../lib/freshness';
+import { CveDetailPanel } from './CveDetailPanel';
 import { RelatedCvesPanel } from './RelatedCvesPanel';
 
 type ThreatSortKey = 'composite' | 'kev' | 'criticality' | 'host';
@@ -51,6 +52,8 @@ export function ThreatsDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, setState] = useState<State>(INITIAL);
   const [expandedDeviceId, setExpandedDeviceId] = useState<number | null>(null);
+  // F-threats-cve-detail-drawer: selected CVE drives the shared CveDetailPanel drawer.
+  const [selectedCveId, setSelectedCveId] = useState<string | null>(null);
 
   // --- Sort URL state ---
   const sortKeyParam = searchParams.get('sort') ?? 'composite';
@@ -137,7 +140,12 @@ export function ThreatsDashboard() {
   };
 
   const toggleDeviceRow = (deviceId: number) => {
-    setExpandedDeviceId(prev => prev === deviceId ? null : deviceId);
+    setExpandedDeviceId(prev => {
+      const next = prev === deviceId ? null : deviceId;
+      // Close the CVE drawer when collapsing the threat row or switching rows.
+      if (next !== prev) setSelectedCveId(null);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -388,6 +396,7 @@ export function ThreatsDashboard() {
                         deviceId={d.deviceId}
                         hostname={d.hostname}
                         ipAddress={d.ipAddress}
+                        onCveSelect={setSelectedCveId}
                       />
                     </td>
                   </tr>
@@ -397,6 +406,12 @@ export function ThreatsDashboard() {
           </tbody>
         </table>
       )}
+
+      {/* CVE detail drawer — same component/UX as /cves page (feat/threats-cve-detail-drawer) */}
+      <CveDetailPanel
+        cveId={selectedCveId}
+        onClose={() => setSelectedCveId(null)}
+      />
     </section>
   );
 }
