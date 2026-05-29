@@ -134,7 +134,7 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
           <dd data-testid="device-os">
             {device.osName
               ? `${device.osName}${device.osAccuracy != null ? ` (${device.osAccuracy}%)` : ''}`
-              : 'Unknown'}
+              : 'Undetected'}
           </dd>
         </dl>
         {isAdmin && (
