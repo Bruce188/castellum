@@ -10,7 +10,7 @@ import type {
   InterfaceInfo, NetworkService,
   OtProbeRequest, OtProbeResponse, OtProtocol,
   Page, PassiveDiscoveryRequest, PassiveDiscoveryResponse,
-  Scan, ScanDetail, ScanPolicyCreateRequest, ScanPolicyDto, ScanRequest,
+  Scan, ScanDetail, ScanPolicyCreateRequest, ScanPolicyDto, ScanReport, ScanRequest,
   ShortestPathResponse,
   SyncStatusResponse,
   TopRiskDeviceDto,
@@ -204,6 +204,9 @@ export const api = {
   },
   getScanDetail: (id: number) =>
     request<ScanDetail>(`/api/scans/${id}`),
+  /** GET /api/scans/{id}/report — VIEWER and ADMIN. Returns the per-scan snapshot report. */
+  getScanReport: (id: number) =>
+    request<ScanReport>(`/api/scans/${id}/report`),
   listScans: (size = 10) =>
     request<Page<Scan>>(`/api/scans?size=${size}&sort=requestedAt,desc`),
   feedsStatus: () =>
