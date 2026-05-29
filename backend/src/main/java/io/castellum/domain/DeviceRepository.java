@@ -30,4 +30,17 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
      */
     @Query("SELECT d.ipAddress FROM Device d")
     List<String> findAllIpAddresses();
+
+    // ── Task 1.2 stubs — attribution queries (implementer wires to real columns) ─────────────
+
+    /** Returns IDs of devices whose first observation was attributed to the given scan (insert-once). */
+    @Query("SELECT d.id FROM Device d WHERE d.discoveredByScanId = :scanId")
+    List<Long> findIdsByDiscoveredByScanId(@Param("scanId") Long scanId);
+
+    /** Returns IDs of devices most recently observed by the given scan (last-writer-wins). */
+    @Query("SELECT d.id FROM Device d WHERE d.lastSeenByScanId = :scanId")
+    List<Long> findIdsByLastSeenByScanId(@Param("scanId") Long scanId);
+
+    /** Returns full Device rows most recently observed by the given scan. */
+    List<Device> findByLastSeenByScanId(Long scanId);
 }

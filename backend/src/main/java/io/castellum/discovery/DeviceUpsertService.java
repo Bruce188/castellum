@@ -162,6 +162,17 @@ public class DeviceUpsertService {
         }
     }
 
+    /**
+     * Scan-only upsert overload — stub for Task 1.2 (implementer wires attribution logic).
+     * On INSERT sets discoveredByScanId and lastSeenByScanId; on UPDATE sets only lastSeenByScanId.
+     * When discoveredByScanId is null, behaves identically to upsert(Discovery).
+     */
+    @Transactional
+    public Device upsert(Discovery d, Long discoveredByScanId) {
+        // STUB: delegate to non-scan path; implementer replaces with attribution logic
+        return upsert(d);
+    }
+
     @Transactional
     public Device upsert(Discovery d) {
         String incomingHostname = sanitizeHostname(d.hostname());

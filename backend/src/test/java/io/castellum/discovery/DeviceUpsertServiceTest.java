@@ -639,4 +639,142 @@ class DeviceUpsertServiceTest {
             .as("UPDATE must flip publishesHostPort true→false (last-writer-wins)")
             .isFalse();
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Task 1.2 — scan attribution upsert overload
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * (1) Scan INSERT: upsert(d, 5L) on a new IP must set BOTH discoveredByScanId=5 AND
+     * lastSeenByScanId=5 on the persisted device.
+     */
+    @Test
+    void upsertForScan_insert_setsDiscoveredAndLastSeenScanId() {
+        Discovery d = new Discovery("10.1.0.1", "aa:bb:cc:dd:01:01", "host-scan1",
+            DiscoverySource.NMAP_SCAN, T1, null, false);
+
+        service.upsert(d, 5L);
+
+        var found = repo.findByIpAddress("10.1.0.1").orElseThrow();
+        assertThat(found.getDiscoveredByScanId())
+            .as("INSERT: discoveredByScanId must be set to the scan id")
+            .isEqualTo(5L);
+        assertThat(found.getLastSeenByScanId())
+            .as("INSERT: lastSeenByScanId must be set to the scan id")
+            .isEqualTo(5L);
+    }
+
+    /**
+     * (2) Scan UPDATE: first upsert(d, 5L) seeds the device; second upsert(sameIp, 9L) must
+     * update lastSeenByScanId to 9 but NEVER overwrite the original discoveredByScanId=5
+     * (insert-once / sticky first-discovery).
+     */
+    @Test
+    void upsertForScan_update_setsOnlyLastSeenScanId() {
+        Discovery first = new Discovery("10.1.0.2", "aa:bb:cc:dd:01:02", "host-scan2",
+            DiscoverySource.NMAP_SCAN, T1, null, false);
+        service.upsert(first, 5L);
+
+        // Re-observe same IP under a different scan
+        Discovery second = new Discovery("10.1.0.2", "aa:bb:cc:dd:01:02", "host-scan2",
+            DiscoverySource.NMAP_SCAN, T2, null, false);
+        service.upsert(second, 9L);
+
+        var found = repo.findByIpAddress("10.1.0.2").orElseThrow();
+        assertThat(found.getDiscoveredByScanId())
+            .as("UPDATE: discoveredByScanId must remain 5 (insert-once, first-discovery is sticky)")
+            .isEqualTo(5L);
+        assertThat(found.getLastSeenByScanId())
+            .as("UPDATE: lastSeenByScanId must be updated to 9 (last-writer-wins)")
+            .isEqualTo(9L);
+        assertThat(repo.count()).isEqualTo(1L); // single row — no duplicate
+    }
+
+    /**
+     * (3) Non-scan delegate: plain upsert(d) and explicit upsert(d, null) must leave BOTH
+     * attribution columns NULL — non-scan callers (docker/passive/ARP) are unaffected.
+     */
+    @Test
+    void upsert_nonScanDelegate_leavesAttributionNull() {
+        // plain upsert(d) — the existing public API used by docker/passive/ARP
+        Discovery d1 = new Discovery("10.1.0.3", "aa:bb:cc:dd:01:03", "host-nonscan1",
+            DiscoverySource.ARP, T1, null, false);
+        service.upsert(d1);
+
+        var found1 = repo.findByIpAddress("10.1.0.3").orElseThrow();
+        assertThat(found1.getDiscoveredByScanId())
+            .as("plain upsert(d): discoveredByScanId must remain null")
+            .isNull();
+        assertThat(found1.getLastSeenByScanId())
+            .as("plain upsert(d): lastSeenByScanId must remain null")
+            .isNull();
+
+        // explicit upsert(d, null) — must also write no attribution
+        Discovery d2 = new Discovery("10.1.0.4", "aa:bb:cc:dd:01:04", "host-nonscan2",
+            DiscoverySource.ARP, T1, null, false);
+        service.upsert(d2, null);
+
+        var found2 = repo.findByIpAddress("10.1.0.4").orElseThrow();
+        assertThat(found2.getDiscoveredByScanId())
+            .as("upsert(d, null): discoveredByScanId must remain null")
+            .isNull();
+        assertThat(found2.getLastSeenByScanId())
+            .as("upsert(d, null): lastSeenByScanId must remain null")
+            .isNull();
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Task 1.2 — repository attribution queries
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * findIdsByDiscoveredByScanId(5L) returns only the device attributed to scan 5 on INSERT.
+     * The device re-observed by scan 9 must NOT appear (its discoveredByScanId is still 5,
+     * but this test verifies the query is keyed to the correct column).
+     *
+     * Additionally:
+     * - findIdsByLastSeenByScanId(9L) must return BOTH the device first-seen by scan 5 (now
+     *   re-observed by scan 9) AND a brand-new device inserted by scan 9.
+     * - findByLastSeenByScanId(9L) must return the same two rows as full Device entities.
+     */
+    @Test
+    void repositoryAttributionQueries_returnCorrectSets() {
+        // Device A: discovered by scan 5, then re-observed by scan 9
+        Discovery dA1 = new Discovery("10.2.0.1", "aa:bb:cc:dd:02:01", "device-a",
+            DiscoverySource.NMAP_SCAN, T1, null, false);
+        Device deviceA = service.upsert(dA1, 5L);
+        Discovery dA2 = new Discovery("10.2.0.1", "aa:bb:cc:dd:02:01", "device-a",
+            DiscoverySource.NMAP_SCAN, T2, null, false);
+        service.upsert(dA2, 9L);
+
+        // Device B: brand-new device inserted by scan 9
+        Discovery dB = new Discovery("10.2.0.2", "aa:bb:cc:dd:02:02", "device-b",
+            DiscoverySource.NMAP_SCAN, T2, null, false);
+        Device deviceB = service.upsert(dB, 9L);
+
+        // findIdsByDiscoveredByScanId(5L) → only device A (inserted by scan 5)
+        List<Long> discoveredByScan5 = repo.findIdsByDiscoveredByScanId(5L);
+        assertThat(discoveredByScan5)
+            .as("findIdsByDiscoveredByScanId(5) must return only the device first seen by scan 5")
+            .containsExactlyInAnyOrder(deviceA.getId());
+
+        // findIdsByDiscoveredByScanId(9L) → only device B (inserted by scan 9)
+        List<Long> discoveredByScan9 = repo.findIdsByDiscoveredByScanId(9L);
+        assertThat(discoveredByScan9)
+            .as("findIdsByDiscoveredByScanId(9) must return only the device first seen by scan 9")
+            .containsExactlyInAnyOrder(deviceB.getId());
+
+        // findIdsByLastSeenByScanId(9L) → both device A (re-observed) and device B (new)
+        List<Long> lastSeenByScan9 = repo.findIdsByLastSeenByScanId(9L);
+        assertThat(lastSeenByScan9)
+            .as("findIdsByLastSeenByScanId(9) must return both devices last observed by scan 9")
+            .containsExactlyInAnyOrder(deviceA.getId(), deviceB.getId());
+
+        // findByLastSeenByScanId(9L) → same two rows as full entities
+        List<io.castellum.domain.Device> lastSeenEntities = repo.findByLastSeenByScanId(9L);
+        assertThat(lastSeenEntities)
+            .as("findByLastSeenByScanId(9) must return the two Device entities for scan 9")
+            .extracting(io.castellum.domain.Device::getId)
+            .containsExactlyInAnyOrder(deviceA.getId(), deviceB.getId());
+    }
 }
