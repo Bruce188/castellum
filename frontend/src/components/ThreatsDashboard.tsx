@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import type { Criticality, FeedsStatusDto, TopRiskDeviceDto } from '../api/types';
+import type { Criticality, Device, DeviceRiskDto, FeedsStatusDto, NetworkService, TopRiskDeviceDto } from '../api/types';
 import { freshnessTier, FRESHNESS_BADGE_CLASSES, FRESHNESS_DOT_CLASSES } from '../lib/freshness';
 import { CveDetailPanel } from './CveDetailPanel';
+import { DeviceDetailPanel } from './DeviceDetailPanel';
 import { RelatedCvesPanel } from './RelatedCvesPanel';
 
 type ThreatSortKey = 'composite' | 'kev' | 'criticality' | 'host';
@@ -48,12 +49,22 @@ const INITIAL: State = { loading: true, error: null, top: [], feeds: null };
  * is preserved as a "View all in CVE explorer" anchor inside the expanded panel.
  * Only one row may be expanded at a time — expanding a second row collapses the first.
  */
-export function ThreatsDashboard() {
+export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, setState] = useState<State>(INITIAL);
   const [expandedDeviceId, setExpandedDeviceId] = useState<number | null>(null);
   // F-threats-cve-detail-drawer: selected CVE drives the shared CveDetailPanel drawer.
   const [selectedCveId, setSelectedCveId] = useState<string | null>(null);
+
+  // feat/threats-open-device-detail: device+risk+services fetched lazily on row open.
+  // deviceDetail holds the last-fetched data; deviceDetailVisible tracks whether the
+  // inline DeviceDetailPanel is shown (operator can close it independently).
+  const [deviceDetail, setDeviceDetail] = useState<{
+    device: Device;
+    risk: DeviceRiskDto | null;
+    services: NetworkService[];
+  } | null>(null);
+  const [deviceDetailVisible, setDeviceDetailVisible] = useState(false);
 
   // --- Sort URL state ---
   const sortKeyParam = searchParams.get('sort') ?? 'composite';
@@ -139,11 +150,36 @@ export function ThreatsDashboard() {
     });
   };
 
+  // Fetch device+risk+services lazily when a row is opened.
+  const fetchDeviceDetail = useCallback(async (deviceId: number) => {
+    try {
+      const [device, risk, services] = await Promise.all([
+        api.getDevice(deviceId),
+        api.deviceRisk(deviceId),
+        api.listServicesForDevice(deviceId),
+      ]);
+      setDeviceDetail({ device, risk, services });
+      setDeviceDetailVisible(true);
+    } catch {
+      // On error keep any prior detail hidden — no crash, no blank stale data.
+      setDeviceDetail(null);
+      setDeviceDetailVisible(false);
+    }
+  }, []);
+
   const toggleDeviceRow = (deviceId: number) => {
     setExpandedDeviceId(prev => {
       const next = prev === deviceId ? null : deviceId;
       // Close the CVE drawer when collapsing the threat row or switching rows.
       if (next !== prev) setSelectedCveId(null);
+      if (next === null) {
+        // Row collapsed — hide device detail too.
+        setDeviceDetailVisible(false);
+        setDeviceDetail(null);
+      } else {
+        // Row opened (or switched) — trigger lazy fetch.
+        void fetchDeviceDetail(next);
+      }
       return next;
     });
   };
@@ -392,6 +428,22 @@ export function ThreatsDashboard() {
                 {expandedDeviceId === d.deviceId && (
                   <tr data-testid={`threats-related-panel-${d.deviceId}`}>
                     <td colSpan={5} className="p-0">
+                      {/* Inline device detail: rendered above related CVEs so the operator
+                          sees device context first. The fixed right-0 DeviceDetailPanel
+                          drawer (used on Topology) would collide with the CVE detail drawer,
+                          so we render it here in normal document flow instead. */}
+                      {deviceDetailVisible && deviceDetail && (
+                        <div className="border-b border-gray-200">
+                          <DeviceDetailPanel
+                            device={deviceDetail.device}
+                            risk={deviceDetail.risk}
+                            services={deviceDetail.services}
+                            isAdmin={isAdmin}
+                            onClose={() => setDeviceDetailVisible(false)}
+                            onDeviceMutated={() => void fetchDeviceDetail(d.deviceId)}
+                          />
+                        </div>
+                      )}
                       <RelatedCvesPanel
                         deviceId={d.deviceId}
                         hostname={d.hostname}
