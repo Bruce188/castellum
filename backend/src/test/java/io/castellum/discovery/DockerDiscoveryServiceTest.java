@@ -591,4 +591,34 @@ class DockerDiscoveryServiceTest {
         assertThat(after.getName()).isEqualTo("MySQL");
         assertThat(after.getVersion()).isEqualTo("8.0.46-1.el9");
     }
+
+    // -----------------------------------------------------------------------
+    // Task 1.2 — local docker-CLI path writes origin='local' (R6 regression)
+    // -----------------------------------------------------------------------
+
+    /**
+     * R6 regression: the local Docker CLI discovery path (discover()) must write
+     * originHostIp='local' on every device it upserts. This proves the 2-arg delegate
+     * (upsertWithScope(d, scope) → upsertWithScope(d, scope, OriginContext.local())) is
+     * wired correctly and that local discovery is byte-identical to the pre-V27 behaviour.
+     */
+    @Test
+    void discover_localPath_originLocal() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        // pingpay-db at 172.18.0.2 — container row must have origin='local'.
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.getOriginHostIp())
+            .as("local Docker CLI discovery must write originHostIp='local'")
+            .isEqualTo("local");
+        assertThat(db.getOriginHostName())
+            .as("local Docker CLI discovery must write originHostName=null")
+            .isNull();
+
+        // The gateway at 172.18.0.1 must also be local.
+        Device gw = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(gw.getOriginHostIp())
+            .as("local Docker CLI gateway must also have originHostIp='local'")
+            .isEqualTo("local");
+    }
 }

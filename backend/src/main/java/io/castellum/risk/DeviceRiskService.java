@@ -116,6 +116,15 @@ public class DeviceRiskService {
     DeviceRiskResult compute(Device device, List<NetworkService> services) {
         record Scored(String cveId, BigDecimal composite) {}
 
+        // Posture peak: max severity score over services that carry a non-null posture_severity.
+        // Computed independently of CVE matching — a CRITICAL exposure row (e.g. docker daemon
+        // on :2375) contributes risk even when no CPE/CVE matches.
+        double posturePeak = 0.0;
+        for (var svc : services) {
+            double ps = postureScore(svc.getPostureSeverity());
+            if (ps > posturePeak) posturePeak = ps;
+        }
+
         // First pass — collect matched CVEs per service plus a flat set of unique CVE IDs.
         Map<Cve, Void> matchedCves = new LinkedHashMap<>();
         Set<String> uniqueCveIds = new HashSet<>();
@@ -168,11 +177,17 @@ public class DeviceRiskService {
         }
 
         if (all.isEmpty()) {
-            DeviceRiskDto empty = new DeviceRiskDto(device.getId(), BigDecimal.ZERO.setScale(2), List.of(), null);
+            // No CVE matches — score is driven entirely by posture (if present).
+            BigDecimal postureScore = BigDecimal.valueOf(posturePeak).setScale(2, RoundingMode.HALF_UP);
+            DeviceRiskDto empty = new DeviceRiskDto(device.getId(), postureScore, List.of(), null);
             return new DeviceRiskResult(empty, 0);
         }
         all.sort(Comparator.comparing(Scored::composite).reversed());
-        BigDecimal max = all.get(0).composite();
+        // Headline score = max(CVE composite, posture peak).
+        BigDecimal cveMax = all.get(0).composite();
+        BigDecimal postureScoreBd = BigDecimal.valueOf(posturePeak).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal max = cveMax.compareTo(postureScoreBd) >= 0 ? cveMax : postureScoreBd;
+
         List<String> top3 = all.stream()
             .map(Scored::cveId)
             .distinct()
@@ -186,6 +201,23 @@ public class DeviceRiskService {
             BigDecimal.valueOf(criticalityWeight(device.getCriticality())).setScale(2, RoundingMode.HALF_UP));
 
         return new DeviceRiskResult(new DeviceRiskDto(device.getId(), max, top3, components), kevCount);
+    }
+
+    /**
+     * Maps a posture-severity string to a numeric score on the 0-10 scale, consistent with
+     * the CVSS severity bands. Returns 0 for null/unknown values so the posture contribution
+     * is silently dropped for normal (no-posture) service rows.
+     */
+    private static double postureScore(String severity) {
+        if (severity == null) return 0.0;
+        return switch (severity.toUpperCase(java.util.Locale.ROOT)) {
+            case "CRITICAL" -> 9.0;
+            case "HIGH"     -> 7.0;
+            case "MEDIUM"   -> 5.0;
+            case "LOW"      -> 3.0;
+            case "INFO"     -> 1.0;
+            default         -> 0.0;
+        };
     }
 
     /** Mirror of {@link CompositeScorer}'s private critFactor table. Documented in the DTO. */

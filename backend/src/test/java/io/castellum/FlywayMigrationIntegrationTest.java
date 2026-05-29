@@ -419,6 +419,88 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v27DeviceOriginHostAndPostureSeverityRoundTrip() {
+        // (a) Column presence — ORIGIN_HOST_IP, ORIGIN_HOST_NAME on DEVICE, POSTURE_SEVERITY on SERVICE.
+        Number originIpCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'ORIGIN_HOST_IP'",
+            Number.class);
+        assertTrue(originIpCol.intValue() > 0,
+            "origin_host_ip column must exist in device table after V27 migration");
+
+        Number originNameCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'ORIGIN_HOST_NAME'",
+            Number.class);
+        assertTrue(originNameCol.intValue() > 0,
+            "origin_host_name column must exist in device table after V27 migration");
+
+        Number postureSevCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'SERVICE' AND UPPER(COLUMN_NAME) = 'POSTURE_SEVERITY'",
+            Number.class);
+        assertTrue(postureSevCol.intValue() > 0,
+            "posture_severity column must exist in service table after V27 migration");
+
+        // (b) Round-trip INSERT a device with explicit origin columns, SELECT back.
+        Instant now = Instant.now();
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, " +
+            "device_role, origin_host_ip, origin_host_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "10.99.27.1", now, now, "MEDIUM", "HOME", "UNKNOWN", "192.168.68.51", "laptop-x"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT origin_host_ip, origin_host_name FROM device WHERE ip_address = '10.99.27.1'"
+        );
+        assertEquals("192.168.68.51", row.get("origin_host_ip"),
+            "origin_host_ip must round-trip after V27 migration");
+        assertEquals("laptop-x", row.get("origin_host_name"),
+            "origin_host_name must round-trip after V27 migration");
+
+        // (c) Default applies — INSERT WITHOUT origin_host_ip; column must default to 'local'.
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, device_role) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            "10.99.27.2", now, now, "MEDIUM", "HOME", "UNKNOWN"
+        );
+        Map<String, Object> defaultRow = jdbcTemplate.queryForMap(
+            "SELECT origin_host_ip FROM device WHERE ip_address = '10.99.27.2'"
+        );
+        assertEquals("local", defaultRow.get("origin_host_ip"),
+            "origin_host_ip must default to 'local' when omitted");
+
+        // (d) Composite uniqueness — same IP, different origins → two rows allowed;
+        //     same IP + same origin → duplicate rejected.
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, " +
+            "device_role, origin_host_ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "172.18.0.2", now, now, "MEDIUM", "HOME", "UNKNOWN", "probedA"
+        );
+        // Same IP, different origin — must succeed (composite uniqueness allows it).
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, " +
+            "device_role, origin_host_ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "172.18.0.2", now, now, "MEDIUM", "HOME", "UNKNOWN", "probedB"
+        );
+        // Verify both rows exist.
+        Number sameIpCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM device WHERE ip_address = '172.18.0.2'",
+            Number.class);
+        assertEquals(2, sameIpCount.intValue(),
+            "two rows with same IP but different origin_host_ip must coexist");
+
+        // Same IP + same origin — must violate composite unique constraint.
+        assertThrows(Exception.class, () ->
+            jdbcTemplate.update(
+                "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, " +
+                "device_role, origin_host_ip) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "172.18.0.2", now, now, "MEDIUM", "HOME", "UNKNOWN", "probedA"
+            ),
+            "duplicate (ip_address, origin_host_ip) must throw a constraint-violation exception"
+        );
+    }
+
+    @Test
     void v18DeviceLastSeenIfaceRoundTrip() {
         // Confirm column existence via INFORMATION_SCHEMA.
         Number colCount = jdbcTemplate.queryForObject(
