@@ -7,6 +7,7 @@ import io.castellum.domain.Scan;
 import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
 import io.castellum.scan.ScanExecutionService;
+import io.castellum.scan.ScanReportService;
 import io.castellum.scan.ScanSubmissionRateLimiter;
 import io.castellum.security.CastellumUserDetailsService;
 import io.castellum.security.JwtAuthenticationFilter;
@@ -60,6 +61,9 @@ class ScanControllerTest {
 
     @MockBean
     private DeviceRepository deviceRepository;
+
+    @MockBean
+    private ScanReportService scanReportService;
 
     @MockBean
     private CastellumUserDetailsService castellumUserDetailsService;
@@ -140,20 +144,23 @@ class ScanControllerTest {
             .andExpect(status().isUnauthorized());
     }
 
+    /**
+     * AC1: getById now uses precise attribution via findIdsByLastSeenByScanId, not
+     * the time-window heuristic findIdsByFirstSeenBetween.
+     */
     @Test
     void getById_existingScan_returnsScanDetailDtoWithDiscoveredDeviceIds() throws Exception {
-        Instant lo = Instant.parse("2024-01-01T00:00:00Z");
-        Instant hi = Instant.parse("2024-01-01T00:05:00Z");
         Scan scan = new Scan();
         scan.setId(7L);
         scan.setCidr("10.0.0.0/24");
         scan.setScanType("PING_SWEEP");
         scan.setStatus(ScanStatus.COMPLETE);
-        scan.setRequestedAt(lo);
-        scan.setCompletedAt(hi);
+        scan.setRequestedAt(Instant.parse("2024-01-01T00:00:00Z"));
+        scan.setCompletedAt(Instant.parse("2024-01-01T00:05:00Z"));
 
         when(scanRepository.findById(7L)).thenReturn(Optional.of(scan));
-        when(deviceRepository.findIdsByFirstSeenBetween(eq(lo), eq(hi)))
+        // Precise attribution: stub the new method, NOT findIdsByFirstSeenBetween
+        when(deviceRepository.findIdsByLastSeenByScanId(7L))
             .thenReturn(List.of(101L, 102L));
 
         mockMvc.perform(get("/api/scans/7"))
@@ -168,18 +175,17 @@ class ScanControllerTest {
 
     @Test
     void getById_scanWithNoDiscoveredDevices_returnsEmptyList() throws Exception {
-        Instant lo = Instant.parse("2024-01-01T00:00:00Z");
-        Instant hi = Instant.parse("2024-01-01T00:05:00Z");
         Scan scan = new Scan();
         scan.setId(7L);
         scan.setCidr("10.0.0.0/24");
         scan.setScanType("PING_SWEEP");
         scan.setStatus(ScanStatus.COMPLETE);
-        scan.setRequestedAt(lo);
-        scan.setCompletedAt(hi);
+        scan.setRequestedAt(Instant.parse("2024-01-01T00:00:00Z"));
+        scan.setCompletedAt(Instant.parse("2024-01-01T00:05:00Z"));
 
         when(scanRepository.findById(7L)).thenReturn(Optional.of(scan));
-        when(deviceRepository.findIdsByFirstSeenBetween(any(), any()))
+        // Precise attribution: stub the new method returning empty
+        when(deviceRepository.findIdsByLastSeenByScanId(7L))
             .thenReturn(List.of());
 
         mockMvc.perform(get("/api/scans/7"))

@@ -7,9 +7,11 @@ import io.castellum.domain.ScanRepository;
 import io.castellum.domain.ScanStatus;
 import io.castellum.scan.CidrValidator;
 import io.castellum.scan.ScanExecutionService;
+import io.castellum.scan.ScanReportService;
 import io.castellum.scan.ScanSizeGuard;
 import io.castellum.scan.ScanSubmissionRateLimiter;
 import io.castellum.web.dto.ScanDetailDto;
+import io.castellum.web.dto.ScanReportDto;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,17 +41,20 @@ public class ScanController {
     private final ScanExecutionService scanExecutionService;
     private final ScanSubmissionRateLimiter scanRateLimiter;
     private final DeviceRepository deviceRepository;
+    private final ScanReportService scanReportService;
 
     public ScanController(ScanRepository scanRepository,
                           AuditService auditService,
                           ScanExecutionService scanExecutionService,
                           ScanSubmissionRateLimiter scanRateLimiter,
-                          DeviceRepository deviceRepository) {
+                          DeviceRepository deviceRepository,
+                          ScanReportService scanReportService) {
         this.scanRepository = scanRepository;
         this.auditService = auditService;
         this.scanExecutionService = scanExecutionService;
         this.scanRateLimiter = scanRateLimiter;
         this.deviceRepository = deviceRepository;
+        this.scanReportService = scanReportService;
     }
 
     @PostMapping("/api/scan")
@@ -100,16 +105,20 @@ public class ScanController {
     public ScanDetailDto getById(@PathVariable Long id) {
         Scan scan = scanRepository.findById(id)
             .orElseThrow(NoSuchElementException::new);
-        Instant lo = scan.getRequestedAt();
-        Instant hi = scan.getCompletedAt() != null ? scan.getCompletedAt() : Instant.now();
-        List<Long> ids = (lo == null)
-            ? List.of()
-            : deviceRepository.findIdsByFirstSeenBetween(lo, hi);
+        // AC1: precise attribution via lastSeenByScanId — heuristic findIdsByFirstSeenBetween removed
+        List<Long> ids = deviceRepository.findIdsByLastSeenByScanId(id);
         return new ScanDetailDto(
             scan.getId(), scan.getCidr(), scan.getScanType(), scan.getStatus(),
             scan.getRequestedAt(), scan.getCompletedAt(),
             scan.getFailureReason(), scan.getRetryCount(),
             ids);
+    }
+
+    @GetMapping("/api/scans/{id}/report")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
+    public ScanReportDto report(@PathVariable Long id) {
+        // Stub — delegates to ScanReportService which returns null until implemented
+        return scanReportService.buildReport(id);
     }
 
     @GetMapping("/api/scans")
