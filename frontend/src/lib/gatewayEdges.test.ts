@@ -344,7 +344,7 @@ describe('buildGatewayEdges', () => {
       expect(isolatedEdges.map(e => e.data.source)).not.toContain(String(internalContainer.id));
     });
 
-    it('(e) non-docker /24 groups still emit gateway and isolated kinds unchanged', () => {
+    it('(g) non-docker /24 groups still emit gateway and isolated kinds unchanged', () => {
       // HOME-only subnet: no docker involvement → gateway kind preserved
       const h1 = makeDevice(30, '10.0.0.1', 'HOME', null, false);
       const h2 = makeDevice(31, '10.0.0.50', 'HOME', null, false);
