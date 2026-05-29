@@ -176,7 +176,8 @@ describe('TopologyView zone grouping (AC1 – compound parent nodes)', () => {
   });
 
   it('zoneGrouping_devicesAssignedToCorrectZone', () => {
-    // HOME device → zone-home; DOCKER_BRIDGE device → zone-docker; they differ.
+    // HOME device → zone-home; DOCKER_BRIDGE device → docker sub-box (which parents to zone-docker).
+    // Since this fixture has no docker-net gateway, the container lands in the unattached sub-box.
     render(
       <TopologyView
         devices={[makeDevice(10, '192.168.1.1', 'HOME'), makeDevice(20, '172.17.0.2', 'DOCKER_BRIDGE')]}
@@ -186,12 +187,19 @@ describe('TopologyView zone grouping (AC1 – compound parent nodes)', () => {
       />
     );
     const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{
-      data: { id: string; parent?: string; zone?: boolean; source?: string; target?: string };
+      data: { id: string; parent?: string; zone?: boolean; dockerNetwork?: boolean; source?: string; target?: string };
     }>;
     const byId = (id: string) => addArgs.find(e => e.data.id === id);
-    // Exact zone-id assertions — these fail immediately if the scope→zone mapping regresses.
+    // HOME device still maps directly to zone-home.
     expect(byId('10')?.data.parent).toBe('zone-home');
-    expect(byId('20')?.data.parent).toBe('zone-docker');
+    // DOCKER_BRIDGE device now parents to a network sub-box (not directly to zone-docker).
+    // Without docker-net gateways, it lands in the unattached fallback sub-box.
+    const dockerParent = byId('20')?.data.parent;
+    expect(dockerParent, 'docker device must have a parent (sub-box or zone)').toBeTruthy();
+    // The sub-box itself must parent to zone-docker (2-level nesting preserved).
+    const subBox = addArgs.find(e => e.data.id === dockerParent && e.data.dockerNetwork === true);
+    expect(subBox, `sub-box ${dockerParent} must carry dockerNetwork=true`).toBeTruthy();
+    expect(subBox?.data.parent).toBe('zone-docker');
   });
 
   it('zoneGrouping_publicDeviceAssignedToZonePublic', () => {
