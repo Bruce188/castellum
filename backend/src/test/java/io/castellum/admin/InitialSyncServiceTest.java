@@ -155,7 +155,7 @@ class InitialSyncServiceTest {
     void trigger_explicitWindow_passesExactInstants() throws Exception {
         Instant since = Instant.parse("2024-01-01T00:00:00Z");
         Instant until = Instant.parse("2025-01-01T00:00:00Z");
-        InitialSyncRequest req = new InitialSyncRequest(since, until);
+        InitialSyncRequest req = new InitialSyncRequest(since, until, false);
 
         service.trigger(req, "admin");
         Thread.sleep(200);
@@ -327,5 +327,93 @@ class InitialSyncServiceTest {
                 "lastError must be 'interrupted' when triggered but no completion exists");
         assertNull(freshService.getLastCompletedAt(),
                 "lastCompletedAt must be null when sync was interrupted");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncStatus_afterRestart_fullBackfillTriggeredButNoCompletion_reportsInterrupted() throws Exception {
+        // An interrupted full-backfill (FULL_BACKFILL_TRIGGERED with no INITIAL_SYNC_COMPLETED)
+        // must reconstruct as "interrupted", not "never synced".
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("test-fb-interrupted-");
+        executor.initialize();
+
+        AuditLogRepository freshRepo = mock(AuditLogRepository.class);
+        AuditService freshAuditService = mock(AuditService.class);
+
+        AuditLog fullBackfillTriggeredRow = new AuditLog(
+                Instant.parse("2026-05-18T07:00:00Z"), "admin", "FULL_BACKFILL_TRIGGERED",
+                "initial-sync", "global", "{\"fullBackfill\":true}");
+        Page<AuditLog> emptyPage = new PageImpl<>(Collections.emptyList());
+        Page<AuditLog> fullBackfillTriggeredPage = new PageImpl<>(List.of(fullBackfillTriggeredRow));
+
+        // Call order: (1) COMPLETED query → empty, (2) INITIAL_SYNC_TRIGGERED → empty,
+        // (3) FULL_BACKFILL_TRIGGERED → has a row
+        when(freshRepo.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(emptyPage)               // first call: COMPLETED query → empty
+                .thenReturn(emptyPage)               // second call: INITIAL_SYNC_TRIGGERED → empty
+                .thenReturn(fullBackfillTriggeredPage); // third call: FULL_BACKFILL_TRIGGERED → row
+
+        InitialSyncService freshService = new InitialSyncService(
+                executor, nvdSyncService, epssIngestionService, kevIngestionService,
+                freshAuditService, freshRepo, mock(io.castellum.risk.RiskCacheEvictor.class));
+
+        assertEquals("interrupted", freshService.getLastError(),
+                "lastError must be 'interrupted' when full-backfill was triggered but never completed");
+        assertNull(freshService.getLastCompletedAt(),
+                "lastCompletedAt must be null when full-backfill was interrupted");
+    }
+
+    // ── AC1/AC3: full-backfill routing tests ──────────────────────────────────
+
+    /**
+     * AC1 (core regression): when fullBackfill=true AND the table is non-empty,
+     * the service must call {@code fullBackfillPull()}, NOT {@code bulkPull()},
+     * so the incremental {@code findMaxLastModified} short-circuit is bypassed.
+     */
+    @Test
+    void trigger_fullBackfill_callsFullBackfillPull_notBulkPull() throws Exception {
+        InitialSyncRequest req = new InitialSyncRequest(null, null, true);
+
+        service.trigger(req, "admin");
+        Thread.sleep(200);
+
+        verify(nvdSyncService).fullBackfillPull();
+        verify(nvdSyncService, never()).bulkPull(any(), any());
+        verify(nvdSyncService, never()).incrementalPull();
+    }
+
+    /**
+     * AC3: when fullBackfill=false (default), the service must use the regular
+     * bulkPull path — the force flag must not change incremental behaviour.
+     */
+    @Test
+    void trigger_noFullBackfill_callsBulkPull_asUsual() throws Exception {
+        InitialSyncRequest req = InitialSyncRequest.defaults(); // fullBackfill=false
+
+        service.trigger(req, "admin");
+        Thread.sleep(200);
+
+        verify(nvdSyncService).bulkPull(eq(Instant.EPOCH), any(Instant.class));
+        verify(nvdSyncService, never()).fullBackfillPull();
+    }
+
+    /**
+     * AC1: even when fullBackfill pull throws, EPSS+KEV still run (resilience contract).
+     */
+    @Test
+    void trigger_fullBackfill_epssAndKevStillRunEvenOnNvdFailure() throws Exception {
+        doThrow(new java.io.IOException("NVD down"))
+            .when(nvdSyncService).fullBackfillPull();
+
+        InitialSyncRequest req = new InitialSyncRequest(null, null, true);
+        service.trigger(req, "admin");
+        Thread.sleep(200);
+
+        verify(epssIngestionService).ingest();
+        verify(kevIngestionService).ingest();
     }
 }

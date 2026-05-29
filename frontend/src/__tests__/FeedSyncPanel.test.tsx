@@ -8,6 +8,7 @@ vi.mock('../api/client', () => ({
     feedsStatus: vi.fn(),
     syncStatus: vi.fn(),
     triggerInitialSync: vi.fn(),
+    triggerFullBackfill: vi.fn(),
     getFeedSchedule: vi.fn(),
     updateFeedSchedule: vi.fn(),
     enableFeedSchedule: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../api/client', () => ({
 const feedsStatus = vi.mocked(api.feedsStatus);
 const syncStatus = vi.mocked(api.syncStatus);
 const triggerInitialSync = vi.mocked(api.triggerInitialSync);
+const triggerFullBackfill = vi.mocked(api.triggerFullBackfill);
 const getFeedSchedule = vi.mocked(api.getFeedSchedule);
 const updateFeedSchedule = vi.mocked(api.updateFeedSchedule);
 const enableFeedSchedule = vi.mocked(api.enableFeedSchedule);
@@ -56,6 +58,7 @@ beforeEach(() => {
   feedsStatus.mockReset();
   syncStatus.mockReset();
   triggerInitialSync.mockReset();
+  triggerFullBackfill.mockReset();
   getFeedSchedule.mockReset();
   updateFeedSchedule.mockReset();
   enableFeedSchedule.mockReset();
@@ -64,6 +67,7 @@ beforeEach(() => {
   feedsStatus.mockResolvedValue(FULL_CORPUS_FEEDS);
   syncStatus.mockResolvedValue(STATUS_IDLE);
   triggerInitialSync.mockResolvedValue({ status: 'started', startedAt: new Date().toISOString() });
+  triggerFullBackfill.mockResolvedValue({ status: 'started', startedAt: new Date().toISOString() });
   getFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
   disableFeedSchedule.mockResolvedValue(SCHEDULE_DISABLED);
   enableFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
@@ -134,8 +138,9 @@ describe('<FeedSyncPanel />', () => {
     });
     render(<FeedSyncPanel isAdmin={true} />);
     await waitFor(() => {
-      const btn = screen.getByRole('button', { name: /Syncing/i });
-      expect(btn).toBeDisabled();
+      const btns = screen.getAllByRole('button', { name: /Syncing/i });
+      expect(btns.length).toBeGreaterThan(0);
+      btns.forEach(btn => expect(btn).toBeDisabled());
     });
   });
 
@@ -229,5 +234,46 @@ describe('<FeedSyncPanel />', () => {
     } else {
       expect(toggleBtn).toBeNull();
     }
+  });
+
+  // --- Full NVD backfill button (AC1 frontend) ---
+
+  it('admin sees "Full NVD backfill" button', async () => {
+    render(<FeedSyncPanel isAdmin={true} />);
+    const btn = await screen.findByTestId('full-backfill-btn');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveTextContent(/Full NVD backfill/i);
+    expect(btn).not.toBeDisabled();
+  });
+
+  it('viewer does NOT see "Full NVD backfill" button', async () => {
+    render(<FeedSyncPanel isAdmin={false} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('full-backfill-btn')).not.toBeInTheDocument();
+  });
+
+  it('clicking "Full NVD backfill" calls triggerFullBackfill', async () => {
+    render(<FeedSyncPanel isAdmin={true} />);
+    const btn = await screen.findByTestId('full-backfill-btn');
+    fireEvent.click(btn);
+    await waitFor(() => expect(triggerFullBackfill).toHaveBeenCalledTimes(1));
+    // triggerInitialSync must NOT be called — distinct call path
+    expect(triggerInitialSync).not.toHaveBeenCalled();
+  });
+
+  it('"Full NVD backfill" button is disabled while running', async () => {
+    syncStatus.mockResolvedValue({
+      running: true,
+      startedAt: new Date().toISOString(),
+      lastCompletedAt: null,
+      lastError: null,
+    });
+    render(<FeedSyncPanel isAdmin={true} />);
+    await waitFor(() => {
+      const btn = screen.getByTestId('full-backfill-btn');
+      expect(btn).toBeDisabled();
+    });
   });
 });

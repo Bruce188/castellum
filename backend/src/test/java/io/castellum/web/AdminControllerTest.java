@@ -170,4 +170,75 @@ class AdminControllerTest {
             .andExpect(jsonPath("$.lastCompletedAt").value(org.hamcrest.Matchers.nullValue()))
             .andExpect(jsonPath("$.lastError").value(org.hamcrest.Matchers.nullValue()));
     }
+
+    // ── Full-backfill endpoint tests ──────────────────────────────────────────
+
+    /** AC1: ADMIN POST /full-backfill returns 202 and triggers sync with fullBackfill=true. */
+    @Test
+    void adminPost_fullBackfill_returns202_andTriggersWithFullBackfillFlag() throws Exception {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        when(initialSyncService.trigger(any(InitialSyncRequest.class), anyString()))
+            .thenReturn(new InitialSyncResponse("started", now));
+
+        mvc.perform(post("/api/admin/full-backfill")
+                .contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.status").value("started"));
+
+        verify(initialSyncService).trigger(
+            argThat(req -> req.isFullBackfill()),
+            anyString()
+        );
+    }
+
+    /** AC1: VIEWER cannot access full-backfill endpoint — 403. */
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerPost_fullBackfill_returns403() throws Exception {
+        mvc.perform(post("/api/admin/full-backfill")
+                .contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isForbidden());
+    }
+
+    /** AC1: anonymous cannot access full-backfill endpoint — 401. */
+    @Test
+    void anonymousPost_fullBackfill_returns401() throws Exception {
+        mvc.perform(post("/api/admin/full-backfill")
+                .with(anonymous())
+                .contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isUnauthorized());
+    }
+
+    /** AC1: full-backfill emits an audit row before dispatch. */
+    @Test
+    void adminPost_fullBackfill_auditsBeforeDispatch() throws Exception {
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        when(initialSyncService.trigger(any(InitialSyncRequest.class), anyString()))
+            .thenReturn(new InitialSyncResponse("started", now));
+
+        mvc.perform(post("/api/admin/full-backfill")
+                .contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isAccepted());
+
+        verify(auditService).recordEvent(
+            anyString(),
+            eq("FULL_BACKFILL_TRIGGERED"),
+            eq("initial-sync"),
+            eq("global"),
+            argThat((Object m) -> m instanceof java.util.Map<?,?> map && map.containsKey("fullBackfill"))
+        );
+    }
+
+    /** AC1: already-running response when a sync is in flight. */
+    @Test
+    void adminPost_fullBackfill_alreadyRunning_returns202WithAlreadyRunningStatus() throws Exception {
+        Instant started = Instant.parse("2026-01-01T00:00:00Z");
+        when(initialSyncService.trigger(any(InitialSyncRequest.class), anyString()))
+            .thenReturn(new InitialSyncResponse("already-running", started));
+
+        mvc.perform(post("/api/admin/full-backfill")
+                .contentType(MediaType.APPLICATION_JSON))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.status").value("already-running"));
+    }
 }

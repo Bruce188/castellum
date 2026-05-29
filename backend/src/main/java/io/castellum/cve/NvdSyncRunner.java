@@ -27,6 +27,12 @@ public class NvdSyncRunner implements ApplicationRunner {
         if (!args.containsOption("nvd-sync")) {
             return;
         }
+
+        // --full forces an unconditional EPOCH→now full-corpus backfill,
+        // bypassing the incremental findMaxLastModified path entirely.
+        // Usage: --nvd-sync --full
+        boolean full = args.containsOption("full");
+
         List<String> sinceVals = args.getOptionValues("since");
         List<String> untilVals = args.getOptionValues("until");
         Instant since;
@@ -52,7 +58,12 @@ public class NvdSyncRunner implements ApplicationRunner {
 
         try {
             NvdSyncService.SyncSummary summary;
-            if (since != null) {
+            if (full) {
+                // Explicit full-corpus backfill: EPOCH→now, no incremental short-circuit.
+                // Equivalent to: --since 1970-01-01T00:00:00Z --until <now>
+                log.info("Starting NVD full-corpus backfill (EPOCH→now, bypasses incremental cursor)");
+                summary = syncService.fullBackfillPull();
+            } else if (since != null) {
                 log.info("Starting NVD bulk pull: since={}, until={}", since, until);
                 summary = syncService.bulkPull(since, until);
             } else {

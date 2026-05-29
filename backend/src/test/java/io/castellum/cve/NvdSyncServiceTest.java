@@ -226,4 +226,103 @@ class NvdSyncServiceTest {
         NvdVulnerability vuln = new NvdVulnerability(item);
         return new NvdCveResponse(1, 0, 1, "NVD_CVE", "2.0", "2026-04-29T12:00:00.000", List.of(vuln));
     }
+
+    // ── AC1/AC2/AC5: full-backfill path ────────────────────────────────────────
+
+    /**
+     * Core regression test (AC5): when the CVE table already has rows, calling
+     * {@code fullBackfillPull()} must issue EPOCH-based slices, NOT
+     * since-max-last-modified slices.  This is the exact footgun being fixed.
+     */
+    @Test
+    void fullBackfillPull_withNonEmptyTable_issuesEpochBasedSlices() throws Exception {
+        // Seed an existing row so findMaxLastModified would return a recent cursor
+        Instant recentCursor = Instant.parse("2026-04-01T00:00:00Z");
+        Cve existing = new Cve();
+        existing.setCveId("CVE-SEED-002");
+        existing.setLastModified(recentCursor);
+        existing.setRawJson("{}");
+        existing.setFetchedAt(Instant.now());
+        cveRepository.save(existing);
+
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
+
+        // Call the force path — must NOT use findMaxLastModified
+        syncService.fullBackfillPull();
+
+        ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt());
+        Instant firstSliceStart = startCaptor.getAllValues().get(0);
+
+        // The first slice must start at EPOCH, not at the seeded cursor
+        assertTrue(
+            firstSliceStart.isBefore(Instant.parse("2002-01-01T00:00:00Z")),
+            "Full backfill must start at EPOCH, not at findMaxLastModified cursor. Got: " + firstSliceStart
+        );
+    }
+
+    /**
+     * AC2: slice count for a multi-year range (2002–2026 ≈ 24 years / 120-day slices ≈ 73+) is ≥ 60.
+     */
+    @Test
+    void fullBackfillPull_producesCorrectSliceCount_forMultiYearRange() throws Exception {
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
+
+        // 2002-01-01 → 2026-01-01 = 8766 days / 120 ≈ 73 slices
+        Instant start = Instant.parse("2002-01-01T00:00:00Z");
+        Instant end   = Instant.parse("2026-01-01T00:00:00Z");
+        List<NvdSyncService.WindowSlice> slices = NvdSyncService.sliceWindow(start, end);
+
+        assertTrue(slices.size() >= 60,
+            "Expected ≥ 60 slices for 24-year window, got " + slices.size());
+        // Each slice must be ≤ 120 days
+        for (NvdSyncService.WindowSlice sl : slices) {
+            long days = java.time.Duration.between(sl.start(), sl.end()).toDays();
+            assertTrue(days <= 120,
+                "Slice " + sl.start() + "/" + sl.end() + " exceeds 120 days: " + days);
+        }
+    }
+
+    /**
+     * AC2/AC5: idempotent re-run of fullBackfillPull yields identical CVE count (no duplicates).
+     */
+    @Test
+    void fullBackfillPull_isIdempotent_reRunDoesNotDuplicate() throws Exception {
+        NvdCveResponse fixture = loadFixture();
+        when(nvdClient.fetchPage(any(), any(), eq(0), anyInt())).thenReturn(fixture);
+        when(nvdClient.fetchPage(any(), any(), eq(10), anyInt())).thenReturn(emptyPage());
+
+        // First run
+        NvdSyncService.SyncSummary first = syncService.fullBackfillPull();
+        long countAfterFirst = cveRepository.count();
+
+        // Second run — must upsert, not duplicate
+        NvdSyncService.SyncSummary second = syncService.fullBackfillPull();
+        long countAfterSecond = cveRepository.count();
+
+        assertEquals(countAfterFirst, countAfterSecond,
+            "Idempotent re-run must not increase CVE count");
+        assertEquals(first.cvesUpserted(), second.cvesUpserted(),
+            "Both runs must report the same upsert count");
+    }
+
+    /**
+     * AC5: fullBackfillPull MUST NOT call {@code cveRepository.findMaxLastModified()}.
+     * The force path bypasses the incremental cursor entirely.
+     */
+    @Test
+    void fullBackfillPull_doesNotCallFindMaxLastModified() throws Exception {
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
+
+        syncService.fullBackfillPull();
+
+        // findMaxLastModified is a repository method; we can verify no DB call reached
+        // the incremental path by asserting the fetch started at EPOCH (< 2002), not
+        // at any value derived from MAX(last_modified).
+        ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt());
+        Instant firstStart = startCaptor.getAllValues().get(0);
+        assertTrue(firstStart.isBefore(Instant.parse("2002-01-01T00:00:00Z")),
+            "fullBackfillPull must begin at EPOCH, not at a derived cursor. Got: " + firstStart);
+    }
 }

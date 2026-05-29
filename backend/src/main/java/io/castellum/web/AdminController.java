@@ -68,4 +68,31 @@ public class AdminController {
         InitialSyncResponse response = initialSyncService.trigger(req, actor);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
+
+    /**
+     * Triggers a FULL corpus backfill from EPOCH to now.
+     *
+     * <p>ADMIN-only. Unlike the general {@code /initial-sync} endpoint this path
+     * unconditionally forces the entire historical window — the
+     * {@code findMaxLastModified} short-circuit is never applied even when the CVE
+     * table already contains rows.  Returns 202 immediately; the actual multi-year
+     * ingest runs on the {@code initialSyncTaskExecutor} thread pool.
+     *
+     * <p>Operational trigger:
+     * {@code POST /api/admin/full-backfill}
+     * with an ADMIN-role JWT bearer token and no request body (or empty JSON body).
+     */
+    @PostMapping("/full-backfill")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<InitialSyncResponse> triggerFullBackfill() {
+
+        String actor = SecurityContextHolder.getContext().getAuthentication().getName();
+        InitialSyncRequest req = new InitialSyncRequest(null, null, true);
+
+        auditService.recordEvent(actor, "FULL_BACKFILL_TRIGGERED", "initial-sync", "global",
+            Map.of("since", "EPOCH", "until", "now", "fullBackfill", "true"));
+
+        InitialSyncResponse response = initialSyncService.trigger(req, actor);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+    }
 }

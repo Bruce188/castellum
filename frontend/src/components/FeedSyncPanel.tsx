@@ -96,6 +96,20 @@ export function FeedSyncPanel({ isAdmin }: Props) {
     }
   }
 
+  async function handleFullBackfill() {
+    if (!isAdmin || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.triggerFullBackfill();
+      // Start polling for completion — same status endpoint tracks progress
+      pollRef.current = setInterval(loadStatus, POLL_INTERVAL_MS);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'full backfill failed');
+      setSubmitting(false);
+    }
+  }
+
   const running = status?.running || submitting;
 
   return (
@@ -182,17 +196,29 @@ export function FeedSyncPanel({ isAdmin }: Props) {
         </div>
       )}
 
-      {/* Trigger button */}
-      <div className="flex items-center gap-3">
+      {/* Trigger buttons */}
+      <div className="flex items-center gap-3 flex-wrap">
         {isAdmin ? (
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={running}
-            className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed"
-          >
-            {running ? 'Syncing…' : 'Sync feeds'}
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleSync}
+              disabled={running}
+              className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed"
+            >
+              {running ? 'Syncing…' : 'Sync feeds'}
+            </button>
+            <button
+              type="button"
+              data-testid="full-backfill-btn"
+              onClick={handleFullBackfill}
+              disabled={running}
+              title="Force a full historical NVD corpus backfill (EPOCH→now). Bypasses the incremental cursor. Takes tens of minutes."
+              className="px-3 py-1 text-sm rounded bg-amber-600 text-white hover:bg-amber-700 disabled:bg-amber-300 disabled:cursor-not-allowed"
+            >
+              {running ? 'Syncing…' : 'Full NVD backfill'}
+            </button>
+          </>
         ) : (
           <button
             type="button"

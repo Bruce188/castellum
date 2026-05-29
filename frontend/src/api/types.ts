@@ -231,7 +231,12 @@ export interface FeedsStatusDto {
 export interface InitialSyncRequest {
   since?: string;
   until?: string;
+  /** When true, forces a full EPOCH→now backfill bypassing the incremental cursor. */
+  fullBackfill?: boolean;
 }
+
+/** Response for the full-backfill trigger endpoint. Same shape as InitialSyncResponse. */
+export type FullBackfillResponse = InitialSyncResponse;
 
 export interface InitialSyncResponse {
   status: 'started' | 'already-running';

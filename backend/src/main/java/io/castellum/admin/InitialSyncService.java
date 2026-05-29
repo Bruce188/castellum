@@ -175,16 +175,26 @@ public class InitialSyncService {
         }
     }
 
-    /** Runs NVD bulk pull, returning the failure message or null on success. */
+    /** Runs NVD pull, returning the failure message or null on success.
+     *
+     * <p>When {@code req.isFullBackfill()} is {@code true} the
+     * {@link io.castellum.cve.NvdSyncService#fullBackfillPull()} path is taken,
+     * which issues an unconditional EPOCH→now window regardless of existing rows —
+     * the incremental {@code findMaxLastModified} shortcut is never consulted.
+     */
     private String runNvd(InitialSyncRequest req) {
         try {
-            nvdSyncService.bulkPull(req.effectiveSince(), req.effectiveUntil());
+            if (req.isFullBackfill()) {
+                nvdSyncService.fullBackfillPull();
+            } else {
+                nvdSyncService.bulkPull(req.effectiveSince(), req.effectiveUntil());
+            }
             return null;
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.warn("Initial sync: NVD bulk pull failed — EPSS+KEV will still run: {}", e.getMessage(), e);
+            log.warn("Initial sync: NVD pull failed — EPSS+KEV will still run: {}", e.getMessage(), e);
             return e.getMessage();
         }
     }
@@ -244,13 +254,18 @@ public class InitialSyncService {
             return;
         }
 
-        // No COMPLETED row — check for TRIGGERED (R3: interrupted detection)
+        // No COMPLETED row — check for TRIGGERED or FULL_BACKFILL_TRIGGERED (R3: interrupted detection)
         var triggeredSpec = AuditQuerySpecifications.build(
                 new AuditFilter(null, null, "INITIAL_SYNC_TRIGGERED", null, null));
         Page<AuditLog> triggeredPage = auditLogRepository.findAll(
                 triggeredSpec, PageRequest.of(0, 1, Sort.by(Sort.Direction.DESC, "occurredAt")));
 
-        if (!triggeredPage.isEmpty()) {
+        var fullBackfillTriggeredSpec = AuditQuerySpecifications.build(
+                new AuditFilter(null, null, "FULL_BACKFILL_TRIGGERED", null, null));
+        Page<AuditLog> fullBackfillTriggeredPage = auditLogRepository.findAll(
+                fullBackfillTriggeredSpec, PageRequest.of(0, 1, Sort.by(Sort.Direction.DESC, "occurredAt")));
+
+        if (!triggeredPage.isEmpty() || !fullBackfillTriggeredPage.isEmpty()) {
             // Sync was triggered but never completed — interrupted
             lastCompletedAt = null;
             lastError = "interrupted";
