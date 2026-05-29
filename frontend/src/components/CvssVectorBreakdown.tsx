@@ -39,7 +39,10 @@ export function CvssVectorBreakdown({ vector, score }: Props) {
           </div>
         ))}
       </dl>
-      <div className="mt-2 font-mono text-gray-400 break-all">{vector}</div>
+      <div data-testid="cvss-raw-vector" className="mt-2 text-gray-400">
+        <span className="text-xs mr-1">Raw vector</span>
+        <span className="font-mono text-xs break-all">{vector}</span>
+      </div>
     </div>
   );
 }
