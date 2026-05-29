@@ -121,7 +121,7 @@ export function ScanDetailPage() {
         <dt className="text-gray-500">Type</dt>
         <dd>{summary.scanType}</dd>
         <dt className="text-gray-500">Status</dt>
-        <dd>{summary.status}</dd>
+        <dd data-testid="scan-status">{summary.status}</dd>
         <dt className="text-gray-500">Requested at</dt>
         <dd>{summary.requestedAt}</dd>
         <dt className="text-gray-500">Completed at</dt>
