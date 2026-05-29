@@ -188,12 +188,12 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(10L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
 
         service.executeAsync(4L);
 
         verify(deviceUpsertService).upsert(argThat(d ->
-            "10.0.1.5".equals(d.ipAddress()) && "myhost".equals(d.hostname())));
+            "10.0.1.5".equals(d.ipAddress()) && "myhost".equals(d.hostname())), eq(4L));
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
     }
 
@@ -224,12 +224,12 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(50L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
 
         service.executeAsync(5L);
 
         // The known-up host IS upserted (no phantom suppression on the alive-host path).
-        verify(deviceUpsertService).upsert(argThat(d -> "10.0.2.7".equals(d.ipAddress())));
+        verify(deviceUpsertService).upsert(argThat(d -> "10.0.2.7".equals(d.ipAddress())), eq(5L));
         // No services to persist.
         verify(networkServiceRepository, never()).save(any());
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
@@ -253,7 +253,7 @@ class ScanExecutionServiceTest {
         verify(nmapRunner, never()).run(anyList(), any(ScanType.class));
         // Parser never invoked; no devices/services persisted.
         verify(nmapOutputParser, never()).parse(anyString(), any(ScanType.class));
-        verify(deviceUpsertService, never()).upsert(any());
+        verify(deviceUpsertService, never()).upsert(any(), any());
         verify(networkServiceRepository, never()).save(any());
         // Still a clean success.
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
@@ -288,13 +288,13 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(20L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
         when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(20L, 22, "tcp"))
             .thenReturn(Optional.empty());
 
         service.executeAsync(6L);
 
-        verify(deviceUpsertService).upsert(argThat(d -> "10.0.3.7".equals(d.ipAddress())));
+        verify(deviceUpsertService).upsert(argThat(d -> "10.0.3.7".equals(d.ipAddress())), eq(6L));
         verify(networkServiceRepository).save(argThat(ns ->
             ns.getPort() == 22
                 // product is stored lowercased; name is the human-readable display form
@@ -328,7 +328,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(30L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
 
         service.executeAsync(7L);
 
@@ -361,7 +361,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(31L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
 
         service.executeAsync(8L);
 
@@ -396,7 +396,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(32L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
         when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(32L, 445, "tcp"))
             .thenReturn(Optional.empty());
 
@@ -430,7 +430,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(40L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
         when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(40L, 3306, "tcp"))
             .thenReturn(Optional.empty());
 
@@ -472,7 +472,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(41L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
         when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(41L, 9999, "tcp"))
             .thenReturn(Optional.empty());
 
@@ -514,7 +514,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(50L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
         when(networkServiceRepository.findByDeviceIdAndPortAndProtocol(50L, 5432, "tcp"))
             .thenReturn(Optional.empty());
 
@@ -554,7 +554,7 @@ class ScanExecutionServiceTest {
 
         Device device = new Device();
         device.setId(42L);
-        when(deviceUpsertService.upsert(any())).thenReturn(device);
+        when(deviceUpsertService.upsert(any(), any())).thenReturn(device);
 
         // Existing service row was created by Docker discovery with generic image label
         io.castellum.domain.NetworkService existing = new io.castellum.domain.NetworkService();
