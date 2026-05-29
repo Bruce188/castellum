@@ -329,6 +329,44 @@ class InitialSyncServiceTest {
                 "lastCompletedAt must be null when sync was interrupted");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncStatus_afterRestart_fullBackfillTriggeredButNoCompletion_reportsInterrupted() throws Exception {
+        // An interrupted full-backfill (FULL_BACKFILL_TRIGGERED with no INITIAL_SYNC_COMPLETED)
+        // must reconstruct as "interrupted", not "never synced".
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(10);
+        executor.setThreadNamePrefix("test-fb-interrupted-");
+        executor.initialize();
+
+        AuditLogRepository freshRepo = mock(AuditLogRepository.class);
+        AuditService freshAuditService = mock(AuditService.class);
+
+        AuditLog fullBackfillTriggeredRow = new AuditLog(
+                Instant.parse("2026-05-18T07:00:00Z"), "admin", "FULL_BACKFILL_TRIGGERED",
+                "initial-sync", "global", "{\"fullBackfill\":true}");
+        Page<AuditLog> emptyPage = new PageImpl<>(Collections.emptyList());
+        Page<AuditLog> fullBackfillTriggeredPage = new PageImpl<>(List.of(fullBackfillTriggeredRow));
+
+        // Call order: (1) COMPLETED query → empty, (2) INITIAL_SYNC_TRIGGERED → empty,
+        // (3) FULL_BACKFILL_TRIGGERED → has a row
+        when(freshRepo.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(emptyPage)               // first call: COMPLETED query → empty
+                .thenReturn(emptyPage)               // second call: INITIAL_SYNC_TRIGGERED → empty
+                .thenReturn(fullBackfillTriggeredPage); // third call: FULL_BACKFILL_TRIGGERED → row
+
+        InitialSyncService freshService = new InitialSyncService(
+                executor, nvdSyncService, epssIngestionService, kevIngestionService,
+                freshAuditService, freshRepo, mock(io.castellum.risk.RiskCacheEvictor.class));
+
+        assertEquals("interrupted", freshService.getLastError(),
+                "lastError must be 'interrupted' when full-backfill was triggered but never completed");
+        assertNull(freshService.getLastCompletedAt(),
+                "lastCompletedAt must be null when full-backfill was interrupted");
+    }
+
     // ── AC1/AC3: full-backfill routing tests ──────────────────────────────────
 
     /**

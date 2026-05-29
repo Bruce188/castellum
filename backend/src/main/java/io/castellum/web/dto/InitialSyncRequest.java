@@ -15,7 +15,7 @@ import java.time.Instant;
  * intent of pulling the entire NVD corpus.
  *
  * <p>{@code fullBackfill} — when {@code true}, the NVD sync path MUST call
- * {@code bulkPull(EPOCH, now)} unconditionally, bypassing any
+ * {@code fullBackfillPull()} (EPOCH→now) unconditionally, bypassing any
  * {@code findMaxLastModified} short-circuit.  Defaults to {@code false} so that
  * existing callers that omit the field retain their current behaviour.
  */

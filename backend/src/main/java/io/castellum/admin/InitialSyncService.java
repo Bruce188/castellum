@@ -254,13 +254,18 @@ public class InitialSyncService {
             return;
         }
 
-        // No COMPLETED row — check for TRIGGERED (R3: interrupted detection)
+        // No COMPLETED row — check for TRIGGERED or FULL_BACKFILL_TRIGGERED (R3: interrupted detection)
         var triggeredSpec = AuditQuerySpecifications.build(
                 new AuditFilter(null, null, "INITIAL_SYNC_TRIGGERED", null, null));
         Page<AuditLog> triggeredPage = auditLogRepository.findAll(
                 triggeredSpec, PageRequest.of(0, 1, Sort.by(Sort.Direction.DESC, "occurredAt")));
 
-        if (!triggeredPage.isEmpty()) {
+        var fullBackfillTriggeredSpec = AuditQuerySpecifications.build(
+                new AuditFilter(null, null, "FULL_BACKFILL_TRIGGERED", null, null));
+        Page<AuditLog> fullBackfillTriggeredPage = auditLogRepository.findAll(
+                fullBackfillTriggeredSpec, PageRequest.of(0, 1, Sort.by(Sort.Direction.DESC, "occurredAt")));
+
+        if (!triggeredPage.isEmpty() || !fullBackfillTriggeredPage.isEmpty()) {
             // Sync was triggered but never completed — interrupted
             lastCompletedAt = null;
             lastError = "interrupted";

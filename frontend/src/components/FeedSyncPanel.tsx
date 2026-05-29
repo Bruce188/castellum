@@ -213,7 +213,7 @@ export function FeedSyncPanel({ isAdmin }: Props) {
               data-testid="full-backfill-btn"
               onClick={handleFullBackfill}
               disabled={running}
-              title="Force a full historical NVD corpus backfill (EPOCH→now). Bypasses the incremental cursor. Takes ~40 min."
+              title="Force a full historical NVD corpus backfill (EPOCH→now). Bypasses the incremental cursor. Takes tens of minutes."
               className="px-3 py-1 text-sm rounded bg-amber-600 text-white hover:bg-amber-700 disabled:bg-amber-300 disabled:cursor-not-allowed"
             >
               {running ? 'Syncing…' : 'Full NVD backfill'}
