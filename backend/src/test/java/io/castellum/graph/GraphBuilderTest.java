@@ -378,6 +378,73 @@ class GraphBuilderTest {
         assertThat(linkLocalHasGatewayEdge).isFalse();
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // AC3 — pivot detection by IP only; hostname string match removed
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * AC3: pivot is detected by the configured dockerHostIp alone. A HOME device at that IP
+     * with a null hostname (real-world post-fix state) must still work as the pivot.
+     */
+    @Test
+    void gatewayPivot_detectedByIp_hostnameNull() {
+        // pivot: HOME device at docker-host IP, hostname = null (bridge alias was filtered)
+        Device pivot = device(5L, "192.168.68.51");
+        // pivot has no hostname set (remains null from device())
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(pivot, docker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPivot = new DeviceVertex(5L, "192.168.68.51");
+        DeviceVertex vDocker = new DeviceVertex(4L, "172.17.0.2");
+
+        assertThat(g.getEdge(vPivot, vDocker))
+            .as("pivot detected by IP with null hostname must still bridge docker")
+            .isNotNull();
+        assertThat(g.getEdge(vPivot, vDocker).getType()).isEqualTo(EdgeType.GATEWAY_PIVOT);
+    }
+
+    /**
+     * AC3: pivot is detected by IP even when it has a real hostname (not the bridge alias).
+     */
+    @Test
+    void gatewayPivot_detectedByIp_hostnameRealName() {
+        Device pivot = homeDeviceWithHostname(5L, "192.168.68.51", "operators-laptop");
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(pivot, docker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPivot = new DeviceVertex(5L, "192.168.68.51");
+        DeviceVertex vDocker = new DeviceVertex(4L, "172.17.0.2");
+
+        assertThat(g.getEdge(vPivot, vDocker))
+            .as("pivot with real hostname still bridges docker")
+            .isNotNull();
+    }
+
+    /**
+     * AC3 / AC5(c): a HOME device whose hostname is "host.docker.internal" but whose IP does NOT
+     * match the configured docker-host IP must NOT be treated as a pivot.
+     * (Hostname-string match is removed; IP is the sole criterion.)
+     */
+    @Test
+    void gatewayPivot_hostnameAliasAloneIsNotSufficient_ipMustMatch() {
+        // device with the alias hostname but a different IP
+        Device wrongIp = homeDeviceWithHostname(5L, "192.168.68.99", "host.docker.internal");
+        Device docker = dockerDevice(4L, "172.17.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(wrongIp, docker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        boolean hasGatewayEdge = g.edgeSet().stream()
+            .anyMatch(e -> e.getType() == EdgeType.GATEWAY_PIVOT);
+        assertThat(hasGatewayEdge)
+            .as("hostname alias alone must not qualify as docker-host pivot")
+            .isFalse();
+    }
+
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
         return org.assertj.core.data.Offset.offset(tolerance);
     }

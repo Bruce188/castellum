@@ -56,11 +56,13 @@ describe('buildGatewayEdges', () => {
     expect(gatewayEdges.every(e => e.data.gatewayIp === '192.168.68.5')).toBe(true);
   });
 
-  it('mixed_scope_with_docker_host_hostname', () => {
+  it('mixed_scope_with_docker_host_at_default_ip', () => {
+    // Device 3 at 192.168.68.51 (default docker-host IP) — detected by IP, not hostname.
+    // Hostname field is null to reflect the post-fix backend behavior (alias filtered).
     const devices: Device[] = [
       makeDevice(1, '192.168.68.1', 'HOME'),
       makeDevice(2, '192.168.68.50', 'HOME'),
-      makeDevice(3, '192.168.68.51', 'HOME', 'host.docker.internal'),
+      makeDevice(3, '192.168.68.51', 'HOME', null),
       makeDevice(4, '172.18.0.2', 'DOCKER_BRIDGE'),
       makeDevice(5, '172.18.0.3', 'DOCKER_BRIDGE'),
     ];
@@ -115,8 +117,9 @@ describe('buildGatewayEdges', () => {
   });
 
   it('docker_bridge_singleton_does_not_double_emit_isolated', () => {
+    // Docker host at default IP (192.168.68.51), null hostname (alias filtered by backend).
     const devices = [
-      makeDevice(1, '192.168.68.51', 'HOME', 'host.docker.internal'),
+      makeDevice(1, '192.168.68.51', 'HOME', null),
       makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
     ];
     const edges = buildGatewayEdges(devices);
@@ -144,5 +147,56 @@ describe('buildGatewayEdges', () => {
       expect(dockerEdges[0].data.source).toBe('1');
       expect(dockerEdges[0].data.target).toBe('2');
     });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // AC4 — docker-host detection must NOT rely on hostname string match
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('ac4_docker_host_with_alias_hostname_detected_by_ip_not_hostname', () => {
+    // Post-fix: device at docker-host IP with a real hostname (alias was filtered by backend)
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.51', 'HOME', 'operators-laptop'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+    ];
+    const edges = buildGatewayEdges(devices);
+    const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+    expect(dockerEdges).toHaveLength(1);
+    expect(dockerEdges[0].data.source).toBe('1');
+  });
+
+  it('ac4_docker_host_null_hostname_detected_by_ip', () => {
+    // Bridge alias was filtered → hostname is null; IP-based detection must still work
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.51', 'HOME', null),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+    ];
+    const edges = buildGatewayEdges(devices);
+    const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+    expect(dockerEdges).toHaveLength(1);
+    expect(dockerEdges[0].data.source).toBe('1');
+  });
+
+  it('ac4_alias_hostname_on_wrong_ip_is_not_docker_host', () => {
+    // A device carrying the alias but NOT at the docker-host IP must not be treated as pivot.
+    // With IP-only detection and default docker-host IP (192.168.68.51), this device (99) misses.
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.99', 'HOME', 'host.docker.internal'),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+    ];
+    const edges = buildGatewayEdges(devices);
+    const dockerEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+    expect(dockerEdges).toHaveLength(0);
+  });
+
+  it('ac4_docker_bridge_singleton_with_ip_only_host_does_not_emit_isolated', () => {
+    // IP-only host detection: device 1 at 192.168.68.51 (no hostname) should rescue device 2
+    const devices = [
+      makeDevice(1, '192.168.68.51', 'HOME', null),
+      makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+    ];
+    const edges = buildGatewayEdges(devices);
+    const isolated = edges.filter(e => e.data.kind === 'isolated');
+    expect(isolated.map(e => e.data.source)).not.toContain('2');
   });
 });
