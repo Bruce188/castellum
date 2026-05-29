@@ -1069,7 +1069,10 @@ describe('<ThreatsDashboard />', () => {
     await screen.findByTestId('device-detail-panel');
 
     // Decommission button must NOT be visible to viewers
-    expect(screen.queryByTestId('decommission-btn')).toBeNull();
+    expect(screen.queryByRole('button', { name: /decommission/i })).toBeNull();
+    // Inline-edit affordances must also be absent for viewers
+    expect(screen.queryByRole('button', { name: /edit hostname/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /edit criticality/i })).toBeNull();
   });
 
   it('cveDetail_secondCveClick_swapsDrawerContent', async () => {
@@ -1144,6 +1147,35 @@ describe('<ThreatsDashboard />', () => {
     await waitFor(() => expect(screen.getByTestId('cve-detail-panel')).toHaveTextContent('CVE-2024-BBB'));
     // Only one panel should exist
     expect(screen.getAllByTestId('cve-detail-panel')).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // N4 — device-detail fetch failure surfaces inline error notice
+  // ---------------------------------------------------------------------------
+
+  it('deviceDetail_fetchFailure_rendersInlineErrorNotice', async () => {
+    const deviceId = 80;
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId, hostname: 'host-80', ipAddress: '10.0.0.80', criticality: 'HIGH', score: '8.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    // All three detail fetches reject
+    (api.getDevice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network error'));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network error'));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network error'));
+
+    renderWith();
+    fireEvent.click(await screen.findByTestId(`threats-row-${deviceId}`));
+
+    // Error notice visible inside the expanded row, DeviceDetailPanel absent
+    const notice = await screen.findByTestId('device-detail-error');
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/Could not load device detail/i);
+    expect(screen.queryByTestId('device-detail-panel')).toBeNull();
   });
 });
 

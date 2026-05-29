@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Criticality, Device, DeviceRiskDto, FeedsStatusDto, NetworkService, TopRiskDeviceDto } from '../api/types';
@@ -150,20 +150,31 @@ export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}
     });
   };
 
+  const [deviceDetailError, setDeviceDetailError] = useState(false);
+  // Monotonic counter used to discard resolutions from superseded requests (rapid
+  // row switching). Captures token at call start; ignores if a newer fetch fired.
+  const fetchTokenRef = useRef(0);
+
   // Fetch device+risk+services lazily when a row is opened.
   const fetchDeviceDetail = useCallback(async (deviceId: number) => {
+    fetchTokenRef.current += 1;
+    const myToken = fetchTokenRef.current;
+    setDeviceDetailError(false);
     try {
       const [device, risk, services] = await Promise.all([
         api.getDevice(deviceId),
         api.deviceRisk(deviceId),
         api.listServicesForDevice(deviceId),
       ]);
+      if (myToken !== fetchTokenRef.current) return; // superseded
       setDeviceDetail({ device, risk, services });
       setDeviceDetailVisible(true);
     } catch {
-      // On error keep any prior detail hidden — no crash, no blank stale data.
+      if (myToken !== fetchTokenRef.current) return; // superseded
+      // Surface the failure inline so the operator can retry without losing context.
       setDeviceDetail(null);
       setDeviceDetailVisible(false);
+      setDeviceDetailError(true);
     }
   }, []);
 
@@ -176,6 +187,7 @@ export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}
         // Row collapsed — hide device detail too.
         setDeviceDetailVisible(false);
         setDeviceDetail(null);
+        setDeviceDetailError(false);
       } else {
         // Row opened (or switched) — trigger lazy fetch.
         void fetchDeviceDetail(next);
@@ -429,12 +441,14 @@ export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}
                   <tr data-testid={`threats-related-panel-${d.deviceId}`}>
                     <td colSpan={5} className="p-0">
                       {/* Inline device detail: rendered above related CVEs so the operator
-                          sees device context first. The fixed right-0 DeviceDetailPanel
-                          drawer (used on Topology) would collide with the CVE detail drawer,
-                          so we render it here in normal document flow instead. */}
+                          sees device context first. Uses variant="inline" so the panel
+                          renders in normal document flow rather than as a fixed-position
+                          overlay — the 'drawer' default would pin to the viewport at the
+                          same coordinates as the F7 CveDetailPanel drawer (both z-20). */}
                       {deviceDetailVisible && deviceDetail && (
                         <div className="border-b border-gray-200">
                           <DeviceDetailPanel
+                            variant="inline"
                             device={deviceDetail.device}
                             risk={deviceDetail.risk}
                             services={deviceDetail.services}
@@ -442,6 +456,14 @@ export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}
                             onClose={() => setDeviceDetailVisible(false)}
                             onDeviceMutated={() => void fetchDeviceDetail(d.deviceId)}
                           />
+                        </div>
+                      )}
+                      {deviceDetailError && !deviceDetailVisible && (
+                        <div
+                          data-testid="device-detail-error"
+                          className="px-4 py-2 text-sm text-red-600 bg-red-50 border-b border-red-100"
+                        >
+                          Could not load device detail — retry
                         </div>
                       )}
                       <RelatedCvesPanel

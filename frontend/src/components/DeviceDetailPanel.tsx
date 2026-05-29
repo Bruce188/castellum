@@ -17,9 +17,18 @@ interface Props {
   isAdmin?: boolean;
   /** Called after a successful PUT/DELETE so the parent can refetch its device list. */
   onDeviceMutated?: () => void;
+  /**
+   * Rendering variant.
+   *
+   * - `'drawer'` (default): fixed right-side viewport overlay used by TopologyPage.
+   * - `'inline'`: in-flow element with no fixed positioning, for use inside a table
+   *   row (e.g. ThreatsDashboard) where a viewport overlay would collide with the
+   *   F7 CveDetailPanel drawer sharing the same coordinates and z-index.
+   */
+  variant?: 'drawer' | 'inline';
 }
 
-export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = false, onDeviceMutated }: Props) {
+export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = false, onDeviceMutated, variant = 'drawer' }: Props) {
   if (device === null) return null;
 
   const score = risk ? Number(risk.score) : null;
@@ -44,13 +53,17 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
     onClose();
   }
 
+  const rootClassName = variant === 'inline'
+    ? 'relative w-full bg-white p-4 border-l-2 border-gray-200 overflow-y-auto'
+    // z-20 lifts the panel above the TopologyLegend (z-10), which is pinned to
+    // the same right edge; without it the legend floats on top of the panel
+    // header when a node is selected.
+    : 'fixed right-0 top-0 z-20 h-screen w-96 bg-white shadow-lg overflow-y-auto p-4 border-l border-gray-200';
+
   return (
     <aside
       data-testid="device-detail-panel"
-      // z-20 lifts the panel above the TopologyLegend (z-10), which is pinned to
-      // the same right edge; without it the legend floats on top of the panel
-      // header when a node is selected.
-      className="fixed right-0 top-0 z-20 h-screen w-96 bg-white shadow-lg overflow-y-auto p-4 border-l border-gray-200"
+      className={rootClassName}
     >
       <header className="flex items-center justify-between mb-4">
         <div>

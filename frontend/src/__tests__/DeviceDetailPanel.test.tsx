@@ -321,4 +321,26 @@ describe('<DeviceDetailPanel />', () => {
     // no product → falls back to name
     expect(screen.getByText('http')).toBeInTheDocument();
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // variant prop — B1 regression guard
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('variant=drawer (default): root aside carries fixed/right-0 classes', () => {
+    const { getByTestId } = render(
+      <DeviceDetailPanel device={device} risk={risk} services={[]} onClose={() => {}} />
+    );
+    const aside = getByTestId('device-detail-panel');
+    expect(aside.className).toMatch(/\bfixed\b/);
+    expect(aside.className).toMatch(/\bright-0\b/);
+  });
+
+  it('variant=inline: root aside does NOT carry fixed or right-0 classes', () => {
+    const { getByTestId } = render(
+      <DeviceDetailPanel device={device} risk={risk} services={[]} onClose={() => {}} variant="inline" />
+    );
+    const aside = getByTestId('device-detail-panel');
+    expect(aside.className).not.toMatch(/\bfixed\b/);
+    expect(aside.className).not.toMatch(/\bright-0\b/);
+  });
 });
