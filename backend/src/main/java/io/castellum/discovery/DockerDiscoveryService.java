@@ -102,9 +102,11 @@ public class DockerDiscoveryService {
                 log.debug("Skipping container '{}' — no network attachment with a usable IP", c.name());
                 continue;
             }
-            DiscoveryScope scope = c.publishesHostPort()
-                ? DiscoveryScope.DOCKER_BRIDGE
-                : DiscoveryScope.HOME;
+            // AC2: Docker discovery is the authoritative source for scope.
+            // ALL discovered containers are DOCKER_BRIDGE regardless of whether they
+            // publish a host port. Custom docker networks (172.20+, 172.21+, …) would
+            // be mis-classified HOME by the IP-range heuristic; Docker source wins.
+            DiscoveryScope scope = DiscoveryScope.DOCKER_BRIDGE;
             Discovery disc = new Discovery(
                 primary.containerIp(),
                 null,                       // docker inspect carries no host-relevant MAC for topology

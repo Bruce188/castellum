@@ -5,6 +5,8 @@ import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
+import io.castellum.discovery.Discovery;
+import io.castellum.discovery.DiscoverySource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -113,21 +115,23 @@ class DockerDiscoveryServiceTest {
     void discover_internalOnlyContainer_mappedToHome() throws Exception {
         newService(fixture("inspect-reference.json"), List.of("c3")).discover();
 
-        // pingpay-db exposes 3306 internal-only → HOME (NOT bridged to host)
+        // pingpay-db exposes 3306 internal-only — AC2: ALL docker containers → DOCKER_BRIDGE
         Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
         assertThat(db.getHostname()).isEqualTo("pingpay-db");
-        assertThat(db.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(db.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
     }
 
     @Test
     void discover_internalContainerOn172_18_notMisclassifiedByIpRange() throws Exception {
         // Regression guard: the IP-range classifier maps 172.18.x → DOCKER_BRIDGE, but the
-        // internal-only db must be HOME. The explicit-scope upsert path overrides the classifier.
+        // explicit-scope upsert path is authoritative. AC2: all docker containers → DOCKER_BRIDGE
+        // regardless of whether a host port is published. The classifier is never consulted for
+        // docker-discovered containers.
         newService(fixture("inspect-reference.json"), List.of("c3")).discover();
         Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
         assertThat(db.getDiscoveryScope())
-            .as("internal-only container on a docker-bridge subnet must be HOME, not DOCKER_BRIDGE")
-            .isEqualTo(DiscoveryScope.HOME);
+            .as("docker-discovered container must be DOCKER_BRIDGE (explicit scope path, not IP classifier)")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
     }
 
     @Test
@@ -156,9 +160,92 @@ class DockerDiscoveryServiceTest {
         assertThat(kong.getHostname()).isEqualTo("supabase_kong_pingpay");
         assertThat(kong.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
 
-        // storage is internal-only → HOME
+        // storage is internal-only — AC2: still DOCKER_BRIDGE (not HOME)
         Device storage = repo.findByIpAddress("172.19.0.8").orElseThrow();
-        assertThat(storage.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(storage.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+    }
+
+    // ── AC1: every docker-discovered container gets os = "Linux" ──────────────────────────────
+
+    @Test
+    void discover_container_hasOsLinux() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c1")).discover();
+
+        Device frontend = repo.findByIpAddress("172.18.0.4").orElseThrow();
+        assertThat(frontend.getOsName())
+            .as("docker container must have os='Linux'")
+            .isEqualTo("Linux");
+    }
+
+    @Test
+    void discover_internalOnlyContainer_hasOsLinux() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.getOsName())
+            .as("internal-only container must still have os='Linux'")
+            .isEqualTo("Linux");
+    }
+
+    // ── AC2: ALL docker-discovered containers → DOCKER_BRIDGE regardless of host-port ─────────
+
+    @Test
+    void discover_internalOnlyContainer_isDockerBridge() throws Exception {
+        // pingpay-db exposes 3306 internally only — no host port
+        // AC2: Docker source is authoritative → DOCKER_BRIDGE (not HOME)
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.getDiscoveryScope())
+            .as("internal-only container must be DOCKER_BRIDGE (Docker source authoritative)")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+    }
+
+    @Test
+    void discover_containerOnCustomNetwork_172_21_isDockerBridge() throws Exception {
+        // pingpay-db-custom on 172.21.0.3 — custom docker network, no host port
+        // AC2: custom network must still → DOCKER_BRIDGE (not HOME via IP-range heuristic)
+        newService(fixture("inspect-custom-network.json"), List.of("c9")).discover();
+
+        Device db = repo.findByIpAddress("172.21.0.3").orElseThrow();
+        assertThat(db.getDiscoveryScope())
+            .as("container on custom 172.21.x network must be DOCKER_BRIDGE, not HOME")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+        assertThat(db.getOsName()).isEqualTo("Linux");
+    }
+
+    // ── AC3: Docker scope is not downgraded by a passive (upsert) observation ─────────────────
+
+    @Test
+    void discover_thenPassiveObservation_scopeNotDowngradedToHome() throws Exception {
+        // 1. Docker discovery seeds the container as DOCKER_BRIDGE
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+
+        // 2. A passive ARP sweep re-observes the same IP — must NOT overwrite to HOME
+        Discovery passive = new Discovery(
+            "172.18.0.2", "02:42:ac:12:00:02", null, DiscoverySource.ARP, FIXED_NOW.plusSeconds(60), null);
+        upsertService.upsert(passive);
+
+        Device after = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(after.getDiscoveryScope())
+            .as("passive ARP must not downgrade DOCKER_BRIDGE to HOME")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+    }
+
+    // ── AC5: non-container HOME devices unaffected ────────────────────────────────────────────
+
+    @Test
+    void discover_syntheticGateway_isHomeAndHasNoOs() throws Exception {
+        // Synthetic gateways are HOME-scope and should NOT get os="Linux"
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        Device gw = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(gw.getDiscoveryScope()).isEqualTo(DiscoveryScope.HOME);
+        assertThat(gw.getOsName())
+            .as("synthetic gateway is not a container — must have null osName")
+            .isNull();
     }
 
     // -----------------------------------------------------------------------
@@ -179,12 +266,28 @@ class DockerDiscoveryServiceTest {
 
     @Test
     void discover_containerStartsPublishing_scopeFlipsHomeToDockerBridge() throws Exception {
-        // First run: db is internal-only → HOME
-        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+        // AC2: ALL containers are DOCKER_BRIDGE from first discovery — the scope is always
+        // DOCKER_BRIDGE regardless of whether a host port is published.
+        String internalOnly = """
+            [
+              {
+                "Id": "c3",
+                "Name": "/pingpay-db",
+                "State": { "Status": "running", "Running": true },
+                "Config": { "Image": "postgres:15.6" },
+                "NetworkSettings": {
+                  "Ports": { "3306/tcp": null },
+                  "Networks": { "pingpay_default": { "IPAddress": "172.18.0.2", "Gateway": "172.18.0.1" } }
+                }
+              }
+            ]
+            """;
+        newService(internalOnly, List.of("c3")).discover();
         assertThat(repo.findByIpAddress("172.18.0.2").orElseThrow().getDiscoveryScope())
-            .isEqualTo(DiscoveryScope.HOME);
+            .as("internal-only container — DOCKER_BRIDGE from first discovery")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
 
-        // Second run: same container now publishes a port → must flip to DOCKER_BRIDGE in place
+        // Second run: same container now publishes a port — still DOCKER_BRIDGE
         String published = """
             [
               {

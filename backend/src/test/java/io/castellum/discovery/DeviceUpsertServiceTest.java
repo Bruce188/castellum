@@ -308,6 +308,90 @@ class DeviceUpsertServiceTest {
         assertThat(found.getHostname()).isEqualTo("renamed-container");
     }
 
+    // ── AC1: upsertWithScope sets os="Linux" for DOCKER_BRIDGE containers ─────────────────────
+
+    /** INSERT path: upsertWithScope(DOCKER_BRIDGE) must set osName="Linux". */
+    @Test
+    void upsertWithScope_insert_setsOsLinuxForDockerBridge() {
+        Discovery d = new Discovery("172.21.0.3", null, "pingpay-db-custom", DiscoverySource.DOCKER, T1, null);
+        service.upsertWithScope(d, DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.21.0.3").orElseThrow();
+        assertThat(found.getOsName())
+            .as("docker container insert must have osName='Linux'")
+            .isEqualTo("Linux");
+        assertThat(found.getDiscoveryScope()).isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+    }
+
+    /** UPDATE path: upsertWithScope(DOCKER_BRIDGE) must also set/refresh osName="Linux". */
+    @Test
+    void upsertWithScope_update_setsOsLinuxForDockerBridge() {
+        // Seed with no os
+        Device seed = new Device(null, "172.21.0.4", "svc", null, T1, T1);
+        seed.setDiscoveryScope(DiscoveryScope.HOME);
+        repo.save(seed);
+
+        service.upsertWithScope(
+            new Discovery("172.21.0.4", null, "svc", DiscoverySource.DOCKER, T2, null),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.21.0.4").orElseThrow();
+        assertThat(found.getOsName())
+            .as("docker container update must set osName='Linux'")
+            .isEqualTo("Linux");
+    }
+
+    /** HOME-scoped upsertWithScope (synthetic gateway) must NOT set osName. */
+    @Test
+    void upsertWithScope_home_doesNotSetOsName() {
+        Discovery d = new Discovery("172.18.0.1", null, "docker-net:pingpay_default", DiscoverySource.DOCKER, T1, null);
+        service.upsertWithScope(d, DiscoveryScope.HOME);
+
+        var found = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(found.getOsName())
+            .as("HOME-scoped device (synthetic gateway) must not get osName='Linux'")
+            .isNull();
+    }
+
+    // ── AC3: passive upsert does not downgrade DOCKER_BRIDGE scope ───────────────────────────
+
+    /**
+     * A device previously seeded as DOCKER_BRIDGE by Docker discovery must NOT have its
+     * scope overwritten to HOME by a subsequent passive (ARP/NMAP) upsert.
+     */
+    @Test
+    void upsert_doesNotDowngradeDockerBridgeScope() {
+        // Seed as DOCKER_BRIDGE (as docker discovery would)
+        service.upsertWithScope(
+            new Discovery("172.21.0.3", null, "pingpay-db-custom", DiscoverySource.DOCKER, T1, null),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        // Passive ARP re-observes same IP — on 172.21.x classifier would return HOME
+        service.upsert(new Discovery("172.21.0.3", "02:42:ac:15:00:03", null, DiscoverySource.ARP, T2, null));
+
+        var found = repo.findByIpAddress("172.21.0.3").orElseThrow();
+        assertThat(found.getDiscoveryScope())
+            .as("passive ARP must not downgrade DOCKER_BRIDGE to HOME")
+            .isEqualTo(DiscoveryScope.DOCKER_BRIDGE);
+        assertThat(found.getLastSeen()).isEqualTo(T2); // sanity — upsert did run
+    }
+
+    /** Non-container HOME device: passive upsert still preserves HOME (regression guard). */
+    @Test
+    void upsert_homeScopedDevice_remainsHome_afterPassiveObservation() {
+        // Seed a normal HOME device (e.g. router on 192.168.1.1)
+        Device seed = new Device(null, "192.168.1.1", "router", "aa:bb:cc:dd:ee:01", T1, T1);
+        seed.setDiscoveryScope(DiscoveryScope.HOME);
+        repo.save(seed);
+
+        service.upsert(new Discovery("192.168.1.1", "aa:bb:cc:dd:ee:01", "router", DiscoverySource.ARP, T2, null));
+
+        var found = repo.findByIpAddress("192.168.1.1").orElseThrow();
+        assertThat(found.getDiscoveryScope())
+            .as("non-container HOME device must stay HOME")
+            .isEqualTo(DiscoveryScope.HOME);
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // AC1 + AC2 — bridge-alias hostname filtering and hostname priority
     // ────────────────────────────────────────────────────────────────────────

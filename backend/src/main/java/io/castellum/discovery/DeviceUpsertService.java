@@ -78,11 +78,17 @@ public class DeviceUpsertService {
      * Scope-explicit upsert for sources whose {@link DiscoveryScope} is determined by
      * runtime metadata rather than the IP-range heuristic in {@link DiscoveryScopeClassifier}.
      *
-     * <p>The Docker discovery path uses this: a container's scope is
-     * {@link DiscoveryScope#DOCKER_BRIDGE} iff it publishes a host port, else
-     * {@link DiscoveryScope#HOME} — a signal orthogonal to the container's bridge-subnet IP
-     * (compose stacks land on {@code 172.18+}, {@code 172.19+}, … which the classifier would
-     * mislabel). Unlike {@link #upsert(Discovery)}, the explicit scope is authoritative and is
+     * <p>The Docker discovery path uses this: all containers get
+     * {@link DiscoveryScope#DOCKER_BRIDGE} — Docker source is authoritative for scope,
+     * regardless of network subnet (custom docker networks can use any RFC1918 range).
+     * Synthetic gateways still use {@link DiscoveryScope#HOME}.
+     *
+     * <p>When scope is {@link DiscoveryScope#DOCKER_BRIDGE} the device {@code osName} is set to
+     * {@code "Linux"}: every Docker container runs on a Linux kernel. If a more specific OS is
+     * ever determined (e.g. from image metadata), the caller should use a dedicated OS-update
+     * path — this method sets the default for freshly-discovered containers.
+     *
+     * <p>Unlike {@link #upsert(Discovery)}, the explicit scope is authoritative and is
      * written on BOTH the insert and update paths (last-writer-wins, mirroring lastSeen): a
      * container that starts publishing a port between sweeps must flip HOME → DOCKER_BRIDGE in
      * place. All other field semantics (mac/hostname fill-when-null, iface
@@ -116,6 +122,10 @@ public class DeviceUpsertService {
             e.setDiscoverySource(d.source());
             // Authoritative scope — written on update too (see method Javadoc).
             e.setDiscoveryScope(scope);
+            // AC1: Docker containers run on Linux — set default OS when scope is DOCKER_BRIDGE.
+            if (scope == DiscoveryScope.DOCKER_BRIDGE) {
+                e.setOsName("Linux");
+            }
             return repo.save(e);
         } else {
             // sanitizeHostname on insert — mirrors the update branch above.
@@ -133,6 +143,10 @@ public class DeviceUpsertService {
             fresh.setDiscoveryScope(scope);
             fresh.setLastSeenIface(d.iface());
             fresh.setDiscoverySource(d.source());
+            // AC1: Docker containers run on Linux — set default OS when scope is DOCKER_BRIDGE.
+            if (scope == DiscoveryScope.DOCKER_BRIDGE) {
+                fresh.setOsName("Linux");
+            }
             return repo.save(fresh);
         }
     }
