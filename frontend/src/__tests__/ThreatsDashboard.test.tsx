@@ -800,6 +800,87 @@ describe('<ThreatsDashboard />', () => {
     expect(panel).toHaveTextContent('CVE-2024-9999');
   });
 
+  it('cveDetail_drawerFromThreats_rendersFullDetailParityWithCvesPage', async () => {
+    // Asserts that opening a CVE from /threats renders the IDENTICAL full detail as
+    // /cves: CVSS vector breakdown, references section, and affected-devices section
+    // (including matched CPE and version range). Previously the test only checked that
+    // the panel *opened* — this test ensures all sections render correctly.
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 100, hostname: 'host-100', ipAddress: '10.0.0.100', criticality: 'CRITICAL', score: '9.50', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makePage([makeSummary('CVE-2024-FULL', '9.8', true)]),
+    );
+    (api.cveDetail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      cveId: 'CVE-2024-FULL',
+      published: '2024-06-01T00:00:00Z',
+      lastModified: '2024-06-02T00:00:00Z',
+      vulnStatus: 'Analyzed',
+      description: 'Full detail CVE description',
+      cvssV31Score: '9.8',
+      // Non-null vector → CvssVectorBreakdown must render Attack Vector etc.
+      cvssV31Vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+      cvssV30Score: null,
+      cvssV30Vector: null,
+      cvssV2Score: null,
+      cvssV2Vector: null,
+      fetchedAt: null,
+      // rawJson with embedded references → References section renders parsed links
+      rawJson: JSON.stringify({
+        vulnerabilities: [{ cve: { references: [{ url: 'https://nvd.nist.gov/vuln/detail/CVE-2024-FULL', source: 'NVD' }] } }],
+      }),
+      kev: true,
+      epssScore: '0.75',
+      compositeScore: '9.8',
+    });
+    // Affected device with matched CPE + range → affected-devices section renders evidence
+    (api.listAffectedDevices as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        deviceId: 42,
+        hostname: 'pg-server',
+        ipAddress: '10.0.0.42',
+        matchedPort: 5432,
+        matchedService: 'postgresql',
+        matchedVersion: '17.6.1.029',
+        matchedCpe: 'cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*',
+        matchedRangeStart: '17.0 (incl.)',
+        matchedRangeEnd: '17.10 (excl.)',
+      },
+    ]);
+
+    renderWith();
+    const threatRow = await screen.findByTestId('threats-row-100');
+    fireEvent.click(threatRow);
+    const cveRow = await screen.findByTestId('related-cves-row-CVE-2024-FULL');
+    fireEvent.click(cveRow);
+
+    const panel = await screen.findByTestId('cve-detail-panel');
+    expect(panel).toBeInTheDocument();
+
+    // --- CVSS Vector breakdown section (CvssVectorBreakdown component) ---
+    // The decoded metric grid must show "Attack Vector" when cvssV31Vector is present.
+    await screen.findByText('Attack Vector');
+    expect(screen.getByText('Attack Vector')).toBeInTheDocument();
+
+    // --- References section ---
+    // The parsed NVD link from rawJson must render as an anchor.
+    const refLink = await screen.findByRole('link', { name: /nvd\.nist\.gov\/vuln\/detail\/CVE-2024-FULL/i });
+    expect(refLink).toBeInTheDocument();
+
+    // --- Affected Devices section with matched CPE + version range ---
+    await screen.findByTestId('matched-cpe');
+    expect(screen.getByTestId('matched-cpe')).toHaveTextContent('cpe:2.3:a:postgresql:postgresql');
+    expect(screen.getByTestId('matched-range')).toHaveTextContent('17.0 (incl.)');
+    expect(screen.getByTestId('matched-range')).toHaveTextContent('17.10 (excl.)');
+    // The device link must be present
+    expect(screen.getByRole('link', { name: /pg-server/i })).toBeInTheDocument();
+  });
+
   it('cveDetail_closingDrawer_keepsThreatRowExpanded', async () => {
     (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
       { deviceId: 88, hostname: 'host-88', ipAddress: '10.0.0.88', criticality: 'HIGH', score: '9.00', kevCount: 1 },
