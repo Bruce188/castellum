@@ -104,8 +104,11 @@ public class DeviceUpsertService {
             // hostname: overwrite-always for the scope-explicit path. A container's name is a
             // stable, authoritative identifier (re-create keeps the same name); refreshing it
             // keeps the topology label current if a prior null/stale source seeded the row.
-            if (d.hostname() != null) {
-                e.setHostname(d.hostname());
+            // Bridge alias filtered via sanitizeHostname — defense-in-depth: a container
+            // pathologically named host.docker.internal must not bypass the AC1 policy.
+            String incomingHostname = sanitizeHostname(d.hostname());
+            if (incomingHostname != null) {
+                e.setHostname(incomingHostname);
             }
             if (d.iface() != null) {
                 e.setLastSeenIface(d.iface());
@@ -115,11 +118,13 @@ public class DeviceUpsertService {
             e.setDiscoveryScope(scope);
             return repo.save(e);
         } else {
+            // sanitizeHostname on insert — mirrors the update branch above.
+            String insertHostname = sanitizeHostname(d.hostname());
             Instant now = d.observedAt();
             Device fresh = new Device(
                 null,
                 d.ipAddress(),
-                d.hostname(),
+                insertHostname,
                 d.macAddress(),
                 now,
                 now,
