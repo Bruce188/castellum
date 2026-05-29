@@ -178,7 +178,7 @@ public class ScanExecutionService {
                     null,           // iface not available from nmap XML output
                     false
                 );
-                Device device = deviceUpsertService.upsert(discovery);
+                Device device = deviceUpsertService.upsert(discovery, scanId);
 
                 if (type == ScanType.OS_FINGERPRINT && host.os() != null) {
                     device.setOsName(host.os().name());
