@@ -51,9 +51,11 @@ public class CveMatcher {
     public List<MatchEvidence> findVulnerableWithEvidence(String cpe23) {
         Cpe23 query = Cpe23.parse(cpe23);
         String prefix = query.prefixVendorProduct();
-        List<CveCpeMatch> candidates = cveCpeMatchRepository.findByCpe23UriStartingWith(prefix);
+        List<CveCpeMatch> candidates = cveCpeMatchRepository.findByCpe23UriStartingWithOrderByIdAsc(prefix);
 
-        // Map cveFk → first matching CveCpeMatch row (first-wins — mirrors findVulnerable's dedup)
+        // Map cveFk → first matching CveCpeMatch row (first-wins, lowest-id row selected —
+        // the CVE-FK dedup semantics match findVulnerable's Set; the id ordering is unique to
+        // this evidence path and ensures a stable, deterministic row is returned across calls)
         Map<Long, CveCpeMatch> matchedRows = new LinkedHashMap<>();
         for (CveCpeMatch row : candidates) {
             if (!Boolean.TRUE.equals(row.getVulnerable())) continue;
@@ -75,7 +77,7 @@ public class CveMatcher {
     public List<Cve> findVulnerable(String cpe23) {
         Cpe23 query = Cpe23.parse(cpe23);
         String prefix = query.prefixVendorProduct();
-        List<CveCpeMatch> candidates = cveCpeMatchRepository.findByCpe23UriStartingWith(prefix);
+        List<CveCpeMatch> candidates = cveCpeMatchRepository.findByCpe23UriStartingWithOrderByIdAsc(prefix);
 
         Set<Long> matchedCveFks = new LinkedHashSet<>();
         for (CveCpeMatch row : candidates) {

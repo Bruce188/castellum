@@ -139,4 +139,39 @@ class CveMatcherTest {
         assertThrows(IllegalArgumentException.class, () -> Cpe23.parse("not-a-cpe"),
             "Malformed CPE URI should throw IllegalArgumentException");
     }
+
+    /**
+     * NB-1 regression lock: when a CVE has two matching rows (one literal + one range),
+     * findVulnerableWithEvidence must return the lowest-id row as evidence on every call.
+     */
+    @Test
+    void findVulnerableWithEvidence_multipleMatchingRows_returnsDeterministicLowestIdRow() {
+        Cve cve = saveCve("CVE-DETERM-1");
+
+        // Row A — range match, inserted first (lower id)
+        CveCpeMatch rowA = saveMatch(cve.getId(),
+            "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*",
+            true, "8.0", null, null, "9.0");
+
+        // Row B — literal version match, inserted second (higher id)
+        CveCpeMatch rowB = saveMatch(cve.getId(),
+            "cpe:2.3:a:openbsd:openssh:8.2:*:*:*:*:*:*:*",
+            true, null, null, null, null);
+
+        String query = "cpe:2.3:a:openbsd:openssh:8.2:*:*:*:*:*:*:*";
+
+        List<CveMatcher.MatchEvidence> first  = matcher.findVulnerableWithEvidence(query);
+        List<CveMatcher.MatchEvidence> second = matcher.findVulnerableWithEvidence(query);
+
+        assertEquals(1, first.size(), "exactly one CVE expected");
+        assertEquals(1, second.size(), "exactly one CVE expected on second call");
+
+        long evidenceIdFirst  = first.get(0).matchedRow().getId();
+        long evidenceIdSecond = second.get(0).matchedRow().getId();
+
+        assertEquals(evidenceIdFirst, evidenceIdSecond,
+            "matched row must be the same (deterministic) across repeated calls");
+        assertEquals(rowA.getId(), evidenceIdFirst,
+            "lowest-id row (rowA) must win as evidence");
+    }
 }
