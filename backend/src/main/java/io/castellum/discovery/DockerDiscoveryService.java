@@ -133,9 +133,9 @@ public class DockerDiscoveryService {
         }
 
         // Upsert one synthetic gateway device per docker network so the star has a real centre.
-        // Gateways are HOME-scope (never bridged to the host themselves) and named after the
-        // docker network. They are NOT the host node — host.docker.internal is a separate
-        // HOME device seeded by the host/passive discovery path.
+        // Gateways are DOCKER_BRIDGE-scoped so they are grouped under their Docker network zone
+        // in the topology renderer. They are NOT the host node — host.docker.internal is a
+        // separate HOME device seeded by the host/passive discovery path.
         int gatewayCount = 0;
         for (Map.Entry<String, String> gw : gatewaysByIp.entrySet()) {
             String gwIp = gw.getKey();
@@ -148,7 +148,7 @@ public class DockerDiscoveryService {
                 observedAt,
                 null,
                 false);                     // synthetic gateway never publishes a host port
-            Device saved = upsertService.upsertWithScope(disc, DiscoveryScope.HOME);
+            Device saved = upsertService.upsertWithScope(disc, DiscoveryScope.DOCKER_BRIDGE);
             deviceIds.add(saved.getId());
             gatewayCount++;
         }
