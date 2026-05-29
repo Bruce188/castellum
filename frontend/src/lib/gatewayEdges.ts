@@ -1,6 +1,7 @@
 import type { Device } from '../api/types';
 import { scopeToZoneId } from './topologyZones';
 import { ipv4Slash24 } from './subnetEdges';
+import { isDockerNetGateway } from './dockerNetworkGroups';
 
 /**
  * Edge produced by {@link buildGatewayEdges}. Structurally identical kinds
@@ -174,24 +175,76 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
     }
   }
 
-  // Step 3: docker-bridge synthetic edges — always cross-zone (HOME → DOCKER_BRIDGE).
+  // Step 3: docker-bridge synthetic edges.
+  //
+  // Routing rules (per AC3):
+  //   a) docker-net gateway devices (isDockerNetGateway) → pivot (HOME docker host)
+  //   b) published-port containers (publishesHostPort === true) → pivot directly
+  //   c) internal-only containers (DOCKER_BRIDGE, not a gateway, publishesHostPort !== true)
+  //      → edge from the container to its network's docker-net gateway;
+  //      fall back to a pivot edge if no gateway exists for that /24 (avoid orphaning).
   if (dockerHost) {
+    // Build a /24 → gateway-device map from the docker-net gateways present.
+    const slash24ToGateway = new Map<string, Device>();
+    for (const d of devices) {
+      if (!isDockerNetGateway(d)) continue;
+      const slash24 = ipv4Slash24(d.ipAddress);
+      if (slash24 !== null && !slash24ToGateway.has(slash24)) {
+        slash24ToGateway.set(slash24, d);
+      }
+    }
+
+    const pivotDevice = deviceById.get(dockerHost.id);
+    const pivotZoneId = pivotDevice ? scopeToZoneId(pivotDevice.discoveryScope) : null;
+
     for (const d of devices) {
       if (d.discoveryScope !== 'DOCKER_BRIDGE') continue;
-      const srcDevice = deviceById.get(dockerHost.id);
-      const tgtDevice = d;
-      const crossZone = srcDevice
-        ? scopeToZoneId(srcDevice.discoveryScope) !== scopeToZoneId(tgtDevice.discoveryScope)
-        : true;
-      edges.push({
-        data: {
-          id: `db-${dockerHost.id}-${d.id}`,
-          source: String(dockerHost.id),
-          target: String(d.id),
-          kind: 'docker-bridge',
-          ...(crossZone ? { crossZone: true } : {}),
-        },
-      });
+
+      const tgtZoneId = scopeToZoneId(d.discoveryScope);
+
+      if (isDockerNetGateway(d) || d.publishesHostPort === true) {
+        // (a) gateway nodes and (b) published-port containers → pivot
+        const crossZone = pivotZoneId !== null ? pivotZoneId !== tgtZoneId : true;
+        edges.push({
+          data: {
+            id: `db-${dockerHost.id}-${d.id}`,
+            source: String(dockerHost.id),
+            target: String(d.id),
+            kind: 'docker-bridge',
+            ...(crossZone ? { crossZone: true } : {}),
+          },
+        });
+      } else {
+        // (c) internal-only container → its docker-net gateway (or pivot as fallback)
+        const slash24 = ipv4Slash24(d.ipAddress);
+        const networkGateway = slash24 !== null ? slash24ToGateway.get(slash24) : undefined;
+
+        if (networkGateway) {
+          const gwZoneId = scopeToZoneId(networkGateway.discoveryScope);
+          const crossZone = tgtZoneId !== gwZoneId;
+          edges.push({
+            data: {
+              id: `db-${d.id}-${networkGateway.id}`,
+              source: String(d.id),
+              target: String(networkGateway.id),
+              kind: 'docker-bridge',
+              ...(crossZone ? { crossZone: true } : {}),
+            },
+          });
+        } else {
+          // Fallback: no gateway for this network — route to pivot to avoid orphaning.
+          const crossZone = pivotZoneId !== null ? pivotZoneId !== tgtZoneId : true;
+          edges.push({
+            data: {
+              id: `db-${dockerHost.id}-${d.id}`,
+              source: String(dockerHost.id),
+              target: String(d.id),
+              kind: 'docker-bridge',
+              ...(crossZone ? { crossZone: true } : {}),
+            },
+          });
+        }
+      }
     }
   }
 
