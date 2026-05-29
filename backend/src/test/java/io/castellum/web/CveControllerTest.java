@@ -3,9 +3,11 @@ package io.castellum.web;
 import io.castellum.audit.AuditService;
 import io.castellum.config.SecurityConfig;
 import io.castellum.cve.Cve;
+import io.castellum.cve.CveCpeMatch;
 import io.castellum.cve.CveEnrichmentService;
 import io.castellum.cve.CveEnrichmentService.Enrichment;
 import io.castellum.cve.CveMatcher;
+import io.castellum.cve.CveMatcher.MatchEvidence;
 import io.castellum.cve.CveRepository;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
@@ -756,6 +758,22 @@ class CveControllerTest {
         org.junit.jupiter.api.Assertions.assertEquals("host-1", dto.hostname());
     }
 
+    // ─── helpers for reverse-endpoint (getAffectedDevices) tests ──────────
+
+    /** Builds a {@link CveCpeMatch} range row (wildcard CPE, version bounds). */
+    private CveCpeMatch buildMatchRow(Long id, Long cveFk, String cpe23Uri,
+                                      String vsi, String vee) {
+        return new CveCpeMatch(id, cveFk, cpe23Uri, true, vsi, null, null, vee);
+    }
+
+    /** Builds a {@link MatchEvidence} pair (cve + range row). */
+    private MatchEvidence buildEvidence(Cve cve, String cpe23Uri) {
+        CveCpeMatch row = buildMatchRow(99L, cve.getId(), cpe23Uri, null, null);
+        return new MatchEvidence(cve, row);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+
     @Test
     void getAffectedDevices_matchingService_returnsDevice() throws Exception {
         // The target CVE exists in the repository.
@@ -767,9 +785,9 @@ class CveControllerTest {
         NetworkService ssh = buildService(10L, 42L, "openssh", "openssh", "8.2");
         ssh.setName("openssh");
         when(networkServiceRepository.findAll()).thenReturn(List.of(ssh));
-        // Matcher returns the target CVE for this CPE.
-        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
-                .thenReturn(List.of(cve));
+        // Matcher returns the target CVE with evidence for this CPE.
+        when(cveMatcher.findVulnerableWithEvidence("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
+                .thenReturn(List.of(buildEvidence(cve, "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*")));
 
         // Device hydration. The handler hydrates via deviceRepository.findAllById(keySet);
         // match on anyIterable() since the controller passes a Map keySet (not a List).
@@ -801,8 +819,8 @@ class CveControllerTest {
         Cve differentCve = buildCve("CVE-2021-23017");
         differentCve.setId(5L);
         when(networkServiceRepository.findAll()).thenReturn(List.of(other));
-        when(cveMatcher.findVulnerable("cpe:2.3:a:nginx:nginx:1.18:*:*:*:*:*:*:*"))
-                .thenReturn(List.of(differentCve));
+        when(cveMatcher.findVulnerableWithEvidence("cpe:2.3:a:nginx:nginx:1.18:*:*:*:*:*:*:*"))
+                .thenReturn(List.of(buildEvidence(differentCve, "cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*")));
 
         mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
                         .accept(MediaType.APPLICATION_JSON))
@@ -820,7 +838,7 @@ class CveControllerTest {
         NetworkService svc = buildService(30L, 55L, "openssh", "openssh", "9.0");
         svc.setName("openssh");
         when(networkServiceRepository.findAll()).thenReturn(List.of(svc));
-        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:9.0:*:*:*:*:*:*:*"))
+        when(cveMatcher.findVulnerableWithEvidence("cpe:2.3:a:openssh:openssh:9.0:*:*:*:*:*:*:*"))
                 .thenReturn(List.of()); // version 9.0 not in range → empty
 
         mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
@@ -856,6 +874,83 @@ class CveControllerTest {
     }
 
     /**
+     * AC1 — matched CPE and version-range evidence surfaced in the affected-devices response.
+     * Asserts that {@code matchedCpe}, {@code matchedRangeStart}, and {@code matchedRangeEnd}
+     * are populated on the response DTO when {@code findVulnerableWithEvidence} provides a
+     * matching {@link CveCpeMatch} row with version bounds.
+     */
+    @Test
+    void getAffectedDevices_surfacesMatchedCpeAndVersionRange() throws Exception {
+        Cve target = buildCve("CVE-2020-15778");
+        target.setId(1L);
+        when(cveRepository.findByCveId("CVE-2020-15778")).thenReturn(Optional.of(target));
+
+        NetworkService ssh = buildService(10L, 42L, "postgresql", "postgresql", "16.0");
+        ssh.setName("postgresql");
+        when(networkServiceRepository.findAll()).thenReturn(List.of(ssh));
+
+        // Build a match-evidence row with a version range
+        CveCpeMatch matchRow = new CveCpeMatch(
+            99L, target.getId(),
+            "cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*",
+            true,
+            "14.0", null, null, "17.0");  // [14.0, 17.0)
+        when(cveMatcher.findVulnerableWithEvidence("cpe:2.3:a:postgresql:postgresql:16.0:*:*:*:*:*:*:*"))
+            .thenReturn(List.of(new MatchEvidence(target, matchRow)));
+
+        Device device = new Device();
+        device.setId(42L);
+        device.setIpAddress("10.0.0.42");
+        device.setCriticality(Criticality.MEDIUM);
+        when(deviceRepository.findAllById(anyIterable())).thenReturn(List.of(device));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-15778/devices")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].deviceId").value(42))
+            .andExpect(jsonPath("$[0].matchedCpe").value("cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*"))
+            .andExpect(jsonPath("$[0].matchedRangeStart").value("14.0 (incl.)"))
+            .andExpect(jsonPath("$[0].matchedRangeEnd").value("17.0 (excl.)"));
+    }
+
+    /**
+     * AC1 — when no version bounds exist on the matching row (literal CPE match),
+     * {@code matchedRangeStart} and {@code matchedRangeEnd} are null.
+     */
+    @Test
+    void getAffectedDevices_literalCpeMatch_rangeFieldsNull() throws Exception {
+        Cve target = buildCve("CVE-2020-LITERAL");
+        target.setId(2L);
+        when(cveRepository.findByCveId("CVE-2020-LITERAL")).thenReturn(Optional.of(target));
+
+        NetworkService svc = buildService(11L, 7L, "openssh", "openssh", "8.2");
+        svc.setName("openssh");
+        when(networkServiceRepository.findAll()).thenReturn(List.of(svc));
+
+        // Literal CPE row — no version bounds
+        CveCpeMatch literalRow = new CveCpeMatch(
+            100L, target.getId(),
+            "cpe:2.3:a:openbsd:openssh:8.2:*:*:*:*:*:*:*",
+            true,
+            null, null, null, null);
+        when(cveMatcher.findVulnerableWithEvidence("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
+            .thenReturn(List.of(new MatchEvidence(target, literalRow)));
+
+        Device device = new Device();
+        device.setId(7L);
+        device.setIpAddress("10.0.0.7");
+        device.setCriticality(Criticality.MEDIUM);
+        when(deviceRepository.findAllById(anyIterable())).thenReturn(List.of(device));
+
+        mockMvc.perform(get("/api/cve/CVE-2020-LITERAL/devices")
+                .accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].matchedCpe").value("cpe:2.3:a:openbsd:openssh:8.2:*:*:*:*:*:*:*"))
+            .andExpect(jsonPath("$[0].matchedRangeStart").isEmpty())
+            .andExpect(jsonPath("$[0].matchedRangeEnd").isEmpty());
+    }
+
+    /**
      * Characterises the existing LinkedHashMap first-wins dedup guard.
      * Two services share deviceId 42 but have distinct ports (22 and 8080).
      * Both CPEs match the target CVE. The result must contain exactly one entry
@@ -881,8 +976,8 @@ class CveControllerTest {
         when(networkServiceRepository.findAll()).thenReturn(List.of(sshSvc, httpSvc));
 
         // Both CPEs resolve to the same string and both match the target CVE.
-        when(cveMatcher.findVulnerable("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
-                .thenReturn(List.of(target));
+        when(cveMatcher.findVulnerableWithEvidence("cpe:2.3:a:openssh:openssh:8.2:*:*:*:*:*:*:*"))
+                .thenReturn(List.of(buildEvidence(target, "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*")));
 
         Device device = new Device();
         device.setId(42L);

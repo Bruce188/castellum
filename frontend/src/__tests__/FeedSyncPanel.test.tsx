@@ -13,6 +13,7 @@ vi.mock('../api/client', () => ({
     updateFeedSchedule: vi.fn(),
     enableFeedSchedule: vi.fn(),
     disableFeedSchedule: vi.fn(),
+    cveCoverage: vi.fn(),
   },
 }));
 
@@ -24,6 +25,7 @@ const getFeedSchedule = vi.mocked(api.getFeedSchedule);
 const updateFeedSchedule = vi.mocked(api.updateFeedSchedule);
 const enableFeedSchedule = vi.mocked(api.enableFeedSchedule);
 const disableFeedSchedule = vi.mocked(api.disableFeedSchedule);
+const cveCoverage = vi.mocked(api.cveCoverage);
 
 const FULL_CORPUS_FEEDS = {
   nvd: { lastModified: '2026-05-20T00:00:00Z', rowCount: 500 },
@@ -54,6 +56,22 @@ const SCHEDULE_DISABLED = {
   nextRunAt: null,
 };
 
+const FULL_COVERAGE = {
+  totalCves: 250_000,
+  earliestPublishedYear: 2004,
+  latestPublishedYear: 2026,
+  kevInCorpus: 1606,
+  thinCorpus: false,
+};
+
+const THIN_COVERAGE = {
+  totalCves: 3957,
+  earliestPublishedYear: 2026,
+  latestPublishedYear: 2026,
+  kevInCorpus: 17,
+  thinCorpus: true,
+};
+
 beforeEach(() => {
   feedsStatus.mockReset();
   syncStatus.mockReset();
@@ -63,6 +81,7 @@ beforeEach(() => {
   updateFeedSchedule.mockReset();
   enableFeedSchedule.mockReset();
   disableFeedSchedule.mockReset();
+  cveCoverage.mockReset();
 
   feedsStatus.mockResolvedValue(FULL_CORPUS_FEEDS);
   syncStatus.mockResolvedValue(STATUS_IDLE);
@@ -71,6 +90,7 @@ beforeEach(() => {
   getFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
   disableFeedSchedule.mockResolvedValue(SCHEDULE_DISABLED);
   enableFeedSchedule.mockResolvedValue(SCHEDULE_ENABLED);
+  cveCoverage.mockResolvedValue(FULL_COVERAGE);
 });
 
 describe('<FeedSyncPanel />', () => {
@@ -275,5 +295,53 @@ describe('<FeedSyncPanel />', () => {
       const btn = screen.getByTestId('full-backfill-btn');
       expect(btn).toBeDisabled();
     });
+  });
+
+  // --- AC3: corpus-coverage visibility ---
+
+  it('shows corpus coverage block with totalCves and KEV count (full corpus)', async () => {
+    render(<FeedSyncPanel isAdmin={true} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('corpus-coverage')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('corpus-coverage')).toHaveTextContent('250,000');
+    expect(screen.getByTestId('kev-in-corpus')).toHaveTextContent('1,606');
+    // year range appears
+    expect(screen.getByTestId('corpus-coverage')).toHaveTextContent('2004');
+    expect(screen.getByTestId('corpus-coverage')).toHaveTextContent('2026');
+    // thin corpus hint must NOT appear for a full corpus
+    expect(screen.queryByTestId('thin-corpus-hint')).not.toBeInTheDocument();
+  });
+
+  it('shows thin-corpus hint when corpus is thin', async () => {
+    cveCoverage.mockResolvedValue(THIN_COVERAGE);
+    render(<FeedSyncPanel isAdmin={true} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('thin-corpus-hint')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('thin-corpus-hint')).toHaveTextContent(/thin/i);
+    expect(screen.getByTestId('thin-corpus-hint')).toHaveTextContent(/Full NVD backfill/i);
+  });
+
+  it('thin-corpus hint does not show backfill action for viewer', async () => {
+    cveCoverage.mockResolvedValue(THIN_COVERAGE);
+    render(<FeedSyncPanel isAdmin={false} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('thin-corpus-hint')).toBeInTheDocument();
+    });
+    // The "Full NVD backfill" CTA must NOT appear for viewers
+    expect(screen.getByTestId('thin-corpus-hint')).not.toHaveTextContent(/Full NVD backfill/i);
+  });
+
+  it('tolerates cveCoverage error — panel still renders feed rows', async () => {
+    cveCoverage.mockRejectedValueOnce(new Error('403'));
+    render(<FeedSyncPanel isAdmin={true} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('feed-row-nvd')).toBeInTheDocument();
+    });
+    // corpus-coverage block should not be present (no data)
+    expect(screen.queryByTestId('corpus-coverage')).not.toBeInTheDocument();
+    // panel must not have crashed
+    expect(screen.getByTestId('feed-sync-panel')).toBeInTheDocument();
   });
 });

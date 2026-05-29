@@ -1,9 +1,11 @@
 package io.castellum.web;
 
 import io.castellum.cve.Cve;
+import io.castellum.cve.CveCpeMatch;
 import io.castellum.cve.CveEnrichmentService;
 import io.castellum.cve.CveEnrichmentService.Enrichment;
 import io.castellum.cve.CveMatcher;
+import io.castellum.cve.CveMatcher.MatchEvidence;
 import io.castellum.cve.CveRepository;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
@@ -14,6 +16,7 @@ import io.castellum.graph.CpeMapper;
 import io.castellum.risk.Criticality;
 import io.castellum.risk.KevEntryRepository;
 import io.castellum.web.dto.CveAffectedDeviceDto;
+import io.castellum.web.dto.CveCoverageDto;
 import io.castellum.web.dto.CveDetailDto;
 import io.castellum.web.dto.CveSummaryDto;
 import org.springframework.cache.annotation.Cacheable;
@@ -113,36 +116,42 @@ public class CveController {
         }
 
         List<NetworkService> allServices = networkServiceRepository.findAll();
-        // Map from deviceId → first matching service (dedup: first-wins).
-        Map<Long, NetworkService> deviceToService = new LinkedHashMap<>();
+        // Map from deviceId → (service, evidence) pair — first-wins dedup.
+        record ServiceEvidence(NetworkService service, CveCpeMatch matchRow) {}
+        Map<Long, ServiceEvidence> deviceToEvidence = new LinkedHashMap<>();
         for (NetworkService s : allServices) {
-            if (deviceToService.containsKey(s.getDeviceId())) continue; // already captured
+            if (deviceToEvidence.containsKey(s.getDeviceId())) continue; // already captured
             String cpe = CpeMapper.toCpe23(s);
             if (cpe == null) continue;
-            boolean matched = cveMatcher.findVulnerable(cpe)
+            // Use findVulnerableWithEvidence so we can surface the matched CPE + range (AC1).
+            cveMatcher.findVulnerableWithEvidence(cpe)
                     .stream()
-                    .anyMatch(c -> cveId.equals(c.getCveId()));
-            if (matched) {
-                deviceToService.put(s.getDeviceId(), s);
-            }
+                    .filter(ev -> cveId.equals(ev.cve().getCveId()))
+                    .findFirst()
+                    .ifPresent(ev -> deviceToEvidence.put(s.getDeviceId(), new ServiceEvidence(s, ev.matchedRow())));
         }
 
-        if (deviceToService.isEmpty()) {
+        if (deviceToEvidence.isEmpty()) {
             return ResponseEntity.ok(List.of());
         }
 
         // Batch-hydrate devices to get hostname + ipAddress.
-        List<Device> devices = deviceRepository.findAllById(deviceToService.keySet());
+        List<Device> devices = deviceRepository.findAllById(deviceToEvidence.keySet());
         List<CveAffectedDeviceDto> result = devices.stream()
                 .map(d -> {
-                    NetworkService s = deviceToService.get(d.getId());
+                    ServiceEvidence se = deviceToEvidence.get(d.getId());
+                    NetworkService s = se.service();
+                    CveCpeMatch row = se.matchRow();
                     return new CveAffectedDeviceDto(
                             d.getId(),
                             d.getHostname(),
                             d.getIpAddress(),
                             s.getPort(),
                             s.getName(),
-                            s.getVersion());
+                            s.getVersion(),
+                            row.getCpe23Uri(),
+                            formatRangeStart(row),
+                            formatRangeEnd(row));
                 })
                 .toList();
         return ResponseEntity.ok(result);
@@ -374,5 +383,63 @@ public class CveController {
                 safe.kev(),
                 safe.epss(),
                 safe.composite());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // AC1 helpers — format version-range bounds for display
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Formats the lower version bound of a {@link CveCpeMatch} row as a human-readable
+     * string (e.g. {@code "14.0 (incl.)"} or {@code "14.0 (excl.)"}); returns {@code null}
+     * when no lower bound exists. Used to populate {@link CveAffectedDeviceDto#matchedRangeStart()}.
+     */
+    private static String formatRangeStart(CveCpeMatch row) {
+        if (row.getVersionStartIncluding() != null) return row.getVersionStartIncluding() + " (incl.)";
+        if (row.getVersionStartExcluding() != null) return row.getVersionStartExcluding() + " (excl.)";
+        return null;
+    }
+
+    /**
+     * Formats the upper version bound of a {@link CveCpeMatch} row as a human-readable
+     * string (e.g. {@code "16.14 (excl.)"} or {@code "16.14 (incl.)"}); returns {@code null}
+     * when no upper bound exists. Used to populate {@link CveAffectedDeviceDto#matchedRangeEnd()}.
+     */
+    private static String formatRangeEnd(CveCpeMatch row) {
+        if (row.getVersionEndExcluding() != null) return row.getVersionEndExcluding() + " (excl.)";
+        if (row.getVersionEndIncluding() != null) return row.getVersionEndIncluding() + " (incl.)";
+        return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // AC3 — corpus-coverage visibility endpoint
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns a brief coverage snapshot of the local NVD + KEV corpus.
+     *
+     * <p>Intended for the Settings / feeds panel to surface "thin corpus" hints:
+     * <ul>
+     *   <li>{@code totalCves} — row count of the {@code cve} table.</li>
+     *   <li>{@code earliestPublishedYear} / {@code latestPublishedYear} — year span of
+     *       the {@code published} column; null when no rows or no published timestamps.</li>
+     *   <li>{@code kevInCorpus} — number of NVD corpus CVEs that are also in the KEV
+     *       catalog (JOIN on cveId). Gives the operator "we have N KEV entries in the
+     *       corpus" without loading every CVE; 0 is expected for a thin/new corpus.</li>
+     *   <li>{@code thinCorpus} — derived flag: true when {@code totalCves} {@literal <} 10 000
+     *       OR the year span is ≤ 1 year (corpus skewed to recent), suggesting the
+     *       operator should run the full NVD backfill to get representative coverage.</li>
+     * </ul>
+     */
+    @GetMapping("/coverage")
+    @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
+    public CveCoverageDto coverage() {
+        long totalCves = cveRepository.count();
+        Integer earliestYear = cveRepository.findEarliestPublishedYear().orElse(null);
+        Integer latestYear = cveRepository.findLatestPublishedYear().orElse(null);
+        long kevInCorpus = kevEntryRepository.countKevInCorpus();
+        boolean thin = totalCves < 10_000
+                || (earliestYear != null && latestYear != null && (latestYear - earliestYear) <= 1);
+        return new CveCoverageDto(totalCves, earliestYear, latestYear, kevInCorpus, thin);
     }
 }

@@ -3,8 +3,10 @@ package io.castellum.cve;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -20,6 +22,54 @@ public class CveMatcher {
     public CveMatcher(CveRepository cveRepository, CveCpeMatchRepository cveCpeMatchRepository) {
         this.cveRepository = cveRepository;
         this.cveCpeMatchRepository = cveCpeMatchRepository;
+    }
+
+    /**
+     * Evidence tuple returned by {@link #findVulnerableWithEvidence}: pairs each matched
+     * CVE with the {@link CveCpeMatch} row that caused the match, giving the caller the
+     * matched CPE URI (product+version) and the version-range bounds without re-querying.
+     *
+     * @param cve         the matched CVE entity.
+     * @param matchedRow  the first {@code cve_cpe_match} row whose bounds included the
+     *                    queried version. {@code cpe23Uri} and the version bounds are the
+     *                    evidence for AC1 display (matched product+version, range).
+     */
+    public record MatchEvidence(Cve cve, CveCpeMatch matchedRow) {}
+
+    /**
+     * Like {@link #findVulnerable(String)} but also returns the matching
+     * {@link CveCpeMatch} row for each CVE, enabling callers to surface the matched
+     * CPE URI (product+version) and the version-range bounds.
+     *
+     * <p>Semantics are identical to {@link #findVulnerable(String)} — this method is
+     * ADDITIVE and does NOT change {@code findVulnerable}'s behaviour. Both iterate the
+     * same candidate set and apply the same {@link #matches} predicate.
+     *
+     * @param cpe23 the queried CPE 2.3 URI (e.g. {@code cpe:2.3:a:postgresql:postgresql:16.0:...})
+     * @return list of {@link MatchEvidence}, one per matched CVE, sorted by cveId ASC.
+     */
+    public List<MatchEvidence> findVulnerableWithEvidence(String cpe23) {
+        Cpe23 query = Cpe23.parse(cpe23);
+        String prefix = query.prefixVendorProduct();
+        List<CveCpeMatch> candidates = cveCpeMatchRepository.findByCpe23UriStartingWith(prefix);
+
+        // Map cveFk → first matching CveCpeMatch row (first-wins — mirrors findVulnerable's dedup)
+        Map<Long, CveCpeMatch> matchedRows = new LinkedHashMap<>();
+        for (CveCpeMatch row : candidates) {
+            if (!Boolean.TRUE.equals(row.getVulnerable())) continue;
+            if (matchedRows.containsKey(row.getCveFk())) continue; // first-wins
+            Cpe23 candidate = safeParse(row.getCpe23Uri());
+            if (candidate == null) continue;
+            if (!matches(query, candidate, row)) continue;
+            matchedRows.put(row.getCveFk(), row);
+        }
+
+        if (matchedRows.isEmpty()) return List.of();
+        List<MatchEvidence> result = new ArrayList<>();
+        cveRepository.findAllById(matchedRows.keySet()).forEach(cve ->
+            result.add(new MatchEvidence(cve, matchedRows.get(cve.getId()))));
+        result.sort((a, b) -> a.cve().getCveId().compareTo(b.cve().getCveId()));
+        return result;
     }
 
     public List<Cve> findVulnerable(String cpe23) {

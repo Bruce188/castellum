@@ -756,7 +756,8 @@ describe('<CvesPage />', () => {
     it('affected-nodes list renders from mocked reverse response', async () => {
       listAffectedDevices.mockResolvedValue([
         { deviceId: 42, hostname: 'host-1', ipAddress: '10.0.0.42',
-          matchedPort: 22, matchedService: 'openssh', matchedVersion: '8.2' },
+          matchedPort: 22, matchedService: 'openssh', matchedVersion: '8.2',
+          matchedCpe: null, matchedRangeStart: null, matchedRangeEnd: null },
       ]);
       render(
         <MemoryRouter initialEntries={['/cves']}>

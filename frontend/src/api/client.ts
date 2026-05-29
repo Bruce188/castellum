@@ -3,7 +3,7 @@ import type {
   AuditEntry, AuditFilters,
   ChangePasswordRequest,
   CreateUserRequest,
-  Criticality, CveAffectedDevice, CveDetailDto, CveFleetSort, CveSummaryDto,
+  Criticality, CveAffectedDevice, CveCoverageDto, CveDetailDto, CveFleetSort, CveSummaryDto,
   Device, DeviceRiskDto, DockerDiscoveryResponse, FeedScheduleDto, FeedScheduleUpdateRequest, FeedsStatusDto, InitialSyncRequest, InitialSyncResponse,
   IntegrationConfigDto, IntegrationProbeRequest, IntegrationProbeResult,
   IntegrationPushResponse, IntegrationType,
@@ -142,6 +142,13 @@ export const api = {
   /** GET /api/cve/{cveId}/devices — VIEWER and ADMIN. 404 → throws; 200+empty → []. */
   listAffectedDevices: (cveId: string) =>
     request<CveAffectedDevice[]>(`/api/cve/${encodeURIComponent(cveId)}/devices`),
+  /**
+   * GET /api/cve/coverage — corpus-coverage snapshot (AC3).
+   * Returns totalCves, earliestPublishedYear, latestPublishedYear, kevInCorpus, thinCorpus.
+   * When thinCorpus is true the UI should surface a full-backfill hint.
+   */
+  cveCoverage: () =>
+    request<CveCoverageDto>('/api/cve/coverage'),
   /**
    * GET /api/cve/fleet — paginated CVE list. v3-F1 adds optional {@code kevOnly}
    * (narrows to KEV-catalog members) and {@code sort} (enrichment-window sort by

@@ -47,7 +47,8 @@ const cveDetailWithVector: CveDetailDto = {
 
 const affectedDevices: CveAffectedDevice[] = [
   { deviceId: 42, hostname: 'host-1', ipAddress: '10.0.0.42',
-    matchedPort: 22, matchedService: 'openssh', matchedVersion: '8.2' },
+    matchedPort: 22, matchedService: 'openssh', matchedVersion: '8.2',
+    matchedCpe: null, matchedRangeStart: null, matchedRangeEnd: null },
 ];
 
 describe('<CveDetailPanel />', () => {
@@ -195,7 +196,8 @@ describe('<CveDetailPanel />', () => {
   it('hostname null fallback: link label shows ipAddress when hostname is null', async () => {
     vi.mocked(api.listAffectedDevices).mockResolvedValue([
       { deviceId: 99, hostname: null, ipAddress: '192.168.1.99',
-        matchedPort: 443, matchedService: 'nginx', matchedVersion: '1.18' },
+        matchedPort: 443, matchedService: 'nginx', matchedVersion: '1.18',
+        matchedCpe: null, matchedRangeStart: null, matchedRangeEnd: null },
     ]);
     render(
       <MemoryRouter>
@@ -288,6 +290,61 @@ describe('<CveDetailPanel />', () => {
     expect(screen.getByText('Attack Vector')).toBeInTheDocument();
     // PRESERVE: the existing CVSS score chip still renders (augment, not replace).
     expect(screen.getByText('7.8')).toBeInTheDocument();
+  });
+
+  // --- AC1: matched CPE product+version and version range display ---
+
+  it('AC1: renders matched CPE and version range when evidence is present', async () => {
+    vi.mocked(api.listAffectedDevices).mockResolvedValue([
+      {
+        deviceId: 42,
+        hostname: 'pg-host',
+        ipAddress: '10.0.0.42',
+        matchedPort: 5432,
+        matchedService: 'postgresql',
+        matchedVersion: '16.0',
+        matchedCpe: 'cpe:2.3:a:postgresql:postgresql:*:*:*:*:*:*:*:*',
+        matchedRangeStart: '14.0 (incl.)',
+        matchedRangeEnd: '17.0 (excl.)',
+      },
+    ]);
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('matched-cpe')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('matched-cpe')).toHaveTextContent('cpe:2.3:a:postgresql:postgresql:*');
+    expect(screen.getByTestId('matched-range')).toHaveTextContent('14.0 (incl.)');
+    expect(screen.getByTestId('matched-range')).toHaveTextContent('17.0 (excl.)');
+  });
+
+  it('AC1: does not render matched CPE/range elements when evidence is null', async () => {
+    vi.mocked(api.listAffectedDevices).mockResolvedValue([
+      {
+        deviceId: 42,
+        hostname: 'host-1',
+        ipAddress: '10.0.0.42',
+        matchedPort: 22,
+        matchedService: 'openssh',
+        matchedVersion: '8.2',
+        matchedCpe: null,
+        matchedRangeStart: null,
+        matchedRangeEnd: null,
+      },
+    ]);
+    render(
+      <MemoryRouter>
+        <CveDetailPanel cveId="CVE-2020-15778" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    await waitFor(() => {
+      expect(screen.getByText('host-1')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('matched-cpe')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('matched-range')).not.toBeInTheDocument();
   });
 
   it('does not crash and leaks no metric labels for the null-vector fixture, score chip preserved', async () => {
