@@ -26,6 +26,11 @@ vi.mock('../api/client', () => ({
     listFleetCves: vi.fn(),
     cveDetail: vi.fn(),
     listAffectedDevices: vi.fn(),
+    getDevice: vi.fn(),
+    deviceRisk: vi.fn(),
+    listServicesForDevice: vi.fn(),
+    updateDevice: vi.fn(),
+    deleteDevice: vi.fn(),
   },
 }));
 
@@ -68,6 +73,11 @@ describe('<ThreatsDashboard />', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default device-detail fetches to rejection so tests that don't care about
+    // device detail don't crash when a row is expanded (fetchDeviceDetail swallows errors).
+    (api.getDevice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not mocked'));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not mocked'));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('not mocked'));
   });
 
   it('shows loading state then top-10 table on success', async () => {
@@ -843,6 +853,228 @@ describe('<ThreatsDashboard />', () => {
     expect(screen.getByTestId('related-cves-row-CVE-2024-0088')).toBeInTheDocument();
   });
 
+  // ---------------------------------------------------------------------------
+  // feat/threats-open-device-detail: device detail inline in expanded row
+  // ---------------------------------------------------------------------------
+
+  const makeDevice = (id: number) => ({
+    id,
+    hostname: `host-${id}`,
+    ipAddress: `10.0.0.${id}`,
+    macAddress: null,
+    criticality: 'HIGH' as const,
+    osName: 'Linux',
+    osAccuracy: 90,
+    osCpe: null,
+    firstSeen: '2024-01-01T00:00:00Z',
+    lastSeen: '2024-01-02T00:00:00Z',
+    lastSeenIface: null,
+    serviceCount: 1,
+    discoveryScope: 'HOME' as const,
+    discoverySource: 'NMAP' as const,
+  });
+
+  const makeRisk = (deviceId: number) => ({
+    deviceId,
+    score: '7.50',
+    topCveIds: [],
+    components: { cvssMax: 7.5, epssMax: 0.1, kevPresent: false, criticalityWeight: 2 },
+  });
+
+  const makeServices = () => [
+    { id: 1, deviceId: 1, port: 22, protocol: 'tcp', protocolFamily: 'INET' as const,
+      name: 'ssh', product: 'OpenSSH', vendor: null, version: '8.0', observedAt: '2024-01-01T00:00:00Z' },
+  ];
+
+  it('deviceDetail_rowClick_rendersDeviceDetailPanelAlongsideRelatedCves', async () => {
+    const deviceId = 55;
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId, hostname: 'host-55', ipAddress: '10.0.0.55', criticality: 'HIGH', score: '8.00', kevCount: 1 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    (api.getDevice as ReturnType<typeof vi.fn>).mockResolvedValue(makeDevice(deviceId));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockResolvedValue(makeRisk(deviceId));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockResolvedValue(makeServices());
+
+    renderWith();
+    const row = await screen.findByTestId(`threats-row-${deviceId}`);
+    fireEvent.click(row);
+
+    // RelatedCvesPanel still present
+    await screen.findByTestId(`threats-related-panel-${deviceId}`);
+
+    // DeviceDetailPanel now also visible
+    await screen.findByTestId('device-detail-panel');
+    expect(screen.getByTestId('device-detail-panel')).toBeInTheDocument();
+  });
+
+  it('deviceDetail_lazyFetch_onlyFetchesOnRowOpen', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 56, hostname: 'host-56', ipAddress: '10.0.0.56', criticality: 'HIGH', score: '8.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.getDevice as ReturnType<typeof vi.fn>).mockResolvedValue(makeDevice(56));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockResolvedValue(makeRisk(56));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWith();
+    // Wait for table to appear — no row expanded yet
+    await screen.findByTestId('threats-row-56');
+
+    // Device fetch calls should NOT have been made before any row is clicked
+    expect(api.getDevice).not.toHaveBeenCalled();
+    expect(api.deviceRisk).not.toHaveBeenCalled();
+    expect(api.listServicesForDevice).not.toHaveBeenCalled();
+
+    // Now click the row
+    fireEvent.click(screen.getByTestId('threats-row-56'));
+
+    // After click the fetches should be triggered
+    await waitFor(() => {
+      expect(api.getDevice).toHaveBeenCalledWith(56);
+      expect(api.deviceRisk).toHaveBeenCalledWith(56);
+      expect(api.listServicesForDevice).toHaveBeenCalledWith(56);
+    });
+  });
+
+  it('deviceDetail_closeDevicePanel_keepsRelatedCvesVisible', async () => {
+    const deviceId = 57;
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId, hostname: 'host-57', ipAddress: '10.0.0.57', criticality: 'HIGH', score: '8.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    (api.getDevice as ReturnType<typeof vi.fn>).mockResolvedValue(makeDevice(deviceId));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockResolvedValue(makeRisk(deviceId));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWith();
+    fireEvent.click(await screen.findByTestId(`threats-row-${deviceId}`));
+
+    // Both panels appear
+    await screen.findByTestId(`threats-related-panel-${deviceId}`);
+    await screen.findByTestId('device-detail-panel');
+
+    // Close device-detail panel via its close button
+    fireEvent.click(screen.getByRole('button', { name: /close panel/i }));
+
+    // DeviceDetailPanel disappears
+    await waitFor(() => expect(screen.queryByTestId('device-detail-panel')).toBeNull());
+
+    // RelatedCvesPanel (and threat row) must still be visible
+    expect(screen.getByTestId(`threats-related-panel-${deviceId}`)).toBeInTheDocument();
+  });
+
+  it('deviceDetail_switchingRows_swapsDeviceDetail', async () => {
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId: 61, hostname: 'host-61', ipAddress: '10.0.0.61', criticality: 'HIGH', score: '9.00', kevCount: 0 },
+      { deviceId: 62, hostname: 'host-62', ipAddress: '10.0.0.62', criticality: 'MEDIUM', score: '5.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    (api.getDevice as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeDevice(61))
+      .mockResolvedValueOnce(makeDevice(62));
+    (api.deviceRisk as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeRisk(61))
+      .mockResolvedValueOnce(makeRisk(62));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    renderWith();
+    fireEvent.click(await screen.findByTestId('threats-row-61'));
+    await screen.findByTestId('device-detail-panel');
+
+    // Switch to row 62
+    fireEvent.click(screen.getByTestId('threats-row-62'));
+
+    // Row 62's related panel appears, row 61's disappears
+    await screen.findByTestId('threats-related-panel-62');
+    expect(screen.queryByTestId('threats-related-panel-61')).toBeNull();
+
+    // Only one device-detail panel (no stacking)
+    await waitFor(() => {
+      expect(screen.getAllByTestId('device-detail-panel')).toHaveLength(1);
+    });
+  });
+
+  it('deviceDetail_adminRole_showsDecommissionControls', async () => {
+    const deviceId = 70;
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId, hostname: 'host-70', ipAddress: '10.0.0.70', criticality: 'HIGH', score: '9.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    (api.getDevice as ReturnType<typeof vi.fn>).mockResolvedValue(makeDevice(deviceId));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockResolvedValue(makeRisk(deviceId));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    // Render with ADMIN role
+    render(
+      <MemoryRouter initialEntries={['/threats']}>
+        <ThreatsDashboard isAdmin={true} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByTestId(`threats-row-${deviceId}`));
+    await screen.findByTestId('device-detail-panel');
+
+    // Decommission button only visible to admins
+    expect(screen.getByRole('button', { name: /decommission/i })).toBeInTheDocument();
+  });
+
+  it('deviceDetail_viewerRole_noDecommissionControls', async () => {
+    const deviceId = 71;
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId, hostname: 'host-71', ipAddress: '10.0.0.71', criticality: 'HIGH', score: '9.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    (api.listFleetCves as ReturnType<typeof vi.fn>).mockResolvedValue(makePage([]));
+    (api.getDevice as ReturnType<typeof vi.fn>).mockResolvedValue(makeDevice(deviceId));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockResolvedValue(makeRisk(deviceId));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    // Render with VIEWER role (default — isAdmin not passed)
+    render(
+      <MemoryRouter initialEntries={['/threats']}>
+        <ThreatsDashboard />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByTestId(`threats-row-${deviceId}`));
+    await screen.findByTestId('device-detail-panel');
+
+    // Decommission button must NOT be visible to viewers
+    expect(screen.queryByRole('button', { name: /decommission/i })).toBeNull();
+    // Inline-edit affordances must also be absent for viewers
+    expect(screen.queryByRole('button', { name: /edit hostname/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /edit criticality/i })).toBeNull();
+  });
+
   it('cveDetail_secondCveClick_swapsDrawerContent', async () => {
     (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
       { deviceId: 77, hostname: 'host-77', ipAddress: '10.0.0.77', criticality: 'CRITICAL', score: '9.50', kevCount: 2 },
@@ -915,6 +1147,35 @@ describe('<ThreatsDashboard />', () => {
     await waitFor(() => expect(screen.getByTestId('cve-detail-panel')).toHaveTextContent('CVE-2024-BBB'));
     // Only one panel should exist
     expect(screen.getAllByTestId('cve-detail-panel')).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // N4 — device-detail fetch failure surfaces inline error notice
+  // ---------------------------------------------------------------------------
+
+  it('deviceDetail_fetchFailure_rendersInlineErrorNotice', async () => {
+    const deviceId = 80;
+    (api.topRisk as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { deviceId, hostname: 'host-80', ipAddress: '10.0.0.80', criticality: 'HIGH', score: '8.00', kevCount: 0 },
+    ]);
+    (api.feedsStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      epss: { scoreDate: '2026-05-24', rowCount: 100 },
+      kev: { lastIngestedAt: '2026-05-24T00:00:00Z', entryCount: 50 },
+      nvd: { lastModified: '2026-05-24T00:00:00Z', rowCount: 42 },
+    });
+    // All three detail fetches reject
+    (api.getDevice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network error'));
+    (api.deviceRisk as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network error'));
+    (api.listServicesForDevice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network error'));
+
+    renderWith();
+    fireEvent.click(await screen.findByTestId(`threats-row-${deviceId}`));
+
+    // Error notice visible inside the expanded row, DeviceDetailPanel absent
+    const notice = await screen.findByTestId('device-detail-error');
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveTextContent(/Could not load device detail/i);
+    expect(screen.queryByTestId('device-detail-panel')).toBeNull();
   });
 });
 
