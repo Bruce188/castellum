@@ -145,6 +145,11 @@ export interface CveDetailDto {
 /**
  * One device returned by GET /api/cve/{cveId}/devices (reverse fleet match).
  * Identifies the device and the first service that matched the target CVE.
+ *
+ * @remarks AC1 additive fields: {@link matchedCpe}, {@link matchedRangeStart},
+ * {@link matchedRangeEnd} carry the NVD CPE row and version-range bounds that
+ * caused the match, making "two devices share N CVEs" self-explanatory without
+ * rewriting the matcher semantics.
  */
 export interface CveAffectedDevice {
   deviceId: number;
@@ -153,6 +158,24 @@ export interface CveAffectedDevice {
   matchedPort: number;
   matchedService: string | null;
   matchedVersion: string | null;
+  /**
+   * CPE 2.3 URI of the NVD row that caused the match
+   * (e.g. "cpe:2.3:a:postgresql:postgresql:*:...").
+   * Null on legacy responses or when no evidence row exists.
+   */
+  matchedCpe: string | null;
+  /**
+   * Lower version bound of the matching CPE row as a human-readable string
+   * (e.g. "14.0 (incl.)" or "14.0 (excl.)").
+   * Null for literal CPE matches or when no lower bound exists.
+   */
+  matchedRangeStart: string | null;
+  /**
+   * Upper version bound of the matching CPE row as a human-readable string
+   * (e.g. "17.0 (excl.)" or "16.14 (incl.)").
+   * Null for literal CPE matches or when no upper bound exists.
+   */
+  matchedRangeEnd: string | null;
 }
 
 /** Sort key for {@code GET /api/cve/fleet}. {@code undefined} → backend default (cvssV31Score DESC). */
@@ -226,6 +249,32 @@ export interface FeedsStatusDto {
     lastModified: string | null;
     rowCount: number;
   };
+}
+
+/**
+ * Response from GET /api/cve/coverage — corpus-coverage snapshot.
+ *
+ * @remarks AC3: When {@link thinCorpus} is true the UI should show a hint pointing
+ * to the "Full NVD backfill" action. A corpus is considered thin when it has fewer
+ * than 10 000 CVEs or the published year span is ≤ 1 year (skewed to recent only).
+ */
+export interface CveCoverageDto {
+  /** Row count of the local NVD corpus; 0 on empty. */
+  totalCves: number;
+  /** Earliest calendar year of any published CVE; null when corpus empty. */
+  earliestPublishedYear: number | null;
+  /** Latest calendar year of any published CVE; null when corpus empty. */
+  latestPublishedYear: number | null;
+  /**
+   * Number of KEV catalog entries whose cve_id exists in the corpus.
+   * 0 is expected for a thin/new corpus — not a bug.
+   */
+  kevInCorpus: number;
+  /**
+   * True when the corpus looks thin (< 10 000 CVEs or year span ≤ 1).
+   * The UI should show the full-backfill hint when this is true.
+   */
+  thinCorpus: boolean;
 }
 
 export interface InitialSyncRequest {

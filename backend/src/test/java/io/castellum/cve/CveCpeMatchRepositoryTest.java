@@ -58,7 +58,7 @@ class CveCpeMatchRepositoryTest {
         Cve cve = saveCve("CVE-2020-15778");
         saveMatch(cve.getId(), "cpe:2.3:a:openbsd:openssh:*:*:*:*:*:*:*:*", true, "8.4");
 
-        List<CveCpeMatch> found = cveCpeMatchRepository.findByCpe23UriStartingWith("cpe:2.3:a:openbsd:openssh:");
+        List<CveCpeMatch> found = cveCpeMatchRepository.findByCpe23UriStartingWithOrderByIdAsc("cpe:2.3:a:openbsd:openssh:");
         assertEquals(1, found.size());
     }
 

@@ -26,4 +26,14 @@ public interface KevEntryRepository extends JpaRepository<KevEntry, Long> {
      */
     @Query("SELECT k.cveId FROM KevEntry k")
     List<String> findAllCveIds();
+
+    /**
+     * Count of KEV catalog entries whose {@code cve_id} also exists in the local
+     * NVD corpus ({@code cve} table). Used by the coverage endpoint (AC3) to surface
+     * "KEV-in-corpus" count without loading every CVE row. Returns 0 when the corpus
+     * is empty or no KEV entries overlap.
+     */
+    @Query("SELECT COUNT(k) FROM KevEntry k WHERE EXISTS " +
+           "(SELECT 1 FROM Cve c WHERE c.cveId = k.cveId)")
+    long countKevInCorpus();
 }

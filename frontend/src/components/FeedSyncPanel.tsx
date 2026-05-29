@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
-import type { FeedScheduleDto, FeedsStatusDto, SyncStatusResponse } from '../api/types';
+import type { CveCoverageDto, FeedScheduleDto, FeedsStatusDto, SyncStatusResponse } from '../api/types';
 import {
   freshnessTier,
   FRESHNESS_DOT_CLASSES,
@@ -24,6 +24,7 @@ export function FeedSyncPanel({ isAdmin }: Props) {
   const [feeds, setFeeds] = useState<FeedsStatusDto | null>(null);
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);
   const [schedule, setSchedule] = useState<FeedScheduleDto | null>(null);
+  const [coverage, setCoverage] = useState<CveCoverageDto | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -56,6 +57,9 @@ export function FeedSyncPanel({ isAdmin }: Props) {
       .then(f => { if (!cancelled) setFeeds(f); })
       .catch(() => { /* keep null — panel still renders */ });
     loadStatus();
+    api.cveCoverage()
+      .then(c => { if (!cancelled) setCoverage(c); })
+      .catch(() => { /* tolerate errors — coverage hint is advisory */ });
     if (isAdmin) {
       api.getFeedSchedule()
         .then(s => { if (!cancelled) setSchedule(s); })
@@ -192,6 +196,36 @@ export function FeedSyncPanel({ isAdmin }: Props) {
             >
               {schedule.enabled ? 'Disable' : 'Enable'}
             </button>
+          )}
+        </div>
+      )}
+
+      {/* AC3: corpus-coverage hint — shown when coverage data indicates a thin corpus */}
+      {coverage && (
+        <div
+          data-testid="corpus-coverage"
+          className="mb-3 text-xs text-gray-600 space-y-0.5 border border-gray-100 rounded bg-gray-50 p-2"
+        >
+          <p>
+            <span className="font-medium">NVD corpus:</span>{' '}
+            {coverage.totalCves.toLocaleString()} CVEs
+            {coverage.earliestPublishedYear && coverage.latestPublishedYear
+              ? ` (${coverage.earliestPublishedYear}–${coverage.latestPublishedYear})`
+              : ''}
+            {' · '}
+            <span data-testid="kev-in-corpus">{coverage.kevInCorpus.toLocaleString()}</span> KEV in corpus
+          </p>
+          {coverage.thinCorpus && (
+            <p
+              data-testid="thin-corpus-hint"
+              className="text-amber-700"
+            >
+              Corpus looks thin — near-identical CVE lists and 0-KEV badges are
+              expected until the backfill completes.{' '}
+              {isAdmin && (
+                <span className="font-medium">Use the "Full NVD backfill" button below.</span>
+              )}
+            </p>
           )}
         </div>
       )}

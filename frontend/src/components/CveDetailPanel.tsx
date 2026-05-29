@@ -193,6 +193,26 @@ export function CveDetailPanel({ cveId, onClose }: Props) {
                       {d.matchedService} :{d.matchedPort}
                       {d.matchedVersion ? ` v${d.matchedVersion}` : ''}
                     </div>
+                    {/* AC1: matched CPE product+version and version range that caused the match */}
+                    {d.matchedCpe && (
+                      <div
+                        data-testid="matched-cpe"
+                        className="text-gray-400 font-mono break-all mt-0.5"
+                        title="NVD CPE that matched this service"
+                      >
+                        {d.matchedCpe}
+                      </div>
+                    )}
+                    {(d.matchedRangeStart || d.matchedRangeEnd) && (
+                      <div
+                        data-testid="matched-range"
+                        className="text-gray-400 mt-0.5"
+                      >
+                        Range:{' '}
+                        {d.matchedRangeStart ? `${d.matchedRangeStart} – ` : ''}
+                        {d.matchedRangeEnd ?? ''}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

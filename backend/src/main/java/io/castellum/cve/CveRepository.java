@@ -18,6 +18,24 @@ public interface CveRepository extends JpaRepository<Cve, Long> {
     @Query("SELECT MAX(c.lastModified) FROM Cve c")
     Optional<Instant> findMaxLastModified();
 
+    /**
+     * Earliest calendar year of any {@code published} timestamp in the corpus.
+     * Returns empty when no CVE has a non-null published timestamp.
+     * Used by the coverage endpoint (AC3) to detect thin / skewed corpora.
+     * Uses {@code EXTRACT(YEAR FROM ...)} which is portable across PostgreSQL and H2
+     * (Hibernate 6 / Spring Boot 3.x).
+     */
+    @Query("SELECT CAST(MIN(EXTRACT(YEAR FROM c.published)) AS integer) FROM Cve c WHERE c.published IS NOT NULL")
+    Optional<Integer> findEarliestPublishedYear();
+
+    /**
+     * Latest calendar year of any {@code published} timestamp in the corpus.
+     * Returns empty when no CVE has a non-null published timestamp.
+     * Used by the coverage endpoint (AC3).
+     */
+    @Query("SELECT CAST(MAX(EXTRACT(YEAR FROM c.published)) AS integer) FROM Cve c WHERE c.published IS NOT NULL")
+    Optional<Integer> findLatestPublishedYear();
+
     Page<Cve> findByCvssV31ScoreIsNotNull(Pageable pageable);
 
     Page<Cve> findByCvssV31ScoreGreaterThanEqual(BigDecimal minScore, Pageable pageable);

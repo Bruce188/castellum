@@ -10,7 +10,7 @@ public interface CveCpeMatchRepository extends JpaRepository<CveCpeMatch, Long> 
 
     List<CveCpeMatch> findByCpe23Uri(String cpe);
 
-    List<CveCpeMatch> findByCpe23UriStartingWith(String prefix);
+    List<CveCpeMatch> findByCpe23UriStartingWithOrderByIdAsc(String prefix);
 
     List<CveCpeMatch> findByCveFk(Long cveFk);
 
