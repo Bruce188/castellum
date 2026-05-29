@@ -63,6 +63,7 @@ export interface NetworkService {
   vendor: string | null;
   product: string | null;
   protocolFamily: string | null;
+  postureSeverity: string | null;
 }
 
 /** Backend BigDecimal serializes as string by default. Callers convert via Number(score). */

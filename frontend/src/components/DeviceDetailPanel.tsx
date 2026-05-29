@@ -188,6 +188,13 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
               {services.map(s => {
                 const isOt = s.protocolFamily === 'OT_ICS';
                 const vp = [s.vendor, s.product].filter(Boolean).join(' ');
+                const postureBadgeClass = s.postureSeverity === 'CRITICAL'
+                  ? 'ml-1 bg-red-100 text-red-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle'
+                  : s.postureSeverity === 'HIGH'
+                  ? 'ml-1 bg-orange-100 text-orange-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle'
+                  : s.postureSeverity === 'MEDIUM'
+                  ? 'ml-1 bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle'
+                  : 'ml-1 bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle';
                 return (
                   <tr key={s.id}>
                     <td>{s.port}</td>
@@ -199,6 +206,14 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
                           className="ml-1 bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle"
                         >
                           ICS / OT
+                        </span>
+                      )}
+                      {s.postureSeverity != null && (
+                        <span
+                          data-testid="posture-severity-badge"
+                          className={postureBadgeClass}
+                        >
+                          {s.postureSeverity}
                         </span>
                       )}
                     </td>

@@ -30,15 +30,15 @@ const risk: DeviceRiskDto = {
 
 const services: NetworkService[] = [
   { id: 1, deviceId: 1, port: 22, protocol: 'tcp', name: 'openssh', version: '8.2',
-    observedAt: null, vendor: null, product: null, protocolFamily: null },
+    observedAt: null, vendor: null, product: null, protocolFamily: null, postureSeverity: null },
   { id: 2, deviceId: 1, port: 80, protocol: 'tcp', name: 'nginx', version: '1.18',
-    observedAt: null, vendor: null, product: null, protocolFamily: null },
+    observedAt: null, vendor: null, product: null, protocolFamily: null, postureSeverity: null },
 ];
 
 const otService: NetworkService = {
   id: 3, deviceId: 1, port: 502, protocol: 'modbus', name: 'modbus', version: '2.4',
   observedAt: null, vendor: 'Schneider Electric', product: 'Modicon M340',
-  protocolFamily: 'OT_ICS',
+  protocolFamily: 'OT_ICS', postureSeverity: null,
 };
 
 describe('<DeviceDetailPanel />', () => {
@@ -300,7 +300,7 @@ describe('<DeviceDetailPanel />', () => {
     const mysqlService: NetworkService = {
       id: 10, deviceId: 1, port: 3306, protocol: 'tcp',
       name: 'MySQL', version: '8.0.46-1.el9',
-      product: 'mysql', vendor: null, observedAt: null, protocolFamily: null,
+      product: 'mysql', vendor: null, observedAt: null, protocolFamily: null, postureSeverity: null,
     };
     render(
       <DeviceDetailPanel device={device} risk={risk} services={[mysqlService]} onClose={() => {}} />
@@ -315,7 +315,7 @@ describe('<DeviceDetailPanel />', () => {
     const legacySvc: NetworkService = {
       id: 11, deviceId: 1, port: 8080, protocol: 'tcp',
       name: 'http', version: null,
-      product: null, vendor: null, observedAt: null, protocolFamily: null,
+      product: null, vendor: null, observedAt: null, protocolFamily: null, postureSeverity: null,
     };
     render(
       <DeviceDetailPanel device={device} risk={risk} services={[legacySvc]} onClose={() => {}} />
@@ -362,5 +362,38 @@ describe('<DeviceDetailPanel />', () => {
       <DeviceDetailPanel device={{ ...device, deviceRole: 'UNKNOWN' }} risk={risk} services={[]} onClose={() => {}} />
     );
     expect(screen.getByTestId('device-role')).toHaveTextContent('UNKNOWN');
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Task 4.3 — posture-severity badge on Services list
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('deviceDetailPanel_rendersPostureSeverityBadge', () => {
+    const criticalService: NetworkService = {
+      id: 100, deviceId: 1, port: 2375, protocol: 'tcp',
+      name: 'docker-engine-api-exposed', version: null,
+      observedAt: null, vendor: null, product: null,
+      protocolFamily: 'DOCKER_EXPOSURE', postureSeverity: 'CRITICAL',
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[criticalService]} onClose={() => {}} />
+    );
+    const badge = screen.getByTestId('posture-severity-badge');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent('CRITICAL');
+    expect(badge.className).toMatch(/red/);
+  });
+
+  it('deviceDetailPanel_noBadge_whenPostureNull', () => {
+    const nonPostureService: NetworkService = {
+      id: 101, deviceId: 1, port: 22, protocol: 'tcp',
+      name: 'openssh', version: '8.2',
+      observedAt: null, vendor: null, product: null,
+      protocolFamily: null, postureSeverity: null,
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[nonPostureService]} onClose={() => {}} />
+    );
+    expect(screen.queryByTestId('posture-severity-badge')).toBeNull();
   });
 });
