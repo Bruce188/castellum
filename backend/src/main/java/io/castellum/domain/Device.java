@@ -56,6 +56,14 @@ public class Device {
     @Column(name = "os_cpe")
     private String osCpe;
 
+    /** Scan that first discovered this device. Set on INSERT during a scan; NULL for pre-V25 and non-scan devices. */
+    @Column(name = "discovered_by_scan_id")
+    private Long discoveredByScanId;
+
+    /** Scan that most recently observed this device. Set on INSERT and UPDATE during a scan; last-writer-wins. NULL for pre-V25 and non-scan devices. */
+    @Column(name = "last_seen_by_scan_id")
+    private Long lastSeenByScanId;
+
     /**
      * Count of network services observed on this device. Computed at entity-load
      * time via the Hibernate formula; not persisted (no Flyway migration needed).
@@ -127,6 +135,12 @@ public class Device {
 
     public String getOsCpe() { return osCpe; }
     public void setOsCpe(String osCpe) { this.osCpe = osCpe; }
+
+    public Long getDiscoveredByScanId() { return discoveredByScanId; }
+    public void setDiscoveredByScanId(Long discoveredByScanId) { this.discoveredByScanId = discoveredByScanId; }
+
+    public Long getLastSeenByScanId() { return lastSeenByScanId; }
+    public void setLastSeenByScanId(Long lastSeenByScanId) { this.lastSeenByScanId = lastSeenByScanId; }
 
     public long getServiceCount() { return serviceCount; }
 
