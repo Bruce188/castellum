@@ -953,6 +953,7 @@ describe('<ThreatsDashboard />', () => {
     serviceCount: 1,
     discoveryScope: 'HOME' as const,
     discoverySource: 'NMAP' as const,
+    deviceRole: 'UNKNOWN' as const,
   });
 
   const makeRisk = (deviceId: number) => ({

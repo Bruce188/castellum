@@ -68,10 +68,13 @@ public class DeviceUpsertService {
 
     private final DeviceRepository repo;
     private final DiscoveryScopeClassifier scopeClassifier;
+    private final DeviceRoleClassifier roleClassifier;
 
-    public DeviceUpsertService(DeviceRepository repo, DiscoveryScopeClassifier scopeClassifier) {
+    public DeviceUpsertService(DeviceRepository repo, DiscoveryScopeClassifier scopeClassifier,
+                               DeviceRoleClassifier roleClassifier) {
         this.repo = repo;
         this.scopeClassifier = scopeClassifier;
+        this.roleClassifier = roleClassifier;
     }
 
     /**
@@ -81,7 +84,7 @@ public class DeviceUpsertService {
      * <p>The Docker discovery path uses this: all containers get
      * {@link DiscoveryScope#DOCKER_BRIDGE} — Docker source is authoritative for scope,
      * regardless of network subnet (custom docker networks can use any RFC1918 range).
-     * Synthetic gateways still use {@link DiscoveryScope#HOME}.
+     * Synthetic gateways still use {@link DiscoveryScope#DOCKER_BRIDGE}.
      *
      * <p>When scope is {@link DiscoveryScope#DOCKER_BRIDGE} the device {@code osName} is filled
      * with {@code "Linux"} if and only if {@code osName} is currently {@code null} or blank:
@@ -135,6 +138,12 @@ public class DeviceUpsertService {
                     && (e.getOsName() == null || e.getOsName().isBlank())) {
                 e.setOsName("Linux");
             }
+            // Non-downgrade role write (UPDATE branch): classify after all other fields are set.
+            // Never overwrite a known role with UNKNOWN — a signal-less re-sweep must not flap.
+            DeviceRole newRoleU = roleClassifier.classify(e);
+            if (newRoleU != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
+                e.setDeviceRole(newRoleU);
+            }
             return repo.save(e);
         } else {
             // sanitizeHostname on insert — mirrors the update branch above.
@@ -157,6 +166,12 @@ public class DeviceUpsertService {
             // AC1: Docker containers run on Linux — set default OS when scope is DOCKER_BRIDGE.
             if (scope == DiscoveryScope.DOCKER_BRIDGE) {
                 fresh.setOsName("Linux");
+            }
+            // Non-downgrade role write (INSERT branch): fresh device starts at entity default UNKNOWN,
+            // so the guard always permits the first classification.
+            DeviceRole newRoleI = roleClassifier.classify(fresh);
+            if (newRoleI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
+                fresh.setDeviceRole(newRoleI);
             }
             return repo.save(fresh);
         }
@@ -211,6 +226,11 @@ public class DeviceUpsertService {
                     e.setDiscoveredByScanId(scanId);
                 }
             }
+            // Non-downgrade role write (UPDATE branch).
+            DeviceRole newRoleUpsertU = roleClassifier.classify(e);
+            if (newRoleUpsertU != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
+                e.setDeviceRole(newRoleUpsertU);
+            }
             return repo.save(e);
         } else {
             Instant now = d.observedAt();
@@ -231,6 +251,11 @@ public class DeviceUpsertService {
             if (scanId != null) {
                 fresh.setDiscoveredByScanId(scanId);
                 fresh.setLastSeenByScanId(scanId);
+            }
+            // Non-downgrade role write (INSERT branch).
+            DeviceRole newRoleUpsertI = roleClassifier.classify(fresh);
+            if (newRoleUpsertI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
+                fresh.setDeviceRole(newRoleUpsertI);
             }
             return repo.save(fresh);
         }
@@ -345,6 +370,11 @@ public class DeviceUpsertService {
                 }
                 // discoverySource: last-writer-wins (mirrors lastSeen; see upsert single-path).
                 existing.setDiscoverySource(d.source());
+                // Non-downgrade role write (UPDATE branch).
+                DeviceRole newRoleAllU = roleClassifier.classify(existing);
+                if (newRoleAllU != DeviceRole.UNKNOWN || existing.getDeviceRole() == DeviceRole.UNKNOWN) {
+                    existing.setDeviceRole(newRoleAllU);
+                }
                 slots.add(new Slot(true, updates.size()));
                 updates.add(existing);
             } else {
@@ -355,6 +385,11 @@ public class DeviceUpsertService {
                 fresh.setLastSeenIface(d.iface());
                 // discoverySource: last-writer-wins (mirrors lastSeen; see upsert single-path).
                 fresh.setDiscoverySource(d.source());
+                // Non-downgrade role write (INSERT branch).
+                DeviceRole newRoleAllI = roleClassifier.classify(fresh);
+                if (newRoleAllI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
+                    fresh.setDeviceRole(newRoleAllI);
+                }
                 slots.add(new Slot(false, inserts.size()));
                 inserts.add(fresh);
             }

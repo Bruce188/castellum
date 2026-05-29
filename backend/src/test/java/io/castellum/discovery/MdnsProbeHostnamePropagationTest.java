@@ -58,7 +58,7 @@ class MdnsProbeHostnamePropagationTest {
     @BeforeEach
     void setUp() {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
-        realUpsert = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier());
+        realUpsert = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier(), new DeviceRoleClassifier());
         service = new PassiveDiscoveryService(
             arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
             realUpsert, auditService, recorder,

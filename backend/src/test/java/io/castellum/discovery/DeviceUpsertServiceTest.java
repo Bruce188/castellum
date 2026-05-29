@@ -2,6 +2,7 @@ package io.castellum.discovery;
 
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
+import io.castellum.discovery.DeviceRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +15,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
-@Import({DeviceUpsertService.class, DiscoveryScopeClassifier.class})
+@Import({DeviceUpsertService.class, DiscoveryScopeClassifier.class, DeviceRoleClassifier.class})
 class DeviceUpsertServiceTest {
 
     @Autowired
@@ -786,6 +787,159 @@ class DeviceUpsertServiceTest {
                 .as("upsertAll: lastSeenByScanId must be null for ip=%s", d.getIpAddress())
                 .isNull();
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Task 1.1 — DeviceRole default round-trip (entity column + default)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A freshly upserted plain ARP device (no OS, no docker source) must persist and
+     * reload with getDeviceRole() == UNKNOWN. This verifies the entity column + default
+     * round-trip via Hibernate-generated schema (Flyway disabled in unit test profile).
+     * DeviceRoleClassifier is NOT in @Import here — classifier wiring is Task 2.1.
+     */
+    @Test
+    void upsert_newIp_defaultsDeviceRoleUnknown_whenNoSignal() {
+        Discovery d = new Discovery("10.0.0.99", "aa:bb:cc:dd:ee:99", "plainhost",
+            DiscoverySource.ARP, T1, null, false);
+        service.upsert(d);
+
+        var found = repo.findByIpAddress("10.0.0.99").orElseThrow();
+        assertThat(found.getDeviceRole()).isEqualTo(DeviceRole.UNKNOWN);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Task 2.1 — DeviceRoleClassifier wiring (all six upsert branches)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * INSERT + UPDATE paths via upsertWithScope: a Docker container (source=DOCKER,
+     * hostname not "docker-net:*") must be classified as CONTAINER on both insert and update.
+     */
+    @Test
+    void upsertWithScope_dockerContainer_setsContainerRole() {
+        service.upsertWithScope(
+            new Discovery("172.20.0.5", null, "api-1", DiscoverySource.DOCKER, T1, null, false),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.20.0.5").orElseThrow();
+        assertThat(found.getDeviceRole())
+            .as("INSERT via upsertWithScope (DOCKER, real hostname) must classify CONTAINER")
+            .isEqualTo(DeviceRole.CONTAINER);
+
+        // Re-upsert (UPDATE branch) — must still be CONTAINER
+        service.upsertWithScope(
+            new Discovery("172.20.0.5", null, "api-1", DiscoverySource.DOCKER, T2, null, false),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var updated = repo.findByIpAddress("172.20.0.5").orElseThrow();
+        assertThat(updated.getDeviceRole())
+            .as("UPDATE via upsertWithScope must preserve CONTAINER role")
+            .isEqualTo(DeviceRole.CONTAINER);
+    }
+
+    /**
+     * A docker-net synthetic gateway (source=DOCKER, hostname starts with "docker-net:")
+     * must stay UNKNOWN on both insert and update (docker-net gateway rule fires first).
+     */
+    @Test
+    void upsertWithScope_dockerNetGateway_staysUnknown() {
+        service.upsertWithScope(
+            new Discovery("172.20.0.1", null, "docker-net:supabase", DiscoverySource.DOCKER, T1, null, false),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var found = repo.findByIpAddress("172.20.0.1").orElseThrow();
+        assertThat(found.getDeviceRole())
+            .as("docker-net gateway must stay UNKNOWN")
+            .isEqualTo(DeviceRole.UNKNOWN);
+    }
+
+    /**
+     * upsert(Discovery, Long) scan path: INSERT and UPDATE branches both classify and persist role.
+     * Seed a device via a first scan upsert (ARP, no OS → UNKNOWN), then re-seed with an OS-bearing
+     * discovery that should flip to SERVER (update branch classification).
+     */
+    @Test
+    void upsert_scanPath_setsRoleFromSignals() {
+        // INSERT path — plain ARP with no OS signals → UNKNOWN (use .5 to avoid .1 ROUTER rule)
+        Discovery insert = new Discovery("10.50.0.5", "aa:bb:cc:00:50:05", "server-host",
+            DiscoverySource.NMAP_SCAN, T1, null, false);
+        service.upsert(insert, 1L);
+
+        var afterInsert = repo.findByIpAddress("10.50.0.5").orElseThrow();
+        assertThat(afterInsert.getDeviceRole())
+            .as("INSERT: no OS signal → UNKNOWN")
+            .isEqualTo(DeviceRole.UNKNOWN);
+
+        // Pre-set osName on the stored device so the UPDATE branch sees a server OS
+        afterInsert.setOsName("Windows Server 2019");
+        repo.save(afterInsert);
+
+        // UPDATE path — re-upsert, classifier reads the now-set osName → SERVER
+        Discovery update = new Discovery("10.50.0.5", "aa:bb:cc:00:50:05", "server-host",
+            DiscoverySource.NMAP_SCAN, T2, null, false);
+        service.upsert(update, 2L);
+
+        var afterUpdate = repo.findByIpAddress("10.50.0.5").orElseThrow();
+        assertThat(afterUpdate.getDeviceRole())
+            .as("UPDATE: server OS on device → SERVER")
+            .isEqualTo(DeviceRole.SERVER);
+    }
+
+    /**
+     * upsertAll batch: INSERT and UPDATE branches both classify and persist role.
+     * One brand-new Docker container (INSERT → CONTAINER) + one pre-seeded HOME device (UPDATE).
+     */
+    @Test
+    void upsertAll_batch_setsRoleOnInsertAndUpdate() {
+        // Seed one existing device (will take the UPDATE branch); use .5 to avoid .1 ROUTER rule
+        Device seed = new Device(null, "10.51.0.5", null, "aa:bb:cc:00:51:05", T1, T1);
+        repo.save(seed);
+
+        List<Discovery> batch = List.of(
+            // UPDATE branch — ARP, no OS → UNKNOWN (no downgrade from existing UNKNOWN is a no-op)
+            new Discovery("10.51.0.5", "aa:bb:cc:00:51:05", null, DiscoverySource.ARP, T2, null, false),
+            // INSERT branch — Docker container → CONTAINER
+            new Discovery("172.20.0.7", null, "db-1", DiscoverySource.DOCKER, T2, null, false)
+        );
+        service.upsertAll(batch);
+
+        var updated = repo.findByIpAddress("10.51.0.5").orElseThrow();
+        assertThat(updated.getDeviceRole())
+            .as("UPDATE batch path: ARP no-OS → UNKNOWN")
+            .isEqualTo(DeviceRole.UNKNOWN);
+
+        var inserted = repo.findByIpAddress("172.20.0.7").orElseThrow();
+        assertThat(inserted.getDeviceRole())
+            .as("INSERT batch path: DOCKER container → CONTAINER")
+            .isEqualTo(DeviceRole.CONTAINER);
+    }
+
+    /**
+     * Non-downgrade guard: a device once classified as CONTAINER (Docker source) must NOT
+     * have its role overwritten back to UNKNOWN by a subsequent signal-less ARP re-sweep
+     * that the classifier would classify as UNKNOWN.
+     */
+    @Test
+    void upsert_nonDowngrade_knownRoleSurvivesSignallessResweep() {
+        // Step 1: seed as Docker container → CONTAINER
+        service.upsertWithScope(
+            new Discovery("172.20.0.9", null, "redis-1", DiscoverySource.DOCKER, T1, null, false),
+            DiscoveryScope.DOCKER_BRIDGE);
+
+        var afterSeed = repo.findByIpAddress("172.20.0.9").orElseThrow();
+        assertThat(afterSeed.getDeviceRole()).isEqualTo(DeviceRole.CONTAINER);
+
+        // Step 2: re-upsert via a signal-less ARP sweep that would classify UNKNOWN
+        // (source=ARP, no OS, non-.1 ip → classifier returns UNKNOWN)
+        service.upsert(new Discovery("172.20.0.9", "02:42:ac:14:00:09", null,
+            DiscoverySource.ARP, T2, null, false));
+
+        var afterResweep = repo.findByIpAddress("172.20.0.9").orElseThrow();
+        assertThat(afterResweep.getDeviceRole())
+            .as("non-downgrade guard: known CONTAINER must survive a signal-less ARP re-sweep")
+            .isEqualTo(DeviceRole.CONTAINER);
     }
 
     // ────────────────────────────────────────────────────────────────────────
