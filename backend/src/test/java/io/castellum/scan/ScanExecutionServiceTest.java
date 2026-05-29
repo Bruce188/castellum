@@ -40,6 +40,7 @@ class ScanExecutionServiceTest {
     @Mock ScanRetryService scanRetryService;
     @Mock io.castellum.risk.RiskCacheEvictor riskCacheEvictor;
     @Mock DeviceRepository deviceRepository;
+    @Mock AliveHostResolver aliveHostResolver;
 
     ScanExecutionService service;
 
@@ -48,7 +49,7 @@ class ScanExecutionServiceTest {
         service = new ScanExecutionService(
             nmapRunner, scanRepository, nmapOutputParser,
             deviceUpsertService, networkServiceRepository, auditService,
-            scanRetryService, riskCacheEvictor, deviceRepository);
+            scanRetryService, riskCacheEvictor, deviceRepository, aliveHostResolver);
     }
 
     // -----------------------------------------------------------------------
@@ -104,7 +105,9 @@ class ScanExecutionServiceTest {
         Scan scan = stubScan(2L, "10.0.0.0/24", "SERVICE_DETECT");
         when(scanRepository.findById(2L)).thenReturn(Optional.of(scan));
         when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(nmapRunner.run(anyString(), any(ScanType.class))).thenThrow(new IOException("connection refused"));
+        // SERVICE_DETECT now resolves alive hosts and runs the explicit-host-list overload.
+        when(aliveHostResolver.aliveHostsIn("10.0.0.0/24")).thenReturn(List.of("10.0.0.5"));
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenThrow(new IOException("connection refused"));
 
         service.executeAsync(2L);
 
@@ -195,32 +198,69 @@ class ScanExecutionServiceTest {
     }
 
     // -----------------------------------------------------------------------
-    // (f) Phantom suppression: SERVICE_DETECT host with 0 open services is NOT persisted
+    // (f) Alive-host path: a known-up SERVICE_DETECT host with 0 open services IS upserted.
+    //     Phantom suppression only applied on the -Pn whole-CIDR fallback; the alive-host
+    //     path targets only hosts a prior PING_SWEEP confirmed up, so a host with no open
+    //     ports is a real device that must NOT be dropped.
     // -----------------------------------------------------------------------
 
     @Test
-    void serviceDetect_hostWithNoOpenServices_isNotUpserted() throws Exception {
+    void serviceDetect_aliveHostWithNoOpenServices_isStillUpserted() throws Exception {
         Scan scan = stubScan(5L, "10.0.2.0/24", "SERVICE_DETECT");
         when(scanRepository.findById(5L)).thenReturn(Optional.of(scan));
         when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        NmapResult result = new NmapResult(0, "stdout", "");
-        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+        // PING_SWEEP confirmed this host up; it simply exposes no open ports right now.
+        when(aliveHostResolver.aliveHostsIn("10.0.2.0/24")).thenReturn(List.of("10.0.2.7"));
 
-        // Under -Pn this address is reported "up" but exposes no open ports — a phantom.
-        NmapOutputParser.DiscoveredHost phantom =
-            new NmapOutputParser.DiscoveredHost("10.0.2.0", null, null);
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(result);
+
+        NmapOutputParser.DiscoveredHost aliveNoPorts =
+            new NmapOutputParser.DiscoveredHost("10.0.2.7", null, null);
         NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(
-            List.of(phantom), List.of());
+            List.of(aliveNoPorts), List.of());
         when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        Device device = new Device();
+        device.setId(50L);
+        when(deviceUpsertService.upsert(any())).thenReturn(device);
 
         service.executeAsync(5L);
 
-        // No device upsert, no service persistence for the phantom host.
+        // The known-up host IS upserted (no phantom suppression on the alive-host path).
+        verify(deviceUpsertService).upsert(argThat(d -> "10.0.2.7".equals(d.ipAddress())));
+        // No services to persist.
+        verify(networkServiceRepository, never()).save(any());
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (f2) SERVICE_DETECT empty alive set → short-circuit COMPLETE, runner never called.
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_emptyAliveSet_shortCircuitsToCompleteWithoutRunningNmap() throws Exception {
+        Scan scan = stubScan(50L, "10.0.9.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(50L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.9.0/24")).thenReturn(List.of());
+
+        service.executeAsync(50L);
+
+        // nmap must NOT run on either overload — no whole-range fallback.
+        verify(nmapRunner, never()).run(anyString(), any(ScanType.class));
+        verify(nmapRunner, never()).run(anyList(), any(ScanType.class));
+        // Parser never invoked; no devices/services persisted.
+        verify(nmapOutputParser, never()).parse(anyString(), any(ScanType.class));
         verify(deviceUpsertService, never()).upsert(any());
         verify(networkServiceRepository, never()).save(any());
-        assertEquals(ScanStatus.COMPLETE, scan.getStatus(),
-            "scan still completes successfully even when all hosts are phantoms");
+        // Still a clean success.
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+        assertNotNull(scan.getCompletedAt());
+        assertNull(scan.getFailureReason());
+        verify(auditService).recordEvent(eq("system"), eq("SCAN_COMPLETE"), eq("scan"), eq("50"), any());
+        verify(auditService, never()).recordEvent(eq("system"), eq("SCAN_FAILED"), any(), any(), any());
     }
 
     // -----------------------------------------------------------------------
@@ -232,9 +272,10 @@ class ScanExecutionServiceTest {
         Scan scan = stubScan(6L, "10.0.3.0/24", "SERVICE_DETECT");
         when(scanRepository.findById(6L)).thenReturn(Optional.of(scan));
         when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.3.0/24")).thenReturn(List.of("10.0.3.7"));
 
         NmapResult result = new NmapResult(0, "stdout", "");
-        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(result);
 
         NmapOutputParser.DiscoveredHost realHost =
             new NmapOutputParser.DiscoveredHost("10.0.3.7", "real", null);
@@ -334,9 +375,10 @@ class ScanExecutionServiceTest {
         Scan scan = stubScan(9L, "10.0.6.0/24", "SERVICE_DETECT");
         when(scanRepository.findById(9L)).thenReturn(Optional.of(scan));
         when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.6.0/24")).thenReturn(List.of("10.0.6.2"));
 
         NmapResult result = new NmapResult(0, "stdout", "");
-        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(result);
 
         NmapOutputParser.OsMatch osMatch =
             new NmapOutputParser.OsMatch("Windows 10", 85, "cpe:/o:microsoft:windows_10");

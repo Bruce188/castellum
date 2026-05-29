@@ -13,6 +13,8 @@ class NmapScanPropertiesTest {
             "default portScanHostTimeout must be 180s");
         assertEquals("30s", props.getPingHostTimeout(),
             "default pingHostTimeout must be 30s");
+        assertEquals(300L, props.getProcessTimeoutSeconds(),
+            "default processTimeoutSeconds must be 300 (sized for a /24, preserving prior behaviour)");
     }
 
     @Test
@@ -20,8 +22,10 @@ class NmapScanPropertiesTest {
         NmapScanProperties props = new NmapScanProperties();
         props.setPortScanHostTimeout("300s");
         props.setPingHostTimeout("60s");
+        props.setProcessTimeoutSeconds(900L);
         assertEquals("300s", props.getPortScanHostTimeout());
         assertEquals("60s", props.getPingHostTimeout());
+        assertEquals(900L, props.getProcessTimeoutSeconds());
     }
 
     @Test

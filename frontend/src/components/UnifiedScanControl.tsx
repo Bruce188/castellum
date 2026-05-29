@@ -66,6 +66,10 @@ export function UnifiedScanControl({ isAdmin = true }: Props) {
       );
     };
 
+    // Stage ordering: PING_SWEEP must finish first. The backend scopes SERVICE_DETECT to the
+    // alive hosts PING_SWEEP discovered, so SERVICE_DETECT (and the other port-enumerating /
+    // device-list-driven stages) depend on PING_SWEEP and start only once it is COMPLETE.
+    // This also prevents the four nmap/OT stages from hammering the host in parallel.
     const deps = {
       stages: [
         {
@@ -77,16 +81,19 @@ export function UnifiedScanControl({ isAdmin = true }: Props) {
           id: 'SERVICE_DETECT' as StageId,
           kind: 'nmap' as const,
           run: makeNmapStage('SERVICE_DETECT', nmapDeps),
+          dependsOn: ['PING_SWEEP' as StageId],
         },
         {
           id: 'OS_FINGERPRINT' as StageId,
           kind: 'nmap' as const,
           run: makeNmapStage('OS_FINGERPRINT', nmapDeps),
+          dependsOn: ['PING_SWEEP' as StageId],
         },
         {
           id: 'OT_ICS_SWEEP' as StageId,
           kind: 'ot' as const,
           run: otStageRunner,
+          dependsOn: ['PING_SWEEP' as StageId],
         },
       ],
     };

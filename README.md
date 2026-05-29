@@ -116,7 +116,7 @@ export CASTELLUM_NVD_API_KEY=<your-key>
 ./scripts/nvd-bulk-sync.sh --since 2002-01-01
 ```
 
-For the full operator runbook — including Suricata wiring, TLS termination with nginx/Caddy/Traefik, and bootstrap admin pre-flight checklist — see [documentation/operations.md](documentation/operations.md).
+For the full operator runbook — including Suricata wiring, TLS termination with nginx/Caddy/Traefik, and bootstrap admin pre-flight checklist — see [documentation/operations.html](documentation/operations.html).
 
 ### Supply-chain pipeline
 
@@ -132,8 +132,8 @@ See [documentation/supply-chain.md](documentation/supply-chain.md) for the full 
 ## API Reference
 
 Full documentation for auth and RBAC: [documentation/auth.md](documentation/auth.md)
-OT probe reference: [documentation/ot-probes.md](documentation/ot-probes.md)
-STIX/TAXII/MISP reference: [documentation/stix-taxii-misp.md](documentation/stix-taxii-misp.md)
+OT probe reference: [documentation/ot-probes.html](documentation/ot-probes.html)
+STIX/TAXII/MISP reference: [documentation/threat-intel-integrations.html](documentation/threat-intel-integrations.html)
 Runtime flags (pcap4j, CAP_NET_RAW): [documentation/runtime-flags.md](documentation/runtime-flags.md)
 Supply-chain pipeline: [documentation/supply-chain.md](documentation/supply-chain.md)
 

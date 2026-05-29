@@ -75,6 +75,9 @@ castellum:
     nmap:
       port-scan-host-timeout: ${CASTELLUM_SCAN_NMAP_PORT_SCAN_HOST_TIMEOUT:180s}
       ping-host-timeout: ${CASTELLUM_SCAN_NMAP_PING_HOST_TIMEOUT:30s}
+      # Outer wall-clock cap on a single nmap process (seconds). Default sized for a /24;
+      # raise for larger ranges (the scope guard permits up to /22).
+      process-timeout-seconds: ${CASTELLUM_SCAN_NMAP_PROCESS_TIMEOUT_SECONDS:300}
   initial-sync:
     executor:
       # Single-threaded executor for the one-click initial data-sync background job.

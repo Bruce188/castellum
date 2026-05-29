@@ -516,4 +516,83 @@ describe('runUnifiedScan', () => {
       expect(snapsWithDevices.length).toBeGreaterThan(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Stage dependencies (dependsOn) — ordering + cascade
+  // -------------------------------------------------------------------------
+  describe('stage dependencies (dependsOn)', () => {
+    it('a dependent stage does not start until its dependency has completed', async () => {
+      const startOrder: StageId[] = [];
+      const completeOrder: StageId[] = [];
+
+      // PING_SWEEP takes 10ms; the other three depend on it. With concurrency 4 the dependents
+      // would otherwise start immediately — dependsOn must hold them until PING_SWEEP completes.
+      const stages: StageDef[] = STAGE_ORDER.map((id) => ({
+        id,
+        kind: id === 'OT_ICS_SWEEP' ? 'ot' : 'nmap',
+        dependsOn: id === 'PING_SWEEP' ? undefined : (['PING_SWEEP'] as StageId[]),
+        run: (ctx: StageContext) =>
+          new Promise<void>((resolve) => {
+            startOrder.push(id);
+            setTimeout(() => {
+              completeOrder.push(id);
+              ctx.report({});
+              resolve();
+            }, id === 'PING_SWEEP' ? 10 : 1);
+          }),
+      }));
+
+      const promise = runUnifiedScan('10.0.0.0/24', { stages }, vi.fn());
+      // Let microtasks settle: only PING_SWEEP should have started.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(startOrder).toEqual(['PING_SWEEP']);
+
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      // PING_SWEEP completes before any dependent starts.
+      for (const id of STAGE_ORDER.filter((s) => s !== 'PING_SWEEP')) {
+        expect(startOrder.indexOf(id)).toBeGreaterThan(startOrder.indexOf('PING_SWEEP'));
+      }
+      expect(completeOrder[0]).toBe('PING_SWEEP');
+      expect(result.succeededStages).toBe(4);
+    });
+
+    it('a failed dependency cascades: dependents are marked failed (skipped) and never run', async () => {
+      const ran: StageId[] = [];
+
+      const stages: StageDef[] = STAGE_ORDER.map((id) => ({
+        id,
+        kind: id === 'OT_ICS_SWEEP' ? 'ot' : 'nmap',
+        dependsOn: id === 'PING_SWEEP' ? undefined : (['PING_SWEEP'] as StageId[]),
+        run: async (ctx: StageContext) => {
+          ran.push(id);
+          ctx.report({});
+          if (id === 'PING_SWEEP') {
+            throw new Error('sweep boom');
+          }
+        },
+      }));
+
+      const promise = runUnifiedScan('10.0.0.0/24', { stages }, vi.fn());
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      // Only PING_SWEEP ever ran its body.
+      expect(ran).toEqual(['PING_SWEEP']);
+
+      // PING_SWEEP failed; the three dependents are failed (skipped) — all 4 terminal.
+      const ping = result.stages.find((s) => s.id === 'PING_SWEEP')!;
+      expect(ping.status).toBe('failed');
+      for (const id of STAGE_ORDER.filter((s) => s !== 'PING_SWEEP')) {
+        const dep = result.stages.find((s) => s.id === id)!;
+        expect(dep.status).toBe('failed');
+        expect(dep.error).toMatch(/skipped/i);
+      }
+      expect(result.completedStages).toBe(4);
+      expect(result.failedStages).toBe(4);
+      expect(result.succeededStages).toBe(0);
+    });
+  });
 });
