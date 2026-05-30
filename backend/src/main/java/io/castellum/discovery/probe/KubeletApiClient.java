@@ -13,12 +13,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
-import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.Optional;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 /**
  * Structural READ-ONLY wrapper for the Kubernetes kubelet read-only port ({@code :10255}).

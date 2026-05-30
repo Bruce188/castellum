@@ -563,8 +563,7 @@ public class DockerHostProbeService {
      * <p><b>:6443 logic:</b>
      * <ul>
      *   <li>If :6443 reachable AND anonymous {@code getPods} returns a body → CRITICAL finding
-     *       (anonymous pod read succeeded) + ingest pod topology. Also attempt {@code getSecrets}
-     *       for the "default" namespace — a secret body further justifies CRITICAL.</li>
+     *       (anonymous pod read succeeded) + ingest pod topology.</li>
      *   <li>If :6443 reachable BUT getter returns empty (401/403) → HIGH finding-only; NO data
      *       extracted, NO retry (R3).</li>
      * </ul>
