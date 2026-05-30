@@ -402,6 +402,17 @@ public class DockerHostProbeService {
             Instant now = Instant.now();
             dockerDiscoveryService.ingest(containers, origin, now);
 
+            // Wire F2 NB1: recover gateway/subnet/network_name for networks with no running
+            // container representative (gateway-only, no phantom containers — R2).
+            // Mirrors the probeSnmp mapBridges → ingestNetworks pattern.
+            Optional<String> networksOpt = apiClient.getNetworks(ip, PORT_2375);
+            if (networksOpt.isPresent()) {
+                var attachments = networkMapper.mapNetworks(networksOpt.get());
+                if (!attachments.isEmpty()) {
+                    dockerDiscoveryService.ingestNetworks(attachments, origin, now);
+                }
+            }
+
             // Raise CRITICAL posture finding for the probed host device
             raiseFindingForExistingDevice(ip, PORT_2375, "tcp",
                 PROTOCOL_FAMILY_DOCKER_EXPOSURE, SEVERITY_CRITICAL);

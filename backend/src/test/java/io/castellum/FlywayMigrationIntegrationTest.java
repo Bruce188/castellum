@@ -573,6 +573,39 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v30NetworkNameColumnRoundTrip() {
+        // (a) Column presence — network_name on device.
+        Number netNameCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'NETWORK_NAME'",
+            Number.class);
+        assertNotNull(netNameCol, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(netNameCol.intValue() > 0,
+            "network_name column must exist in device table after V30 migration");
+
+        // (b) Nullable — INSERT with network_name=null succeeds.
+        Instant now = Instant.now();
+        Device nullNameDevice = new Device();
+        nullNameDevice.setIpAddress("10.99.30.1");
+        nullNameDevice.setFirstSeen(now);
+        nullNameDevice.setLastSeen(now);
+        Device savedNull = deviceRepository.save(nullNameDevice);
+        assertNull(deviceRepository.findById(savedNull.getId()).orElseThrow().getNetworkName(),
+            "network_name must be null when not set");
+
+        // (c) Non-null value round-trips.
+        Device namedDevice = new Device();
+        namedDevice.setIpAddress("10.99.30.2");
+        namedDevice.setFirstSeen(now);
+        namedDevice.setLastSeen(now);
+        namedDevice.setNetworkName("bridge");
+        Device savedNamed = deviceRepository.save(namedDevice);
+        assertEquals("bridge",
+            deviceRepository.findById(savedNamed.getId()).orElseThrow().getNetworkName(),
+            "network_name='bridge' must round-trip after V30 migration");
+    }
+
+    @Test
     void v29RemoteAgentTokenRoundTrip() {
         // (a) Column presence — token_hash, revoked, created_at on remote_agent_token.
         Number tokenHashCol = jdbcTemplate.queryForObject(

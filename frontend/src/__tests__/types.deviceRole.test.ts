@@ -32,6 +32,9 @@ describe('DeviceRole type contract', () => {
       osCpe: null,
       publishesHostPort: false,
       deviceRole: 'UNKNOWN',
+      originHostIp: 'local',
+      originHostName: null,
+      networkName: null,
     };
     expect(r).toBe('CONTAINER');
     expect(d.deviceRole).toBe('UNKNOWN');

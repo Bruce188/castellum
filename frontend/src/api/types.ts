@@ -50,6 +50,24 @@ export interface Device {
    * Defaults to {@code 'UNKNOWN'} for devices that have not been classified.
    */
   deviceRole: DeviceRole;
+  /**
+   * IP of the host from which this device was discovered. Value {@code "local"}
+   * for all local-discovery paths (ARP/NMAP/Docker-CLI). A remote docker probe
+   * writes the probed host's IP so the same container IP from two different hosts
+   * becomes two distinct device rows. NOT NULL — defaults to {@code "local"}.
+   */
+  originHostIp: string;
+  /**
+   * Human-readable hostname of the origin host. Null for local discovery and when
+   * the hostname is unknown at probe time.
+   */
+  originHostName: string | null;
+  /**
+   * Docker network name for container devices (e.g. {@code "bridge"},
+   * {@code "pingpay_default"}). Null for non-docker devices and legacy rows.
+   * Populated by the backend from the container's primary docker network (V30).
+   */
+  networkName: string | null;
 }
 
 export interface NetworkService {

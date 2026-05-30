@@ -445,6 +445,84 @@ class GraphBuilderTest {
             .isFalse();
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Multi-pivot: per-origin GATEWAY_PIVOT partitioning
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Two origins: "local" pivot at dockerHostIp and a remote pivot at 192.168.1.50.
+     * Each pivot bridges ONLY its own partition's docker member.
+     * Cross-origin GATEWAY_PIVOT edges must NOT exist.
+     */
+    @Test
+    void multiPivot_eachOriginBridgesOnlyItsOwnDockerMember() {
+        // Local origin — pivot and its docker member
+        Device localPivot = device(5L, "192.168.68.51");          // HOME, local
+        Device localDocker = dockerDevice(4L, "172.17.0.2");      // DOCKER_BRIDGE, originHostIp="local" (entity default)
+
+        // Remote origin — pivot at 192.168.1.50 and its docker member
+        Device remotePivot = device(10L, "192.168.1.50");         // HOME
+        Device remoteDocker = dockerDevice(11L, "172.18.0.2");    // DOCKER_BRIDGE, originHostIp="192.168.1.50"
+        remoteDocker.setOriginHostIp("192.168.1.50");
+
+        when(deviceRepo.findAll()).thenReturn(List.of(localPivot, localDocker, remotePivot, remoteDocker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vLocalPivot  = new DeviceVertex(5L,  "192.168.68.51");
+        DeviceVertex vLocalDocker = new DeviceVertex(4L,  "172.17.0.2");
+        DeviceVertex vRemPivot    = new DeviceVertex(10L, "192.168.1.50");
+        DeviceVertex vRemDocker   = new DeviceVertex(11L, "172.18.0.2");
+
+        // Each pivot bridges its own member
+        assertThat(g.getEdge(vLocalPivot, vLocalDocker)).as("local pivot → local docker").isNotNull();
+        assertThat(g.getEdge(vLocalDocker, vLocalPivot)).as("local docker → local pivot").isNotNull();
+        assertThat(g.getEdge(vRemPivot, vRemDocker)).as("remote pivot → remote docker").isNotNull();
+        assertThat(g.getEdge(vRemDocker, vRemPivot)).as("remote docker → remote pivot").isNotNull();
+
+        // Cross-origin GATEWAY_PIVOT edges must NOT exist
+        assertThat(g.getEdge(vLocalPivot, vRemDocker))
+            .as("local pivot must NOT bridge remote docker")
+            .isNull();
+        assertThat(g.getEdge(vRemPivot, vLocalDocker))
+            .as("remote pivot must NOT bridge local docker")
+            .isNull();
+    }
+
+    /**
+     * Per-partition subnetCap: one origin exceeds cap (skipped), a second origin under cap
+     * still emits edges — proves the cap is per-partition, not global.
+     */
+    @Test
+    void multiPivot_perPartitionSubnetCap_overCapPartitionSkippedOtherEmits() {
+        properties.setSubnetCap(1);   // cap = 1 member per partition
+
+        // Local partition: 2 docker members — exceeds cap → skipped
+        Device localPivot = device(5L, "192.168.68.51");
+        Device localDocker1 = dockerDevice(4L, "172.17.0.2");
+        Device localDocker2 = dockerDevice(6L, "172.17.0.3");
+
+        // Remote partition: 1 docker member — within cap → emits
+        Device remotePivot = device(10L, "192.168.1.50");
+        Device remoteDocker = dockerDevice(11L, "172.18.0.2");
+        remoteDocker.setOriginHostIp("192.168.1.50");
+
+        when(deviceRepo.findAll()).thenReturn(List.of(localPivot, localDocker1, localDocker2, remotePivot, remoteDocker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vLocalPivot  = new DeviceVertex(5L,  "192.168.68.51");
+        DeviceVertex vLocalD1     = new DeviceVertex(4L,  "172.17.0.2");
+        DeviceVertex vRemPivot    = new DeviceVertex(10L, "192.168.1.50");
+        DeviceVertex vRemDocker   = new DeviceVertex(11L, "172.18.0.2");
+
+        // Local partition over cap → no GATEWAY_PIVOT
+        assertThat(g.getEdge(vLocalPivot, vLocalD1)).as("over-cap local partition must not emit edges").isNull();
+
+        // Remote partition within cap → emits
+        assertThat(g.getEdge(vRemPivot, vRemDocker)).as("under-cap remote partition must emit edges").isNotNull();
+    }
+
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
         return org.assertj.core.data.Offset.offset(tolerance);
     }

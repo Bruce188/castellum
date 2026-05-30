@@ -48,13 +48,17 @@ import java.util.Map;
  * {@code Map<String, List<Device>>} via the {@code v4:}/{@code v6:} prefix on the bucket key
  * returned by {@link #extractSubnetKey(String)}.
  *
- * <p>A third, additive gateway-bridge pass runs after the EXPLOITABLE_VULN pass. It detects a
- * single HOME-scope pivot node (matched by the configured {@link GraphProperties#getDockerHostIp()})
- * and emits bidirectional {@link EdgeType#GATEWAY_PIVOT} edges between the pivot and every
- * DOCKER_BRIDGE device. Pivot detection is IP-based only — the hostname alias
+ * <p>A third, additive gateway-bridge pass runs after the EXPLOITABLE_VULN pass. DOCKER_BRIDGE
+ * devices are partitioned by {@code originHostIp}. For each partition a pivot HOME device is
+ * resolved: the {@code "local"} origin matches the configured
+ * {@link GraphProperties#getDockerHostIp()}; non-local origins match a HOME device whose
+ * {@code ipAddress} equals the origin host IP. Bidirectional {@link EdgeType#GATEWAY_PIVOT}
+ * edges are emitted ONLY between the pivot and members of its own partition — cross-origin
+ * bridging never occurs. Pivot detection is IP-based only — the hostname alias
  * {@code "host.docker.internal"} is a Docker network artifact, never stored as a real hostname.
- * LINK_LOCAL and LOOPBACK scopes are explicitly excluded. When no pivot is detected,
- * DOCKER_BRIDGE devices remain isolated.
+ * LINK_LOCAL and LOOPBACK scopes are explicitly excluded. Single-origin ({@code "local"}) input
+ * is byte-identical to the prior single-pivot behaviour. When no pivot is detected for a
+ * partition, that partition's DOCKER_BRIDGE devices remain isolated.
  */
 @Component
 public class GraphBuilder {
@@ -176,41 +180,74 @@ public class GraphBuilder {
 
         // WEAK_CRED_PATH: typed-but-empty seam — no signal source in v1; see analysis-v5 § 3.
 
-        // GATEWAY_PIVOT pass — bridges HOME and DOCKER_BRIDGE scopes through a single pivot node.
-        // Pivot detection: a HOME-scope device whose IP matches the configured dockerHostIp.
-        // Hostname is deliberately NOT used for detection — "host.docker.internal" is a Docker
-        // bridge-gateway alias that is never stored as a real hostname (filtered by
-        // DeviceUpsertService). Matching by IP alone is correct and alias-free.
-        // If multiple qualify, pick by lowest device id.
+        // GATEWAY_PIVOT pass — bridges HOME and DOCKER_BRIDGE scopes through per-origin pivot nodes.
+        // Pivot detection is per-origin: DOCKER_BRIDGE devices are partitioned by originHostIp.
+        // For each partition, the pivot HOME device is resolved:
+        //   - origin "local" → HOME device whose IP matches the configured dockerHostIp (min by id).
+        //   - non-local origin → HOME device whose ipAddress equals that originHostIp (min by id).
+        // GATEWAY_PIVOT edges are emitted ONLY between the pivot and members of its own partition.
+        // Single-origin ("local") input reproduces the previous single-pivot loop byte-identically.
+        // Hostname is deliberately NOT used — "host.docker.internal" is filtered by DeviceUpsertService.
         // LINK_LOCAL and LOOPBACK scopes are never bridged by this pass.
-        Device pivot = devices.stream()
-            .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
-            .filter(d -> properties.getDockerHostIp().equals(d.getIpAddress()))
-            .min(Comparator.comparingLong(Device::getId))
-            .orElse(null);
 
-        if (pivot != null) {
-            List<Device> dockerMembers = devices.stream()
-                .filter(d -> d.getDiscoveryScope() == DiscoveryScope.DOCKER_BRIDGE)
-                .toList();
-            if (dockerMembers.size() > properties.getSubnetCap()) {
-                log.warn("docker-bridge set has {} members, exceeds subnet-cap={}; skipping GATEWAY_PIVOT edges",
-                    dockerMembers.size(), properties.getSubnetCap());
+        // Partition DOCKER_BRIDGE devices by originHostIp (LinkedHashMap for determinism).
+        Map<String, List<Device>> dockerByOrigin = new LinkedHashMap<>();
+        for (Device d : devices) {
+            if (d.getDiscoveryScope() != DiscoveryScope.DOCKER_BRIDGE) continue;
+            String origin = d.getOriginHostIp() != null ? d.getOriginHostIp() : "local";
+            dockerByOrigin.computeIfAbsent(origin, k -> new ArrayList<>()).add(d);
+        }
+
+        // Build a lookup of HOME devices by IP for non-local pivot resolution.
+        Map<String, Device> homeByIp = new LinkedHashMap<>();
+        for (Device d : devices) {
+            if (d.getDiscoveryScope() != DiscoveryScope.HOME) continue;
+            homeByIp.putIfAbsent(d.getIpAddress(), d);
+        }
+
+        String techniqueId = AttackTechniqueMapper.forEdgeType(EdgeType.GATEWAY_PIVOT).id();
+        for (Map.Entry<String, List<Device>> entry : dockerByOrigin.entrySet()) {
+            String originHostIp = entry.getKey();
+            List<Device> dockerMembers = entry.getValue();
+
+            // Resolve the pivot HOME device for this partition.
+            Device pivot;
+            if ("local".equals(originHostIp)) {
+                // Local origin: match by configured dockerHostIp.
+                pivot = devices.stream()
+                    .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
+                    .filter(d -> properties.getDockerHostIp().equals(d.getIpAddress()))
+                    .min(Comparator.comparingLong(Device::getId))
+                    .orElse(null);
             } else {
-                DeviceVertex vPivot = vertexById.get(pivot.getId());
-                String techniqueId = AttackTechniqueMapper.forEdgeType(EdgeType.GATEWAY_PIVOT).id();
-                for (Device member : dockerMembers) {
-                    DeviceVertex vMember = vertexById.get(member.getId());
-                    AttackEdge fwd = new AttackEdge(EdgeType.GATEWAY_PIVOT,
-                        EdgeWeights.gatewayPivotRisk(), null, techniqueId);
-                    if (graph.addEdge(vPivot, vMember, fwd)) {
-                        graph.setEdgeWeight(fwd, EdgeWeights.gatewayPivotWeight());
-                    }
-                    AttackEdge rev = new AttackEdge(EdgeType.GATEWAY_PIVOT,
-                        EdgeWeights.gatewayPivotRisk(), null, techniqueId);
-                    if (graph.addEdge(vMember, vPivot, rev)) {
-                        graph.setEdgeWeight(rev, EdgeWeights.gatewayPivotWeight());
-                    }
+                // Remote origin: HOME device whose IP equals the origin host IP.
+                pivot = devices.stream()
+                    .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
+                    .filter(d -> originHostIp.equals(d.getIpAddress()))
+                    .min(Comparator.comparingLong(Device::getId))
+                    .orElse(null);
+            }
+
+            if (pivot == null) continue;
+
+            if (dockerMembers.size() > properties.getSubnetCap()) {
+                log.warn("docker-bridge partition for origin {} has {} members, exceeds subnet-cap={}; skipping GATEWAY_PIVOT edges",
+                    originHostIp, dockerMembers.size(), properties.getSubnetCap());
+                continue;
+            }
+
+            DeviceVertex vPivot = vertexById.get(pivot.getId());
+            for (Device member : dockerMembers) {
+                DeviceVertex vMember = vertexById.get(member.getId());
+                AttackEdge fwd = new AttackEdge(EdgeType.GATEWAY_PIVOT,
+                    EdgeWeights.gatewayPivotRisk(), null, techniqueId);
+                if (graph.addEdge(vPivot, vMember, fwd)) {
+                    graph.setEdgeWeight(fwd, EdgeWeights.gatewayPivotWeight());
+                }
+                AttackEdge rev = new AttackEdge(EdgeType.GATEWAY_PIVOT,
+                    EdgeWeights.gatewayPivotRisk(), null, techniqueId);
+                if (graph.addEdge(vMember, vPivot, rev)) {
+                    graph.setEdgeWeight(rev, EdgeWeights.gatewayPivotWeight());
                 }
             }
         }

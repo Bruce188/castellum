@@ -3,6 +3,7 @@ package io.castellum.discovery;
 import io.castellum.audit.AuditService;
 import io.castellum.discovery.DockerContainer.DockerNetworkAttachment;
 import io.castellum.domain.Device;
+import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
 import org.slf4j.Logger;
@@ -55,6 +56,7 @@ public class DockerDiscoveryService {
     private final DockerCliClient cli;
     private final DockerInspectParser parser;
     private final DeviceUpsertService upsertService;
+    private final DeviceRepository deviceRepository;
     private final NetworkServiceRepository networkServiceRepository;
     private final AuditService auditService;
     private final Clock clock;
@@ -62,12 +64,14 @@ public class DockerDiscoveryService {
     public DockerDiscoveryService(DockerCliClient cli,
                                   DockerInspectParser parser,
                                   DeviceUpsertService upsertService,
+                                  DeviceRepository deviceRepository,
                                   NetworkServiceRepository networkServiceRepository,
                                   AuditService auditService,
                                   Clock clock) {
         this.cli = cli;
         this.parser = parser;
         this.upsertService = upsertService;
+        this.deviceRepository = deviceRepository;
         this.networkServiceRepository = networkServiceRepository;
         this.auditService = auditService;
         this.clock = clock;
@@ -140,6 +144,11 @@ public class DockerDiscoveryService {
                 null,                       // no host iface for a container address
                 c.publishesHostPort());     // propagate host-port flag from parsed container
             Device saved = upsertService.upsertWithScope(disc, scope, origin);
+            // Populate the container's docker network name (e.g. "bridge", "pingpay_default").
+            // Post-upsert mutation mirrors the registryImages / originHostIp re-save pattern.
+            // primary.networkName() is always non-null for containers that reach this path.
+            saved.setNetworkName(primary.networkName());
+            deviceRepository.save(saved);
             deviceIds.add(saved.getId());
             containerCount++;
 

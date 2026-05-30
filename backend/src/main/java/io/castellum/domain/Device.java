@@ -118,6 +118,14 @@ public class Device {
     private String originHostName;
 
     /**
+     * Docker network name for container devices (e.g. {@code "bridge"}, {@code "pingpay_default"}).
+     * Populated by {@code DockerDiscoveryService.ingest()} from the container's primary docker
+     * network. Null for non-docker devices, gateway devices, and legacy rows (pre-V30).
+     */
+    @Column(name = "network_name")
+    private String networkName;
+
+    /**
      * Count of network services observed on this device. Computed at entity-load
      * time via the Hibernate formula; not persisted (no Flyway migration needed).
      * Uses the physical table name {@code service} and column {@code device_id}
@@ -209,6 +217,9 @@ public class Device {
 
     public String getOriginHostName() { return originHostName; }
     public void setOriginHostName(String originHostName) { this.originHostName = originHostName; }
+
+    public String getNetworkName() { return networkName; }
+    public void setNetworkName(String networkName) { this.networkName = networkName; }
 
     public long getServiceCount() { return serviceCount; }
 

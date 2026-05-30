@@ -14,6 +14,8 @@ import {
   ZONE_BORDER_COLORS,
   ZONE_LABEL_COLORS,
   presentZoneIds,
+  presentBehindGatewayZones,
+  behindGatewayZoneId,
 } from '../lib/topologyZones';
 import { type HighlightPath, makeEdgeKey, EDGE_STYLES } from './topologyConstants';
 
@@ -270,10 +272,23 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       classes: `zone-${zid}`,
     }));
 
+    // ── Behind-gateway zone compound parent nodes (additive, per-origin) ────
+    // One node per remote origin among DOCKER_BRIDGE devices.
+    // Local origin always collapses to zone-docker — no new zone for today's data.
+    // Uses the docker palette for visual consistency.
+    const behindGwZones = presentBehindGatewayZones(visibleDevices);
+    const behindGwZoneNodes = behindGwZones.map(z => ({
+      data: {
+        id: z.zoneId,
+        label: z.label,
+        zone: true as const,
+      },
+      classes: `zone-zone-docker`,
+    }));
+
     // ── Docker-network sub-box compound nodes ──────────────────────────────
-    // Within the Docker zone, render one compound box per docker network
-    // (compose project). Each box's parent is zone-docker; DOCKER_BRIDGE
-    // devices then parent to their network box instead of directly to zone-docker.
+    // Within the Docker zone (or a behind-gw zone), render one compound box per
+    // docker network. DOCKER_BRIDGE devices then parent to their network box.
     // Containers with no matching docker-net gateway go to the fallback
     // "Docker (unattached)" sub-box so the graph never crashes.
     const dockerNetGroups = buildDockerNetworkGroups(visibleDevices);
@@ -284,7 +299,20 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         deviceToNetworkGroup.set(memberId, g.groupId);
       }
     }
-    // Network sub-box compound nodes (parent = zone-docker).
+    // For each network group, determine which zone it belongs to by looking at
+    // the originHostIp of a representative member.
+    const groupToZone = new Map<string, string>();
+    for (const g of dockerNetGroups) {
+      for (const memberId of g.memberIds) {
+        const member = visibleDevices.find(d => d.id === memberId);
+        if (member) {
+          groupToZone.set(g.groupId, behindGatewayZoneId(member.originHostIp));
+          break;
+        }
+      }
+    }
+
+    // Network sub-box compound nodes (parent = the device's behind-gw zone or zone-docker).
     // Only emit these if zone-docker is present (i.e. there are visible DOCKER_BRIDGE devices).
     // Muted groups (the "Docker (unattached)" stale fallback) receive a `muted` class so the
     // stylesheet can de-emphasize them without affecting named network boxes.
@@ -292,7 +320,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       data: {
         id: g.groupId,
         label: g.label,
-        parent: 'zone-docker',
+        parent: groupToZone.get(g.groupId) ?? 'zone-docker',
         dockerNetwork: true as const,
         ...(g.muted ? { muted: true as const } : {}),
       },
@@ -367,9 +395,10 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     // Nodes must be added in parent-before-child order so cytoscape can
     // resolve parent references when child nodes are added:
     //   1. Zone compound nodes (zone-home, zone-docker, …)
-    //   2. Docker-network sub-box compound nodes (parent = zone-docker)
-    //   3. Device leaf nodes (parent = network-box or zone)
-    cy.add([...zoneNodes, ...dockerNetworkBoxNodes, ...nodes, ...edges, ...extraEdges]);
+    //   2. Behind-gateway zone compound nodes (per-origin, additive)
+    //   3. Docker-network sub-box compound nodes (parent = zone-docker or behind-gw zone)
+    //   4. Device leaf nodes (parent = network-box or zone)
+    cy.add([...zoneNodes, ...behindGwZoneNodes, ...dockerNetworkBoxNodes, ...nodes, ...edges, ...extraEdges]);
     // randomize:true prevents collinear collapse on sparse graphs — without it
     // cose-bilkent starts from degenerate (0,0) seed positions and converges
     // to a straight line when the fleet is small.
