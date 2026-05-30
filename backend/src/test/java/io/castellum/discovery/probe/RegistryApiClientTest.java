@@ -102,4 +102,118 @@ class RegistryApiClientTest {
                 .matches("get.*|equals|hashCode|toString|getClass|wait|notify|notifyAll");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // R2 BLOCKING #1 — SSRF / URI-injection via untrusted registry repo names
+    //
+    // RegistryApiClient.getTags(host, port, name) must validate `name` against the
+    // Docker repository-name grammar and REJECT non-conforming names WITHOUT issuing
+    // any HTTP request. A capturing getter records every URI the client was asked to
+    // fetch; for malicious names the capture list must stay empty (no off-host GET).
+    // -----------------------------------------------------------------------
+
+    /**
+     * Malicious repository names returned by a crafted registry _catalog must be
+     * rejected BEFORE any network call is made.
+     *
+     * <p>Each of the names below violates Docker's repository-name grammar in a way
+     * that would redirect or otherwise mutate the constructed URI:
+     * <ul>
+     *   <li>{@code "nginx@attacker.com/pwn"} — {@code @} is not a legal repo-name char;
+     *       URI.create would include the authority fragment, redirecting the request.</li>
+     *   <li>{@code "../../etc/passwd"} — path traversal via dots.</li>
+     *   <li>{@code "evil?x"} — {@code ?} injects a query string into the URI.</li>
+     *   <li>{@code "evil#x"} — {@code #} injects a fragment into the URI.</li>
+     *   <li>{@code "a%0d%0aX"} — CRLF injection via percent-encoded bytes.</li>
+     * </ul>
+     *
+     * <p>RED until {@link RegistryApiClient#getTags} validates {@code name} and
+     * short-circuits before calling the getter.
+     */
+    @Test
+    void getTags_maliciousName_rejectedNoRequest() {
+        List<String> maliciousNames = List.of(
+            "nginx@attacker.com/pwn",
+            "../../etc/passwd",
+            "evil?x",
+            "evil#x",
+            "a%0d%0aX"
+        );
+
+        for (String maliciousName : maliciousNames) {
+            List<URI> capturedUris = new ArrayList<>();
+            RegistryApiClient client = new RegistryApiClient(uri -> {
+                capturedUris.add(uri);
+                return Optional.of("{\"name\":\"evil\",\"tags\":[]}");
+            });
+
+            Optional<String> result = client.getTags("trusted-registry.internal", 5000, maliciousName);
+
+            assertThat(result)
+                .as("getTags must return empty for malicious name '%s' (SSRF rejection)", maliciousName)
+                .isEmpty();
+            assertThat(capturedUris)
+                .as("getter must NOT be called for malicious name '%s' — validation must reject before any network call",
+                    maliciousName)
+                .isEmpty();
+        }
+    }
+
+    /**
+     * Legitimate Docker repository names must still reach the getter with the
+     * correct URI — host/authority must equal the ORIGINAL host:port, and the path
+     * must be exactly {@code /v2/<name>/tags/list}.
+     *
+     * <p>Docker repository names allow lowercase letters, digits, hyphens, dots,
+     * and a single {@code /} as a namespace separator (e.g. {@code "library/nginx"}).
+     *
+     * <p>RED until validation accepts these names and delegates the request.
+     */
+    @Test
+    void getTags_validName_issuesOnHostRequest() {
+        List<String> validNames = List.of("nginx", "library/nginx");
+
+        for (String validName : validNames) {
+            List<URI> capturedUris = new ArrayList<>();
+            RegistryApiClient client = new RegistryApiClient(uri -> {
+                capturedUris.add(uri);
+                return Optional.of("{\"name\":\"" + validName + "\",\"tags\":[\"latest\"]}");
+            });
+
+            Optional<String> result = client.getTags("trusted-registry.internal", 5000, validName);
+
+            assertThat(capturedUris)
+                .as("getter must be called exactly once for valid name '%s'", validName)
+                .hasSize(1);
+
+            URI issued = capturedUris.get(0);
+            assertThat(issued.getScheme())
+                .as("URI scheme must be 'http' for valid name '%s'", validName)
+                .isEqualTo("http");
+            assertThat(issued.getHost())
+                .as("URI host must equal the original host for valid name '%s'", validName)
+                .isEqualTo("trusted-registry.internal");
+            assertThat(issued.getPort())
+                .as("URI port must equal the original port for valid name '%s'", validName)
+                .isEqualTo(5000);
+            assertThat(issued.getPath())
+                .as("URI path must be /v2/<name>/tags/list for valid name '%s'", validName)
+                .isEqualTo("/v2/" + validName + "/tags/list");
+            // No unexpected query or fragment must have been injected
+            assertThat(issued.getQuery())
+                .as("URI must not have a query component for valid name '%s'", validName)
+                .isNull();
+            assertThat(issued.getFragment())
+                .as("URI must not have a fragment component for valid name '%s'", validName)
+                .isNull();
+            // Authority must stay on the ORIGINAL host:port — not redirected off-host
+            assertThat(issued.getAuthority())
+                .as("URI authority must equal 'trusted-registry.internal:5000' for valid name '%s'", validName)
+                .isEqualTo("trusted-registry.internal:5000");
+
+            assertThat(result)
+                .as("getTags must return a non-empty result for valid name '%s'", validName)
+                .isPresent();
+        }
+    }
 }

@@ -1297,4 +1297,86 @@ class DockerHostProbeServiceTest {
                 s -> assertThat(s).contains("nginx:latest"),
                 s -> assertThat(s).contains("nginx:1.25"));
     }
+
+    // -----------------------------------------------------------------------
+    // R2 BLOCKING #2 — Blob DoS: per-repo tag cap must bound registry_images size
+    //
+    // probeRegistry accumulates repo:tag entries with NO cap on tags per repo.
+    // A crafted registry returning e.g. 200 tags for one repo can build a
+    // multi-megabyte blob. The fix: cap tags-per-repo at a documented bound.
+    //
+    // The exact cap value is the implementer's choice, but this test asserts it
+    // is at most 64 entries — a reasonable, documented upper bound.  Whatever cap
+    // the implementer chooses, the assertion `<= 64` must hold.
+    // -----------------------------------------------------------------------
+
+    /**
+     * A registry with a single repository that advertises many tags (200) must produce
+     * a {@code registry_images} blob whose entry count for that repo is bounded.
+     *
+     * <p>The existing happy-path enrichment test
+     * ({@code registry5000_getTags_enrichesRegistryImagesWithNameColonTag}) must still
+     * pass after this test is introduced — the cap only kicks in for excess tags.
+     *
+     * <p>RED until {@code probeRegistry} (or a downstream mapper) applies a per-repo
+     * tag cap that limits the number of {@code repo:tag} entries per repository.
+     *
+     * <p>Comment: The exact cap is the implementer's choice; we assert at most 64
+     * entries in {@code registry_images} for the single overloaded repo.  Use a
+     * count of comma-delimited tokens as a proxy for the entry count.
+     */
+    @Test
+    void registry5000_manyTags_perRepoTagCapEnforced() {
+        String probedIp = "10.0.2.10";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // Build a tags/list response body with 200 tags for "overloaded"
+        StringBuilder tagsBuilder = new StringBuilder();
+        tagsBuilder.append("{\"name\":\"overloaded\",\"tags\":[");
+        for (int i = 0; i < 200; i++) {
+            if (i > 0) tagsBuilder.append(",");
+            tagsBuilder.append("\"tag").append(i).append("\"");
+        }
+        tagsBuilder.append("]}");
+        String manyTagsJson = tagsBuilder.toString();
+
+        String catalogJson = "{\"repositories\":[\"overloaded\"]}";
+
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/v2/_catalog")) return Optional.of(catalogJson);
+            if (path.startsWith("/v2/overloaded/tags/list")) return Optional.of(manyTagsJson);
+            return Optional.empty();
+        });
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        String images = reloadedHost.getRegistryImages();
+        assertThat(images)
+            .as("registry_images must be set after a repo with many tags is probed")
+            .isNotBlank();
+
+        // Count entries: the blob is comma-separated; split on comma to count tokens.
+        // Each token corresponds to one repo:tag entry (or bare repo name for the
+        // fallback case).  With 200 raw tags and no cap the count would be 200;
+        // with a proper cap it must be <= 64.
+        long entryCount = java.util.Arrays.stream(images.split(","))
+            .filter(s -> !s.isBlank())
+            .count();
+
+        assertThat(entryCount)
+            .as("registry_images entry count must be <= 64 for a single overloaded repo "
+                + "(implementer's per-repo tag cap must bound blob growth; "
+                + "actual cap is implementer's choice but this assertion sets the ceiling)")
+            .isLessThanOrEqualTo(64);
+    }
 }
