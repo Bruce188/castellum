@@ -3,8 +3,13 @@ package io.castellum.config;
 import io.castellum.security.JwtAuthenticationFilter;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
+import io.castellum.security.RemoteAgentTokenAuthFilter;
+import io.castellum.security.RemoteAgentTokenRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.lang.Nullable;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -20,6 +25,14 @@ import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    /**
+     * Optional: injected when the JPA layer is present (full SpringBootTest / production).
+     * Null in {@code @WebMvcTest} slices that don't load JPA repositories.
+     */
+    @Autowired(required = false)
+    @Nullable
+    private RemoteAgentTokenRepository remoteAgentTokenRepository;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -54,9 +67,25 @@ public class SecurityConfig {
                 // /api/auth/change-password requires an authenticated principal — the
                 // controller reads Authentication.getName() to identify the actor.
                 .requestMatchers("/api/auth/change-password").authenticated()
+                // Remote-agent push ingest: authenticated by bearer token (RemoteAgentTokenAuthFilter).
+                .requestMatchers(HttpMethod.POST, "/api/discovery/remote-docker").hasRole("REMOTE_AGENT")
                 .anyRequest().authenticated())
-            .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class)
-            .exceptionHandling(e -> e
+            // Register jwt before UsernamePasswordAuthenticationFilter first, so it gets
+            // that slot. Then register remoteAgent before jwt — since jwt is now placed in
+            // the chain, remoteAgent is inserted immediately before it, making the order:
+            // remoteAgentTokenAuthFilter → jwt → UsernamePasswordAuthenticationFilter.
+            .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class);
+
+        // RemoteAgentTokenAuthFilter is created inline only when the JPA repository is
+        // available. In @WebMvcTest slices (no JPA), the filter is skipped; the ingest route
+        // is still gated by hasRole("REMOTE_AGENT") in the authorizeHttpRequests block above.
+        if (remoteAgentTokenRepository != null) {
+            RemoteAgentTokenAuthFilter remoteAgentTokenAuthFilter =
+                    new RemoteAgentTokenAuthFilter(remoteAgentTokenRepository, passwordEncoder());
+            http.addFilterBefore(remoteAgentTokenAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        }
+
+        http.exceptionHandling(e -> e
                 .authenticationEntryPoint(entry)
                 .accessDeniedHandler(deny))
             .httpBasic(b -> b.disable())

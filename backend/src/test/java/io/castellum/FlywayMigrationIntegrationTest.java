@@ -571,4 +571,64 @@ class FlywayMigrationIntegrationTest {
         assertEquals("docker0", row.get("last_seen_iface"),
             "last_seen_iface must round-trip after V18 migration");
     }
+
+    @Test
+    void v29RemoteAgentTokenRoundTrip() {
+        // (a) Column presence — token_hash, revoked, created_at on remote_agent_token.
+        Number tokenHashCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'REMOTE_AGENT_TOKEN' AND UPPER(COLUMN_NAME) = 'TOKEN_HASH'",
+            Number.class);
+        assertNotNull(tokenHashCol, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(tokenHashCol.intValue() > 0,
+            "token_hash column must exist in remote_agent_token table after V29 migration");
+
+        Number revokedCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'REMOTE_AGENT_TOKEN' AND UPPER(COLUMN_NAME) = 'REVOKED'",
+            Number.class);
+        assertNotNull(revokedCol, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(revokedCol.intValue() > 0,
+            "revoked column must exist in remote_agent_token table after V29 migration");
+
+        Number createdAtCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'REMOTE_AGENT_TOKEN' AND UPPER(COLUMN_NAME) = 'CREATED_AT'",
+            Number.class);
+        assertNotNull(createdAtCol, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(createdAtCol.intValue() > 0,
+            "created_at column must exist in remote_agent_token table after V29 migration");
+
+        // (b) INSERT a row (label + token_hash + created_by) then SELECT back.
+        jdbcTemplate.update(
+            "INSERT INTO remote_agent_token (label, token_hash, created_by) VALUES (?, ?, ?)",
+            "test-agent-label", "$2a$12$hashedTokenValue", "admin"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT label, token_hash, created_by, revoked, created_at FROM remote_agent_token " +
+            "WHERE label = 'test-agent-label'"
+        );
+        assertEquals("test-agent-label", row.get("label"),
+            "label must round-trip after V29 migration");
+        assertEquals("$2a$12$hashedTokenValue", row.get("token_hash"),
+            "token_hash must round-trip after V29 migration");
+        assertEquals("admin", row.get("created_by"),
+            "created_by must round-trip after V29 migration");
+
+        // (c) Default applies — INSERT omitting revoked → defaults FALSE; created_at non-null.
+        jdbcTemplate.update(
+            "INSERT INTO remote_agent_token (label, token_hash) VALUES (?, ?)",
+            "default-test-label", "$2a$12$anotherHash"
+        );
+        Map<String, Object> defaultRow = jdbcTemplate.queryForMap(
+            "SELECT revoked, created_at FROM remote_agent_token WHERE label = 'default-test-label'"
+        );
+        Object revokedVal = defaultRow.get("revoked");
+        assertNotNull(revokedVal, "revoked column must not be null");
+        // H2 returns Boolean for boolean columns
+        assertFalse((Boolean) revokedVal,
+            "revoked must default to FALSE when omitted");
+        assertNotNull(defaultRow.get("created_at"),
+            "created_at must be non-null when omitted (DEFAULT now())");
+    }
 }
