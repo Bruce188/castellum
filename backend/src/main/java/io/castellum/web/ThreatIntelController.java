@@ -24,12 +24,12 @@ import java.util.Optional;
 public class ThreatIntelController {
 
     private final ThreatIntelService service;
+    private final ExportJobService exportJobService;
 
-    @Autowired(required = false)
-    private ExportJobService exportJobService;
-
-    public ThreatIntelController(ThreatIntelService service) {
+    @Autowired
+    public ThreatIntelController(ThreatIntelService service, ExportJobService exportJobService) {
         this.service = service;
+        this.exportJobService = exportJobService;
     }
 
     @PostMapping("/export")

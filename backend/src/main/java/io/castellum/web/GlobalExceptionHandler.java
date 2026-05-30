@@ -2,6 +2,7 @@ package io.castellum.web;
 
 import io.castellum.discovery.DiscoveryUnavailableException;
 import io.castellum.graph.GraphTooLargeException;
+import io.castellum.threatintel.ExportQueueFullException;
 import io.castellum.ot.OtProbeDecodeException;
 import io.castellum.ot.OtProbeNotImplementedException;
 import io.castellum.ot.OtProbeTimeoutException;
@@ -134,6 +135,13 @@ public class GlobalExceptionHandler {
         log.warn("Integration probe timeout: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
             .body(Map.of("error", "integration_probe_timeout", "message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ExportQueueFullException.class)
+    public ResponseEntity<Map<String, Object>> handleExportQueueFull(ExportQueueFullException ex) {
+        log.warn("Export queue full: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(Map.of("error", "export_queue_full", "message", ex.getMessage()));
     }
 
     @ExceptionHandler(IOException.class)

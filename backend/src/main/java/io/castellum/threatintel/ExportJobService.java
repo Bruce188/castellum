@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Manages async STIX-bundle export jobs.
@@ -71,7 +72,12 @@ public class ExportJobService {
                 Instant.now()
         );
         jobs.put(jobId, job);
-        executor.execute(() -> runExport(jobId));
+        try {
+            executor.execute(() -> runExport(jobId));
+        } catch (RejectedExecutionException e) {
+            jobs.remove(jobId);
+            throw new ExportQueueFullException("Export queue is full — try again later", e);
+        }
         return jobId;
     }
 
