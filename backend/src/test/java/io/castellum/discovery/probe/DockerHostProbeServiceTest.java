@@ -1667,4 +1667,83 @@ class DockerHostProbeServiceTest {
                 + "else-gate in probeK8s must be preserved")
             .isEqualTo(0);
     }
+
+    // -----------------------------------------------------------------------
+    // R5 trip3 review nit — R5 symmetry: bare-name-only repos still obey
+    // MAX_IMAGES_TOTAL aggregate cap
+    //
+    // probeRegistry: when getTags returns empty for every repo, the code falls
+    // back to bare repo names.  The outer "if (imageEntries.size() >= MAX_IMAGES_TOTAL)
+    // break;" guard must still fire for the bare-name path so that a registry with
+    // 5000 repos (each returning no tags) cannot push the blob past the cap.
+    //
+    // GREEN (characterization) — the outer-loop guard already bounds the bare-name
+    // path because the break precedes the bare-name addition in probeRegistry.
+    // This test locks the invariant against future regressions.
+    // -----------------------------------------------------------------------
+
+    /**
+     * R5 trip3 nit — bare-name fallback (no getTags) must still obey MAX_IMAGES_TOTAL.
+     *
+     * <p>A registry that advertises 5 000 repositories but whose getTags call returns
+     * empty for every repo falls back to adding the bare repo name.  The outer aggregate
+     * cap must fire: the resulting {@code registry_images} blob must contain at most
+     * {@code MAX_IMAGES_TOTAL} entries (constant value = 2 000).
+     *
+     * <p><b>GREEN</b> — the {@code if (imageEntries.size() >= MAX_IMAGES_TOTAL) break}
+     * guard already runs at the top of the per-repo loop, before the bare-name fallback
+     * addition.  This test characterises the bound so any future restructuring of
+     * probeRegistry cannot silently regress it.
+     */
+    @Test
+    void registry5000_bareNamesOnly_aggregateCapEnforced() {
+        String probedIp = "10.0.4.1";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // 5 000 repos → getTags always returns empty (no tags available for any repo)
+        int repoCount = 5_000;
+        StringBuilder catalogBuilder = new StringBuilder("{\"repositories\":[");
+        for (int i = 0; i < repoCount; i++) {
+            if (i > 0) catalogBuilder.append(",");
+            catalogBuilder.append("\"bare-repo-").append(i).append("\"");
+        }
+        catalogBuilder.append("]}");
+        String catalogJson = catalogBuilder.toString();
+
+        // getTags returns empty for every repo → bare-name fallback path
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/v2/_catalog")) return Optional.of(catalogJson);
+            // All /v2/*/tags/list requests return empty → no tag enrichment
+            return Optional.empty();
+        });
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        String images = reloadedHost.getRegistryImages();
+        assertThat(images)
+            .as("registry_images must be non-blank — at least some bare names were stored")
+            .isNotBlank();
+
+        // Count entries in the blob (comma-separated bare names)
+        // Without the aggregate cap 5 000 bare names would be stored; with the cap
+        // the count must not exceed MAX_IMAGES_TOTAL (2 000).
+        long entryCount = java.util.Arrays.stream(images.split(","))
+            .filter(s -> !s.isBlank())
+            .count();
+
+        assertThat(entryCount)
+            .as("registry_images entry count for bare-name-only repos must be <= MAX_IMAGES_TOTAL (2 000) "
+                + "— the outer aggregate-cap loop guard must fire even when getTags returns empty")
+            .isLessThanOrEqualTo(2_000);
+    }
 }
