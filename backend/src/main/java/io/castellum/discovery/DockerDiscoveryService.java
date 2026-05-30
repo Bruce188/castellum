@@ -386,8 +386,11 @@ public class DockerDiscoveryService {
     /**
      * Derive the gateway IP from a CIDR subnet string (e.g. {@code "172.17.0.0/16"} → {@code "172.17.0.1"}).
      * Returns null if the subnet is null/blank or cannot be parsed.
+     *
+     * <p>Package-private (not {@code private}) so {@code DeriveGatewayIpTest} in the same package
+     * can exercise the octet-range guard directly without a Spring context.
      */
-    private static String deriveGatewayIp(String subnet) {
+    static String deriveGatewayIp(String subnet) {
         if (subnet == null || subnet.isBlank()) {
             return null;
         }
@@ -401,6 +404,12 @@ public class DockerDiscoveryService {
         // For 172.17.0.0/16 → 172.17.0.1; for 10.0.0.0/8 → 10.0.0.1.
         try {
             int last = Integer.parseInt(octets[3]);
+            // Guard: last octet must be in [0, 254] so that last+1 stays in valid octet range [1, 255].
+            // A network address ending in .255 (e.g. "10.0.0.255/24") would produce the invalid
+            // "10.0.0.256" without this check — return null instead.
+            if (last < 0 || last > 254) {
+                return null;
+            }
             octets[3] = String.valueOf(last + 1);
         } catch (NumberFormatException e) {
             return null;
