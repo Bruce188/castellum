@@ -1035,7 +1035,7 @@ deactivations.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>HSTS deployment caveat</strong>: HSTS without TLS in front is a no-op — browsers ignore HSTS over plain HTTP. Operators running plain HTTP behind a reverse proxy must terminate TLS at the proxy. See <a href="operations.md">documentation/operations.md</a> for TLS termination guidance.</p>
+<p><strong>HSTS deployment caveat</strong>: HSTS without TLS in front is a no-op — browsers ignore HSTS over plain HTTP. Operators running plain HTTP behind a reverse proxy must terminate TLS at the proxy. See <a href="operations.html">documentation/operations.html</a> for TLS termination guidance.</p>
 <h2 id="cors-origin-validator">CORS Origin Validator</h2>
 <p>At startup, Castellum validates <code>castellum.cors.allowed-origins</code> (env: <code>CORS_ALLOWED_ORIGINS</code>) and throws <code>IllegalStateException</code> if any origin is invalid — the application refuses to start with a broken CORS config.</p>
 <p>Validation rules (in order):</p>
