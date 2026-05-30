@@ -627,8 +627,8 @@ footer {
       <li class="lvl-2"><a href="#6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</a></li>
       <li class="lvl-2"><a href="#7-environment-variables">7. Environment variables</a></li>
       <li class="lvl-3"><a href="#castellum-integration-key">CASTELLUM_INTEGRATION_KEY</a></li>
-      <li class="lvl-3"><a href="#castellum-jwt-secret">CASTELLUM_JWT_SECRET</a></li>
-      <li class="lvl-3"><a href="#castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</a></li>
+      <li class="lvl-3"><a href="#castellum-security-jwt-secret">CASTELLUM_SECURITY_JWT_SECRET</a></li>
+      <li class="lvl-3"><a href="#castellum-admin-credentials">CASTELLUM_ADMIN_USERNAME / CASTELLUM_ADMIN_PASSWORD_HASH</a></li>
     </ul>
   </aside>
 
@@ -701,10 +701,12 @@ footer {
 <div class="codehilite"><pre><code class="language-bash">openssl rand -hex 32
 </code></pre></div>
 <p>Rotation is non-trivial: changing the key requires re-encrypting every row in <code>integration_config</code> with the new key. The current implementation does not include a rotation helper; rotation today is "truncate the table, re-enter credentials in the UI under the new key." A future feature will add a <code>ROTATION_KEY</code> env that runs a one-shot re-encrypt on boot.</p>
-<h3 id="castellum-jwt-secret">CASTELLUM_JWT_SECRET</h3>
-<p>HMAC-SHA256 signing key (32+ bytes) for issued JWTs. Read by <code>JwtService</code> at boot. Missing → boot fails with an explicit error. Generate with <code>openssl rand -hex 32</code>. Rotation invalidates every outstanding token instantly; combine with <code>tokenVersion</code> bump in <code>AuthController</code> for per-user invalidation.</p>
-<h3 id="castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</h3>
-<p>Optional. When set on first boot (before the <code>users</code> table has any admin), creates an <code>admin</code> user with this password and marks <code>must_change_password = true</code> so the operator is forced to rotate on first login. Subsequent boots ignore the variable. If unset on first boot, a random 32-character password is generated, logged once at INFO, and the operator must capture it from the log.</p>
+<h3 id="castellum-security-jwt-secret">CASTELLUM_SECURITY_JWT_SECRET</h3>
+<p>HMAC-SHA256 signing key for issued JWTs. Maps to property <code>castellum.security.jwt.secret</code>. Read by <code>JwtService</code> at boot — startup fails with an explicit error (<code>"Refusing to start with default JWT secret placeholder; set CASTELLUM_SECURITY_JWT_SECRET"</code>) if the default placeholder is still in use outside the <code>test</code> Spring profile. Must be ≥ 32 bytes. Generate with <code>openssl rand -hex 32</code>. Rotation invalidates every outstanding token instantly; combine with <code>token_version</code> bump (via disable or password-change) for per-user invalidation.</p>
+<h3 id="castellum-admin-credentials">CASTELLUM_ADMIN_USERNAME / CASTELLUM_ADMIN_PASSWORD_HASH</h3>
+<p>Required to seed the admin account. <code>BootstrapAdminInitializer</code> runs at <code>ApplicationReadyEvent</code> and performs an idempotent upsert: if the user does not exist it is created; if it exists and the stored BCrypt hash differs from the env var, the hash is updated and an <code>ADMIN_HASH_ROTATE</code> audit event is emitted. If either variable is absent or blank, the bootstrap step is skipped with a warning. The operator must supply a pre-computed BCrypt strength-12 hash — the application never generates or logs a plaintext password. Equivalent variables exist for the viewer account: <code>CASTELLUM_VIEWER_USERNAME</code> / <code>CASTELLUM_VIEWER_PASSWORD_HASH</code>.</p>
+<p>First-login rotation: <code>mustChangePassword</code> in the login response is <code>true</code> when <code>user.lastLoginAt == null</code> and the username matches a bootstrap principal — computed live in <code>AuthController</code> on each login, not stored as a database column.</p>
+<p>Generate a BCrypt strength-12 hash: <code>htpasswd -bnBC 12 "" "&lt;password&gt;" | tr -d ':\n'</code></p>
     </div>
 
     <div class="no-results" id="no-results">

@@ -730,8 +730,8 @@ footer {
 <li>
 <p>Set the key as an environment variable before starting Castellum:
    <code>bash
-   export CASTELLUM_NVD_API_KEY=&lt;your-key-here&gt;</code>
-   The Spring Boot property binding maps <code>CASTELLUM_NVD_API_KEY</code> to <code>castellum.nvd.api-key</code>.</p>
+   export NVD_API_KEY=&lt;your-key-here&gt;</code>
+   The Spring Boot property binding maps <code>NVD_API_KEY</code> to <code>castellum.nvd.api-key</code>.</p>
 </li>
 <li>
 <p>Verify the key is active by checking the <code>nvd-bulk-sync.sh</code> output for a <code>200 OK</code> response without <code>X-RateLimit-Remaining: 0</code> warnings.</p>
@@ -919,7 +919,7 @@ openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w
 
 <h3 id="optional-environment-variables">Optional environment variables</h3>
 <div class="codehilite"><pre><span></span><code><span class="c1"># NVD API key (strongly recommended — see §1):</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">CASTELLUM_NVD_API_KEY</span><span class="o">=</span>&lt;nvd-key&gt;
+<span class="nb">export</span><span class="w"> </span><span class="nv">NVD_API_KEY</span><span class="o">=</span>&lt;nvd-key&gt;
 
 <span class="c1"># Suricata eve.json path (required for Suricata direction-B integration — see §2):</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">SURICATA_EVE_LOG_PATH</span><span class="o">=</span>/var/log/suricata/eve.json
@@ -960,7 +960,7 @@ openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w
 <li>[ ] <code>CASTELLUM_SECURITY_JWT_SECRET</code> is ≥ 32 bytes (the application rejects weak secrets at startup unless the <code>test</code> Spring profile is active).</li>
 <li>[ ] PostgreSQL 16 is running and the schema has been migrated via Flyway (runs automatically on startup).</li>
 <li>[ ] The reverse proxy is configured for TLS (see §3).</li>
-<li>[ ] <code>CASTELLUM_NVD_API_KEY</code> is set (recommended, not required).</li>
+<li>[ ] <code>NVD_API_KEY</code> is set (recommended, not required).</li>
 <li>[ ] Container is started with <code>--cap-add=NET_RAW</code> if passive discovery is needed (see §5).</li>
 <li>[ ] The container image is verified with cosign before deployment (see <a href="supply-chain.html">documentation/supply-chain.html</a>).</li>
 </ul>
@@ -1020,10 +1020,10 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 
 <p>For the full list of pcap4j properties and known deployment issues (RHEL-based distros, Alpine musl libc, WSL2 packet capture limitations), see <a href="runtime-flags.html">documentation/runtime-flags.html</a>.</p>
 <h3 id="database-connection-configuration">Database connection configuration</h3>
-<div class="codehilite"><pre><span></span><code><span class="c1"># PostgreSQL connection (Spring Boot default property binding):</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">SPRING_DATASOURCE_URL</span><span class="o">=</span>jdbc:postgresql://localhost:5432/castellum
-<span class="nb">export</span><span class="w"> </span><span class="nv">SPRING_DATASOURCE_USERNAME</span><span class="o">=</span>castellum
-<span class="nb">export</span><span class="w"> </span><span class="nv">SPRING_DATASOURCE_PASSWORD</span><span class="o">=</span>&lt;db-password&gt;
+<div class="codehilite"><pre><span></span><code><span class="c1"># PostgreSQL connection (application.yml binds DATABASE_URL / DATABASE_USERNAME / DATABASE_PASSWORD):</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">DATABASE_URL</span><span class="o">=</span>jdbc:postgresql://localhost:5432/castellum
+<span class="nb">export</span><span class="w"> </span><span class="nv">DATABASE_USERNAME</span><span class="o">=</span>castellum
+<span class="nb">export</span><span class="w"> </span><span class="nv">DATABASE_PASSWORD</span><span class="o">=</span>&lt;db-password&gt;
 </code></pre></div>
 
 <p>Flyway runs schema migrations automatically on startup. On a clean database, migrations V1 through V9 (and beyond) run in sequence. On an existing database, only new migrations run.</p>
