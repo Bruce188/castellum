@@ -911,7 +911,6 @@ class DockerHostProbeServiceTest {
         // R4 test: :6443 reachable, pod-list returns empty (blocked/401), but secret-list
         // returns a non-empty SecretList body (anonymous secret read succeeds) →
         // secondary escalation: CRITICAL finding (not HIGH).
-        // RED until getSecrets is wired into probeK8s.
         String probedIp = "10.0.0.68";
         Device hostDevice = seedLocalDevice(probedIp);
 

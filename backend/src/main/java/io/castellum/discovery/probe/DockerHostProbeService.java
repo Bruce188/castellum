@@ -610,10 +610,18 @@ public class DockerHostProbeService {
                     raiseFindingForExistingDevice(ip, PORT_6443, "tcp",
                         PROTOCOL_FAMILY_K8S_API_EXPOSURE, SEVERITY_CRITICAL);
                 } else {
-                    // Getter returned empty — 401/403 back-off (no retry, R3)
-                    log.info("DockerHostProbeService: {} :6443 reachable but 401/403 (auth required) — HIGH finding only", ip);
-                    raiseFindingForExistingDevice(ip, PORT_6443, "tcp",
-                        PROTOCOL_FAMILY_K8S_API_EXPOSURE, SEVERITY_HIGH);
+                    // Pods blocked — attempt anonymous secret-read CRITICAL escalation before falling to HIGH
+                    Optional<String> secretsOpt = k8sApiClient.getSecrets(ip, PORT_6443, "default");
+                    if (secretsOpt.isPresent()) {
+                        log.info("DockerHostProbeService: {} :6443 anonymous secret read succeeded — CRITICAL escalation", ip);
+                        raiseFindingForExistingDevice(ip, PORT_6443, "tcp",
+                            PROTOCOL_FAMILY_K8S_API_EXPOSURE, SEVERITY_CRITICAL);
+                    } else {
+                        // Both pod-list and secret-list blocked (401/403) — no further retry (R3)
+                        log.info("DockerHostProbeService: {} :6443 reachable but 401/403 (auth required) — HIGH finding only", ip);
+                        raiseFindingForExistingDevice(ip, PORT_6443, "tcp",
+                            PROTOCOL_FAMILY_K8S_API_EXPOSURE, SEVERITY_HIGH);
+                    }
                 }
                 emitAuditSuccess(ip, PORT_6443, "k8s-api", startMs);
             } catch (Exception e) {
