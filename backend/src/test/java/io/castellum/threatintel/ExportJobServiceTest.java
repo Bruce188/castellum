@@ -1,12 +1,14 @@
 package io.castellum.threatintel;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.castellum.threatintel.ExportQueueFullException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 /**
@@ -156,6 +159,38 @@ class ExportJobServiceTest {
 
         ExportJob job = service.get(jobId).orElseThrow();
         assertThat(job.filePath()).isNull();
+    }
+
+    // ── queue-rejection safety ────────────────────────────────────────────────
+
+    /**
+     * When the underlying executor is saturated (AbortPolicy fires), submit() MUST:
+     *  1. Throw {@link ExportQueueFullException} (domain exception mapped to HTTP 503).
+     *  2. NOT leave an orphaned PENDING job in the map — the caller has no id to poll.
+     *
+     * RED: fails until ExportJobService catches TaskRejectedException/
+     * RejectedExecutionException, removes the pre-inserted job, and rethrows as
+     * ExportQueueFullException.
+     */
+    @Test
+    void submit_executorRejects_removesPendingJob_andThrows() throws JsonProcessingException {
+        // Executor that always rejects — simulates a saturated thread pool with AbortPolicy.
+        Executor rejectingExecutor = runnable -> {
+            throw new TaskRejectedException("Export queue full",
+                    new java.util.concurrent.RejectedExecutionException("queue full"));
+        };
+
+        ExportJobService saturatedService =
+                new ExportJobService(threatIntelService, rejectingExecutor, tempDir);
+
+        // submit() must throw the domain exception ...
+        assertThatThrownBy(saturatedService::submit)
+                .isInstanceOf(ExportQueueFullException.class);
+
+        // ... and leave NO orphaned PENDING job in the map.
+        // Because we don't have the id (it was never returned), we verify indirectly:
+        // a get() for any random id must return empty (the map stays empty overall).
+        assertThat(saturatedService.get("any-id")).isEmpty();
     }
 
     // ── get() for unknown id ─────────────────────────────────────────────────

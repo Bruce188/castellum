@@ -10,6 +10,7 @@ import io.castellum.security.RbacAuthenticationEntryPoint;
 import io.castellum.security.UserRepository;
 import io.castellum.threatintel.ExportJob;
 import io.castellum.threatintel.ExportJobService;
+import io.castellum.threatintel.ExportQueueFullException;
 import io.castellum.threatintel.ThreatIntelService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -97,6 +98,20 @@ class ThreatIntelControllerAsyncExportTest {
     void postExportAsync_viewer_returns403() throws Exception {
         mvc.perform(post("/api/threat-intel/export/async"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void postExportAsync_queueFull_returns503() throws Exception {
+        // ExportJobService.submit() throws ExportQueueFullException when the executor
+        // rejects the task.  The controller (or GlobalExceptionHandler) must surface
+        // this as HTTP 503 Service Unavailable — not a 500 internal error.
+        //
+        // RED: fails until GlobalExceptionHandler (or the controller) maps
+        // ExportQueueFullException → 503.
+        when(exportJobService.submit()).thenThrow(new ExportQueueFullException());
+
+        mvc.perform(post("/api/threat-intel/export/async"))
+                .andExpect(status().isServiceUnavailable());
     }
 
     // ── GET /export/async/{jobId} — DONE → stream file ───────────────────────
