@@ -212,26 +212,23 @@ class BundleAssemblerGoldenTest {
         List<String> errors = StixSchemaValidator.validate(json);
         assertThat(errors).as("STIX schema validation errors").isEmpty();
 
-        // Golden file: generate on first run, compare thereafter
+        // NB5: fail-on-missing — a missing golden fixture is a test failure, not a bootstrap trigger.
+        // To regenerate the fixture after an intentional format change, delete the file and run
+        // the assembler manually (e.g. via a one-off @Test annotated with @Disabled) to produce
+        // a fresh golden, then commit it. Self-bootstrap is removed so accidental deletion is caught.
         URL goldenUrl = getClass().getClassLoader().getResource("golden/stix-bundle-v1.json");
-        if (goldenUrl == null) {
-            // First run: write the golden file
-            Path resourceDir = Path.of("src/test/resources/golden");
-            Files.createDirectories(resourceDir);
-            Path goldenPath = resourceDir.resolve("stix-bundle-v1.json");
-            // Pretty-print for readability
-            Object parsed = stixObjectMapper.readValue(normalized, Object.class);
-            String pretty = stixObjectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(parsed);
-            Files.writeString(goldenPath, pretty);
-        } else {
-            String expected = Files.readString(Path.of(goldenUrl.toURI()));
-            // Compare structurally: parse both and re-serialize for stable comparison
-            Object expParsed = stixObjectMapper.readValue(expected, Object.class);
-            Object actParsed = stixObjectMapper.readValue(normalized, Object.class);
-            assertThat(stixObjectMapper.writeValueAsString(actParsed))
-                .as("Bundle JSON should match golden fixture")
-                .isEqualTo(stixObjectMapper.writeValueAsString(expParsed));
-        }
+        assertThat(goldenUrl)
+            .as("Golden fixture 'src/test/resources/golden/stix-bundle-v1.json' is missing. "
+                + "Restore it from git or regenerate intentionally — self-bootstrap removed (NB5).")
+            .isNotNull();
+
+        String expected = Files.readString(Path.of(goldenUrl.toURI()));
+        // Compare structurally: parse both and re-serialize for stable comparison
+        Object expParsed = stixObjectMapper.readValue(expected, Object.class);
+        Object actParsed = stixObjectMapper.readValue(normalized, Object.class);
+        assertThat(stixObjectMapper.writeValueAsString(actParsed))
+            .as("Bundle JSON should match golden fixture")
+            .isEqualTo(stixObjectMapper.writeValueAsString(expParsed));
     }
 
     @Test
