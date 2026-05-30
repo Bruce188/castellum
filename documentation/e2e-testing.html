@@ -707,6 +707,11 @@ and component coverage; Playwright owns the integrated, browser-rendered user jo
 <td>Broad QA sweep (self-login)</td>
 <td>Own login flow</td>
 </tr>
+<tr>
+<td><code>uat-ux-automation.spec.ts</code></td>
+<td>UAT — ADMIN-gated panels F5–F9 (TAXII, MISP, scan-policy, attack-graph, STIX export)</td>
+<td>Shared storage state</td>
+</tr>
 </tbody>
 </table>
 <p>Configuration lives in <code>frontend/playwright.config.ts</code>. The Playwright HTML report is
@@ -918,6 +923,16 @@ standard local development stack:</p>
 <td><code>admin12345</code></td>
 <td>Bootstrap admin password (must match bcrypt hash — see below)</td>
 </tr>
+<tr>
+<td><code>E2E_VIEWER_USERNAME</code></td>
+<td><code>viewer</code></td>
+<td>Viewer account username (used by RBAC specs in <code>qa-sweep</code> and <code>initial-sync-banner</code>)</td>
+</tr>
+<tr>
+<td><code>E2E_VIEWER_PASSWORD</code></td>
+<td><code>admin12345</code></td>
+<td>Viewer account password (must match <code>CASTELLUM_VIEWER_PASSWORD_HASH</code>)</td>
+</tr>
 </tbody>
 </table>
 <h3 id="the-bcrypt-pairing-the-1-setup-gotcha">The bcrypt pairing — the #1 setup gotcha</h3>
@@ -964,11 +979,12 @@ request. The job:</p>
 <ol>
 <li>Starts a <strong>PostgreSQL 16</strong> service container on port <code>5432</code>.</li>
 <li>Starts the <strong>Spring Boot backend</strong> on port <code>8081</code> with the configured
-   <code>CASTELLUM_ADMIN_PASSWORD_HASH</code> (read from the <code>CASTELLUM_ADMIN_PASSWORD_HASH</code>
-   repo secret, falling back to a pre-computed hash of <code>admin12345</code>).</li>
+   <code>CASTELLUM_ADMIN_PASSWORD_HASH</code> and <code>CASTELLUM_VIEWER_PASSWORD_HASH</code> (read from repo
+   secrets, falling back to a pre-computed bcrypt hash of <code>admin12345</code>).
+   Both the admin and viewer accounts are bootstrapped so that RBAC specs can sign in as either role.</li>
 <li>Waits for the backend <code>/actuator/health</code> endpoint to return <code>"status":"UP"</code>.</li>
 <li>Installs frontend npm deps (<code>npm ci</code>) and Chromium binaries.</li>
-<li>Runs <code>npx playwright test</code> with <code>E2E_ADMIN_PASSWORD</code> from the matching repo secret.</li>
+<li>Runs <code>npx playwright test</code> with <code>E2E_ADMIN_PASSWORD</code> and <code>E2E_VIEWER_PASSWORD</code> from the matching repo secrets (both fall back to <code>admin12345</code> when the secrets are absent).</li>
 <li><strong>Uploads the HTML report</strong> as the <code>playwright-report</code> artifact (retained 7 days)
    via <code>actions/upload-artifact@v4</code> — always uploaded, even on failure.</li>
 </ol>

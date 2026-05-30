@@ -631,7 +631,6 @@ footer {
       <li class="lvl-3"><a href="#bacnet-ip">BACnet/IP</a></li>
       <li class="lvl-2"><a href="#passive-discovery-endpoints">Passive discovery endpoints</a></li>
       <li class="lvl-2"><a href="#frontend-control-surfaces">Frontend control surfaces</a></li>
-      <li class="lvl-3"><a href="#discoverycontrolpanel">DiscoveryControlPanel</a></li>
       <li class="lvl-3"><a href="#otprobepanel">OtProbePanel</a></li>
       <li class="lvl-3"><a href="#client-side-403-graceful-degrade">Client-side 403 graceful degrade</a></li>
       <li class="lvl-2"><a href="#one-action-all-protocol-sweep">One-Action All-Protocol Sweep</a></li>
@@ -843,26 +842,9 @@ discovery surface is exposed under <code>/api/discovery</code>:</p>
 not exposed to operators — and because the passive sweep that consumes the list is itself
 ADMIN-only. A VIEWER request returns <code>403 Forbidden</code>.</p>
 <h2 id="frontend-control-surfaces">Frontend control surfaces</h2>
-<p>The frontend mounts two panels for the OT/discovery surface:</p>
-<h3 id="discoverycontrolpanel"><code>DiscoveryControlPanel</code></h3>
-<p>Lives at <code>frontend/src/components/DiscoveryControlPanel.tsx</code>. Drives the passive-discovery
-endpoint. On mount it calls <code>api.listInterfaces()</code> to populate the interface dropdown; the
-list is replaced when the response has at least one entry, otherwise the panel keeps its
-hard-coded fallback (<code>eth0</code>, <code>wlan0</code>). The fallback exists so the panel remains usable
-when called by a VIEWER — <code>api.listInterfaces()</code> swallows a <code>403</code> and returns <code>[]</code> so the
-panel does not throw, and the controls render disabled with an "ADMIN required" notice. A
-VIEWER can therefore see exactly what an ADMIN would be able to trigger, without the
-backend ever observing the call.</p>
-<p>The source checkboxes track three of the five backend sources (<code>ARP</code>, <code>MDNS</code>, <code>PCAP</code>); LLDP
-and CDP are deferred to the managed-switch profile and not surfaced in the panel.</p>
-<p>The primary affordance is a single <strong>Activate passive scanning</strong> button
-(<code>passive-activate-btn</code>) that submits an all-defaults sweep — the operator does not
-have to choose an interface, window, or source set for the common case. While a sweep
-is in flight the button shows "Scanning…" and a one-action <strong>Deactivate</strong> button
-(<code>passive-deactivate-btn</code>, <code>AbortController</code>-backed) appears. The interface / window /
-source controls described above are relocated under a collapsed <strong>Advanced</strong> disclosure
-for operators who need to override the defaults. The activate button is disabled when no
-passive sources are available.</p>
+<p>The frontend mounts the following panel for the OT fingerprint surface. Passive-discovery controls
+live in <code>DiscoveryControlPanel</code> under the Settings page (<code>/settings</code>) — see the passive-discovery
+endpoints section above for the backend API.</p>
 <h3 id="otprobepanel"><code>OtProbePanel</code></h3>
 <p>Lives at <code>frontend/src/components/OtProbePanel.tsx</code>. Wraps <code>POST /api/ot-probe</code>. The
 protocol dropdown lists Modbus/TCP, DNP3, S7comm, and BACnet/IP; picking a protocol
@@ -887,7 +869,7 @@ retry wrapper) propagate.</p>
 </code></pre></div>
 
 <h2 id="one-action-all-protocol-sweep">One-Action All-Protocol Sweep</h2>
-<p>Beyond the single-target probe, <code>OtProbePanel</code> exposes a one-action <strong>Sweep all</strong>
+<p>Beyond the single-target probe, <code>OtProbePanel</code> exposes a one-action <strong>Probe all OT/ICS protocols</strong>
 control (<code>ot-sweep-all-btn</code>) that fingerprints <em>every</em> known host across <em>all four</em>
 protocols (Modbus/TCP, DNP3, S7comm, BACnet/IP) without the operator picking a host
 or protocol. It auto-targets the hosts from the device inventory and renders a live
@@ -1044,7 +1026,7 @@ capture tool. This section documents that procedure.</p>
 </ol>
 <p><code>curl -X POST http://&lt;castellum-host&gt;:8080/api/ot-probe \
         -H 'Content-Type: application/json' \
-        -d '{"deviceId": &lt;id&gt;, "protocol": "MODBUS_TCP"}'</code></p>
+        -d '{"host": "&lt;target-ip&gt;", "port": 502, "protocol": "MODBUS_TCP"}'</code></p>
 <p>Repeat once per protocol you need to certify.</p>
 <ol start="3">
 <li><strong>Stop the capture</strong> (<code>Ctrl-C</code>) and open the <code>.pcap</code> in Wireshark.</li>

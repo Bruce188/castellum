@@ -958,8 +958,10 @@ stored BCrypt hash) plus the proposed new password:</p>
 <li>Increments <code>token_version</code> so every outstanding JWT for the user is
   rejected on the next request. The caller's own current token is
   invalidated too — the client must re-login after rotation.</li>
-<li>Clears <code>must_change_password</code> if it was set.</li>
-<li>Emits <code>PASSWORD_CHANGE</code> audit event.</li>
+<li>Sets <code>lastLoginAt</code> (already set on login), so the derived
+  <code>mustChangePassword</code> flag in subsequent login responses will be
+  <code>false</code> — the forced-rotation overlay will not reappear.</li>
+<li>Emits <code>AUTH_PASSWORD_CHANGE</code> audit event.</li>
 </ul>
 <p>Failure modes:</p>
 <ul>
@@ -971,13 +973,16 @@ stored BCrypt hash) plus the proposed new password:</p>
   (5 attempts / 60s by default) is exhausted.</li>
 </ul>
 <h2 id="first-login-forced-rotation">First-login forced rotation</h2>
-<p>The bootstrap-admin and viewer initializers set
-<code>must_change_password = true</code> whenever they create OR update a user
-from environment-variable hashes. <code>LoginResponse</code> exposes a
-<code>mustChangePassword: boolean</code> field; when true the frontend mounts
-<code>ForcePasswordRotation</code> in place of the routed app — no navigation
-matches until the user successfully POSTs to
-<code>/api/auth/change-password</code>.</p>
+<p><code>LoginResponse</code> exposes a <code>mustChangePassword: boolean</code> field. It is
+computed live in <code>AuthController</code> on each login as:
+<code>user.lastLoginAt == null &amp;&amp; bootstrapUsernames.contains(username)</code>.
+There is no <code>must_change_password</code> database column — the flag is
+derived purely from the absence of a prior login timestamp and
+membership in the set of bootstrap principals
+(<code>CASTELLUM_ADMIN_USERNAME</code>, <code>CASTELLUM_VIEWER_USERNAME</code>).
+When the field is <code>true</code>, the frontend mounts <code>ForcePasswordRotation</code>
+in place of the routed app — no navigation matches until the user
+successfully POSTs to <code>/api/auth/change-password</code>.</p>
 <h2 id="user-management">User management</h2>
 <p>ADMIN-only CRUD over <code>/api/users</code>:</p>
 <table>

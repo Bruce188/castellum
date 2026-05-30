@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Attack Graph — Castellum — pipelinekit</title>
-<meta name="description" content="Castellum attack-graph reference: the shortest-path REST endpoint, response shape, edge types and MITRE ATT&amp;CK technique mapping, the edge weight and risk-contribution model, the composite score, performance bounds, multi-edge dedupe, IPv4/IPv6 subnet bucketing, and the Attack Graph Explorer frontend.">
+<meta name="description" content="Castellum attack-graph reference: the shortest-path REST endpoint, response shape, edge types (SAME_SUBNET, EXPLOITABLE_VULN, WEAK_CRED_PATH, GATEWAY_PIVOT) and MITRE ATT&amp;CK technique mapping, the edge weight and risk-contribution model, the composite score, performance bounds, multi-edge dedupe, IPv4/IPv6 subnet bucketing, and the Attack Graph Explorer frontend.">
 <meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
 <style>
 /* === Reset + variables === */
@@ -641,7 +641,7 @@ footer {
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
       <h1>Attack Graph</h1>
-      <p class="description">Castellum attack-graph reference: the shortest-path REST endpoint, response shape, edge types and MITRE ATT&amp;CK technique mapping, the edge weight and risk-contribution model, the composite score, performance bounds, multi-edge dedupe, IPv4/IPv6 subnet bucketing, and the Attack Graph Explorer frontend.</p>
+      <p class="description">Castellum attack-graph reference: the shortest-path REST endpoint, response shape, edge types (SAME_SUBNET, EXPLOITABLE_VULN, WEAK_CRED_PATH, GATEWAY_PIVOT) and MITRE ATT&amp;CK technique mapping, the edge weight and risk-contribution model, the composite score, performance bounds, multi-edge dedupe, IPv4/IPv6 subnet bucketing, and the Attack Graph Explorer frontend.</p>
       <div class="page-meta"><span class="meta-item"><strong>Section:</strong> reference</span> · <span class="meta-item"><strong>Audience:</strong> developers &amp; operators</span></div>
     </header>
 
@@ -705,6 +705,7 @@ Authorization: Bearer &lt;jwt&gt;
 <tr><td><code>SAME_SUBNET</code></td><td>T1021 Remote Services</td><td>—</td></tr>
 <tr><td><code>EXPLOITABLE_VULN</code></td><td>T1190 Exploit Public-Facing Application</td><td>T1210 Exploitation of Remote Services when service name contains <code>smb</code>, <code>rpc</code>, <code>rdp</code>, or <code>ssh</code> (case-insensitive, <code>Locale.ROOT</code>)</td></tr>
 <tr><td><code>WEAK_CRED_PATH</code></td><td>T1078 Valid Accounts</td><td>— (typed-but-empty seam in v1; no signal source wired)</td></tr>
+<tr><td><code>GATEWAY_PIVOT</code></td><td>T1090 Proxy</td><td>—</td></tr>
 </tbody>
 </table>
 <p>The service-aware refinement runs at <code>GraphBuilder.build()</code> time and is captured in <code>AttackEdge.techniqueId</code>. <code>GraphService.shortestPath</code> reads the per-edge technique id directly rather than re-mapping by <code>EdgeType</code> — this avoids a re-mapping seam and ensures the response reflects the producer's classification.</p>
@@ -723,10 +724,12 @@ Authorization: Bearer &lt;jwt&gt;
 <tr><td><code>SAME_SUBNET</code></td><td><code>1.0</code></td><td><code>0.0</code></td></tr>
 <tr><td><code>EXPLOITABLE_VULN</code></td><td><code>11.0 - composite_score</code> (range <code>[1.0, 11.0]</code>)</td><td><code>composite_score</code> (range <code>[0.0, 10.0]</code>)</td></tr>
 <tr><td><code>WEAK_CRED_PATH</code></td><td><code>2.0</code></td><td><code>5.0</code></td></tr>
+<tr><td><code>GATEWAY_PIVOT</code></td><td><code>3.0</code></td><td><code>4.0</code></td></tr>
 </tbody>
 </table>
 <p>The <code>EXPLOITABLE_VULN</code> weight inversion (<code>11.0 - composite_score</code>) is strictly positive (composite is bounded in <code>[0, 10]</code>) and ensures higher-severity CVEs produce lower-cost edges in Dijkstra. The risk contribution preserves the composite score directly so the response's <code>cumulativeRisk</code> aggregates defender pain across the path.</p>
 <p><code>WEAK_CRED_PATH</code> has no signal source in v1; the type is reserved for future credential-graph integration.</p>
+<p><code>GATEWAY_PIVOT</code> edges bridge HOME-scope devices and DOCKER_BRIDGE-scope containers through a per-origin pivot node. Weight is fixed at <code>3.0</code> (heavier than <code>SAME_SUBNET</code> 1.0 and <code>WEAK_CRED_PATH</code> 2.0, lighter than the worst-case <code>EXPLOITABLE_VULN</code> 11.0). Risk contribution is fixed at <code>4.0</code>. Edges are bidirectional and emitted in the third graph-build pass inside <code>GraphBuilder.build()</code>.</p>
 <h2 id="composite-score">Composite score</h2>
 <p>The composite score is computed by <code>io.castellum.risk.CompositeScorer</code> from CVSS, EPSS, KEV, and the target device's <code>Criticality</code>. Scoring is memoized per build via <code>CompositeScoreMemoizer</code> keyed on <code>(cveId, deviceId)</code> — two same-subnet peers routing through the same target device + CVE pair share a single repository read. Two different target devices for the same CVE do NOT share the cache, because the composite incorporates target criticality.</p>
 <h2 id="performance-bounds">Performance bounds</h2>
@@ -773,14 +776,14 @@ Authorization: Bearer &lt;jwt&gt;
 <tr><td><code>BuiltGraph</code></td><td>Immutable record holding the JGraphT graph + <code>vertexById</code> map.</td></tr>
 <tr><td><code>GraphService</code></td><td>Validate input, lookup vertices, invoke <code>ShortestPathFinder</code>, render <code>ShortestPathResponse</code>.</td></tr>
 <tr><td><code>ShortestPathFinder</code></td><td>Wraps <code>org.jgrapht.alg.shortestpath.DijkstraShortestPath</code>.</td></tr>
-<tr><td><code>EdgeWeights</code></td><td>Pure static utility — weight and risk-contribution functions.</td></tr>
+<tr><td><code>EdgeWeights</code></td><td>Pure static utility — weight and risk-contribution functions for all four edge types including <code>GATEWAY_PIVOT</code> (weight 3.0, risk 4.0).</td></tr>
 <tr><td><code>CpeMapper</code></td><td>Lossy <code>NetworkService</code> → CPE 2.3 string (<code>vendor=product=lowercase-sanitized(name)</code>).</td></tr>
 <tr><td><code>CompositeScoreMemoizer</code></td><td>Per-build cache of <code>CompositeScorer</code> outputs keyed on <code>(cveId, deviceId)</code>.</td></tr>
 <tr><td><code>AttackTechniqueMapper</code></td><td><code>EdgeType</code> → ATT&amp;CK technique mapping with service-aware overload.</td></tr>
 <tr><td><code>AttackEdge</code></td><td>JGraphT <code>DefaultWeightedEdge</code> subclass with <code>EdgeType</code>, <code>riskContribution</code>, <code>cveId</code>, <code>techniqueId</code>.</td></tr>
 <tr><td><code>GraphProperties</code></td><td>Spring <code>@ConfigurationProperties(prefix = "castellum.graph")</code> — caps, defaults.</td></tr>
 <tr><td><code>GraphTooLargeException</code></td><td>Thrown on <code>max-devices</code> overflow; mapped to HTTP 503.</td></tr>
-<tr><td><code>GraphController</code></td><td>REST endpoint <code>GET /api/graph/shortest-path</code>.</td></tr>
+<tr><td><code>GraphController</code></td><td>REST endpoint <code>GET /api/graph/shortest-path</code>. Mounted at <code>/api/graph</code>; only this one mapping exists on the controller.</td></tr>
 </tbody>
 </table>
 <h2 id="frontend--attack-graph-explorer">Frontend — Attack Graph Explorer</h2>
