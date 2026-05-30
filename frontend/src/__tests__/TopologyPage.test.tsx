@@ -1,4 +1,5 @@
-import { render, act, screen, fireEvent } from '@testing-library/react';
+import { render, act, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Device, DeviceRiskDto, Page, Scan } from '../api/types';
 
@@ -155,5 +156,104 @@ describe('<TopologyPage /> mount fanout', () => {
       const parsed = JSON.parse(raw as string);
       expect(parsed.PUBLIC).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// focus param — R7 feat/device-focus-routing
+// ---------------------------------------------------------------------------
+// Device 42 used as the focus target. Must appear in the mocked listDevices
+// payload so TopologyPage can look it up by id.
+const DEVICE_42: Device = {
+  id: 42,
+  ipAddress: '10.0.0.42',
+  hostname: 'focus-host',
+  macAddress: null,
+  firstSeen: '2026-01-01T00:00:00Z',
+  lastSeen: '2026-01-01T00:00:00Z',
+  criticality: 'MEDIUM',
+  discoveryScope: 'HOME',
+  discoverySource: null,
+  lastSeenIface: null,
+  serviceCount: 0,
+  osName: null,
+  osAccuracy: null,
+  osCpe: null,
+  publishesHostPort: false,
+  deviceRole: 'UNKNOWN',
+  originHostIp: 'local',
+  originHostName: null,
+  networkName: null,
+};
+
+const DEVICES_WITH_42: Page<Device> = {
+  content: [...DEVICES, DEVICE_42],
+  totalElements: DEVICES.length + 1,
+  totalPages: 1,
+  number: 0,
+  size: 200,
+};
+
+const RISK_42: DeviceRiskDto = { deviceId: 42, score: '3.00', topCveIds: [] };
+
+describe('<TopologyPage /> ?focus search param — device pre-selection', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    mockApi.listDevices.mockResolvedValue(DEVICES_WITH_42);
+    mockApi.deviceRisk.mockResolvedValue(RISK_42);
+    mockApi.deviceRisksBatch.mockResolvedValue(
+      new Map([...DEVICES, DEVICE_42].map(d => [d.id, RISK_42])),
+    );
+    mockApi.listScans.mockResolvedValue(SCANS_PAGE);
+    mockApi.listServicesForDevice.mockResolvedValue([]);
+    mockApi.feedsStatus.mockResolvedValue({
+      epss: { scoreDate: '2025-01-01', rowCount: 1000 },
+      kev: { lastIngestedAt: '2025-01-01T00:00:00Z', entryCount: 100 },
+      nvd: { lastModified: '2025-01-01T00:00:00Z', rowCount: 200000 },
+    });
+    mockApi.syncStatus.mockResolvedValue({ running: false, startedAt: null });
+    mockApi.getActiveCidr.mockResolvedValue({ iface: null, cidr: null, ipAddress: null, prefix: 0, note: null });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('pre-selects the focused device and opens DeviceDetailPanel on load when ?focus=42', async () => {
+    render(
+      <MemoryRouter initialEntries={['/?focus=42']}>
+        <TopologyPage />
+      </MemoryRouter>,
+    );
+
+    // Flush device + risk fetches.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // DeviceDetailPanel should mount showing device 42's hostname.
+    await waitFor(() => {
+      const panel = screen.getByTestId('device-detail-panel');
+      expect(panel).toBeInTheDocument();
+      // The panel h2 renders hostname ?? ipAddress — device 42 has hostname 'focus-host'.
+      expect(panel.querySelector('h2')?.textContent).toBe('focus-host');
+    });
+  });
+
+  it('does NOT open DeviceDetailPanel when ?focus param is absent', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <TopologyPage />
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // No focus param → panel should not render (device is null → returns null).
+    expect(screen.queryByTestId('device-detail-panel')).not.toBeInTheDocument();
   });
 });

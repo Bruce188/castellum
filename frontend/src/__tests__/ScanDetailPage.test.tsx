@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { ScanDetailPage } from '../pages/ScanDetailPage';
 import { api } from '../api/client';
 import * as scanReportExportModule from '../lib/scanReportExport';
@@ -156,5 +156,69 @@ describe('<ScanDetailPage />', () => {
     renderWith('/scans/7');
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(/Back to scans/)).toBeInTheDocument();
+  });
+});
+
+// Sentinel that reads the ?focus param so we can assert navigation target.
+function TopologyFocusSentinel() {
+  const [params] = useSearchParams();
+  const focus = params.get('focus');
+  return <div data-testid="topology-sentinel">topology-focus-{focus ?? 'none'}</div>;
+}
+
+describe('<ScanDetailPage /> device-row focus navigation', () => {
+  beforeEach(() => {
+    getScanReport.mockReset();
+    exportScanReportJson.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  function renderWithTopologySentinel(path = '/scans/7') {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/scans/:id" element={<ScanDetailPage />} />
+          <Route path="/scans" element={<div>scans list</div>} />
+          <Route path="/" element={<TopologyFocusSentinel />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('each device row IP cell is a link targeting /?focus=<deviceId>', async () => {
+    getScanReport.mockResolvedValueOnce(baseReport);
+    renderWithTopologySentinel('/scans/7');
+
+    // Wait for the snapshot table to render.
+    await screen.findByTestId('scan-snapshot-table');
+
+    // Device 101 — "host-new" at 10.0.0.1
+    const link101 = screen.getByTestId('device-focus-link-101');
+    expect(link101).toBeInTheDocument();
+    expect(link101).toHaveAttribute('href', '/?focus=101');
+
+    // Device 102 — "host-changed" at 10.0.0.2
+    const link102 = screen.getByTestId('device-focus-link-102');
+    expect(link102).toHaveAttribute('href', '/?focus=102');
+
+    // Device 103 — "host-unchanged" at 10.0.0.3
+    const link103 = screen.getByTestId('device-focus-link-103');
+    expect(link103).toHaveAttribute('href', '/?focus=103');
+  });
+
+  it('clicking a device row IP link navigates to topology with ?focus=<deviceId>', async () => {
+    getScanReport.mockResolvedValueOnce(baseReport);
+    renderWithTopologySentinel('/scans/7');
+
+    await screen.findByTestId('scan-snapshot-table');
+
+    const link101 = screen.getByTestId('device-focus-link-101');
+    fireEvent.click(link101);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('topology-sentinel')).toHaveTextContent(
+        'topology-focus-101',
+      );
+    });
   });
 });
