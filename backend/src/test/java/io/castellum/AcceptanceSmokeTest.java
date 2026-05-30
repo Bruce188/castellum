@@ -445,9 +445,9 @@ class AcceptanceSmokeTest {
 
     @Test
     void ac2_cosignVerifyDocumentedAndScripted() throws Exception {
-        Path doc = Paths.get(System.getProperty("user.dir"), "..", "documentation", "supply-chain.md").normalize();
+        Path doc = Paths.get(System.getProperty("user.dir"), "..", "documentation", "supply-chain.html").normalize();
         if (!doc.toFile().exists()) {
-            doc = Paths.get(System.getProperty("user.dir"), "documentation", "supply-chain.md").normalize();
+            doc = Paths.get(System.getProperty("user.dir"), "documentation", "supply-chain.html").normalize();
         }
         String body = Files.readString(doc);
         assertTrue(body.contains("cosign generate-key-pair"), "AC#2: keygen must be documented");

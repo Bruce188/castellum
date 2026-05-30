@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Runtime Flags &amp; Native Dependencies — Castellum — pipelinekit</title>
-<meta name="description" content="Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.">
+<title>Compliance Posture — NIST 800-53 — Castellum — pipelinekit</title>
+<meta name="description" content="Castellum's honest NIST SP 800-53 Rev. 5 control mapping: which AC, AU, CM, IA, RA, SC, SI, and SR controls are genuinely implemented with concrete evidence links, which are conceptual wiring or operator-responsibility carve-outs, the evidence-link policy, and the explicit out-of-scope non-claims.">
 <meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
 <style>
 /* === Reset + variables === */
@@ -588,7 +588,7 @@ footer {
   pre { page-break-inside: avoid; }
 }
 </style>
-<!-- richness-exempt: operational runbook — env-var tables, CLI recipes, and reverse-proxy config; not a tutorial / lifecycle / catalog page. The interactive snippets are intended for higher-level conceptual pages. -->
+<!-- richness-exempt: compliance reference — control-mapping tables, evidence links, and explicit non-claims; not a tutorial / lifecycle / catalog page. The interactive snippets are intended for higher-level conceptual pages. -->
 </head>
 <body>
 
@@ -598,7 +598,7 @@ footer {
     <span>pipelinekit docs</span>
   </a>
   <div class="crumbs">
-    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Runtime Flags &amp; Native Dependencies — Castellum</span>
+    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Compliance Posture — NIST 800-53 — Castellum</span>
   </div>
   <div class="search-box">
     <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -619,92 +619,108 @@ footer {
   <aside class="toc" id="toc">
     <h2 class="toc-heading">On this page</h2>
     <ul>
-      <li class="lvl-2"><a href="#1-jvm-flags">1. JVM flags</a></li>
-      <li class="lvl-2"><a href="#2-linux-capability">2. Linux capability</a></li>
-      <li class="lvl-2"><a href="#3-native-library">3. Native library</a></li>
-      <li class="lvl-2"><a href="#4-distroless-base-resolved">4. Distroless base (resolved)</a></li>
-      <li class="lvl-2"><a href="#5-linux-only-contract-for-v1">5. Linux-only contract for v1</a></li>
-      <li class="lvl-2"><a href="#6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</a></li>
-      <li class="lvl-2"><a href="#7-environment-variables">7. Environment variables</a></li>
-      <li class="lvl-3"><a href="#castellum-integration-key">CASTELLUM_INTEGRATION_KEY</a></li>
-      <li class="lvl-3"><a href="#castellum-jwt-secret">CASTELLUM_JWT_SECRET</a></li>
-      <li class="lvl-3"><a href="#castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</a></li>
+      <li class="lvl-2"><a href="#posture-summary">Posture Summary</a></li>
+      <li class="lvl-2"><a href="#nist-800-53-control-mapping">NIST 800-53 Control Mapping</a></li>
+      <li class="lvl-2"><a href="#evidence-link-policy">Evidence-Link Policy</a></li>
+      <li class="lvl-3"><a href="#distinguishing-implementation-states">Distinguishing implementation states</a></li>
+      <li class="lvl-2"><a href="#operator-responsibility-carve-outs">Operator-Responsibility Carve-Outs</a></li>
+      <li class="lvl-2"><a href="#explicit-non-claims">Explicit Non-Claims</a></li>
+      <li class="lvl-2"><a href="#cross-references">Cross-References</a></li>
     </ul>
   </aside>
 
   <main>
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
-      <h1>Runtime Flags &amp; Native Dependencies</h1>
-      <p class="description">Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.</p>
-      <div class="page-meta"><span class="meta-item"><strong>Section:</strong> operations</span> · <span class="meta-item"><strong>Audience:</strong> operators &amp; sysadmins</span></div>
+      <h1>Compliance Posture — NIST 800-53</h1>
+      <p class="description">Castellum's honest NIST SP 800-53 Rev. 5 control mapping: which AC, AU, CM, IA, RA, SC, SI, and SR controls are genuinely implemented with concrete evidence links, which are conceptual wiring or operator-responsibility carve-outs, the evidence-link policy, and the explicit out-of-scope non-claims.</p>
+      <div class="page-meta"><span class="meta-item"><strong>Version:</strong> <code>1.0 (Feature 10)</code></span> · <span class="meta-item"><strong>Date:</strong> 2026-04-29</span> · <span class="meta-item"><strong>Standard:</strong> NIST SP 800-53 Rev. 5</span> · <span class="meta-item"><strong>Section:</strong> security</span> · <span class="meta-item"><strong>Audience:</strong> assessors &amp; operators</span></div>
     </header>
 
     <div id="page-content">
-<blockquote>
-<p>[NOTE] <strong>TODO (feature 9):</strong> wire the JVM flags into the <code>ENTRYPOINT java</code> line. The distroless base is resolved — see §4.</p>
-</blockquote>
-<p>This document is the single source of truth for the pcap4j runtime requirements introduced in feature 4 (<code>feat/passive-discovery</code>). Feature 9 (<code>feat/security-hardening-and-supply-chain</code>) will read from this file when wiring the production Dockerfile.</p>
-<h2 id="1-jvm-flags">1. JVM flags</h2>
-<p>The pcap4j 1.8.x library uses JNA to call into the native <code>libpcap.so</code> library. JNA reflectively accesses internals of <code>sun.nio.ch</code> and triggers JDK 21's restricted-native-access guard. Two JVM flags are required:</p>
-<ul>
-<li><code>--enable-native-access=ALL-UNNAMED</code></li>
-<li><code>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</code></li>
-</ul>
-<p>These flags are wired in <strong>Maven Surefire</strong> (<code>backend/pom.xml</code> → <code>&lt;build&gt;&lt;plugins&gt;</code> → <code>maven-surefire-plugin</code> → <code>&lt;argLine&gt;</code>) so tests run with the same flag set as production.</p>
-<p>When feature 9 lands the production Dockerfile, the <code>ENTRYPOINT java</code> line MUST include both flags. Example:</p>
-<div class="codehilite"><pre><code class="language-dockerfile">ENTRYPOINT ["java", \
-  "--enable-native-access=ALL-UNNAMED", \
-  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED", \
-  "-jar", "/app/backend.jar"]
-</code></pre></div>
-<h2 id="2-linux-capability">2. Linux capability</h2>
-<p>The PCAP source (<code>PcapSniffer</code>) opens raw sockets via libpcap. Raw-socket open requires the <code>CAP_NET_RAW</code> Linux capability.</p>
-<p>The production container MUST run with <code>CAP_NET_RAW</code> and <strong>all other capabilities dropped</strong>. Example Docker run:</p>
-<div class="codehilite"><pre><code class="language-bash">docker run --cap-drop=ALL --cap-add=NET_RAW castellum:latest
-</code></pre></div>
-<p>Equivalent Kubernetes <code>securityContext</code>:</p>
-<div class="codehilite"><pre><code class="language-yaml">securityContext:
-  capabilities:
-    drop: ["ALL"]
-    add: ["NET_RAW"]
-</code></pre></div>
-<p>The ARP and MDNS sources do NOT require <code>CAP_NET_RAW</code>. ARP reads <code>/proc/net/arp</code> (filesystem only). MDNS uses the JVM's standard multicast socket.</p>
-<h2 id="3-native-library">3. Native library</h2>
-<p><code>libpcap.so</code> (Linux package: <code>libpcap0.8</code>, version &gt;= 1.0.0). NOT a Maven dependency — provided by the host OS or container layer.</p>
-<p>On Debian/Ubuntu: <code>apt-get install libpcap0.8</code>.</p>
-<h2 id="4-distroless-base-resolved">4. Distroless base (resolved)</h2>
-<blockquote>
-<p>[NOTE] <strong>Resolved.</strong> The production image is built on the Debian-12 distroless variant, which ships <code>libpcap</code>, so the PCAP source works in containerized deployments. The earlier "pure-distroless lacks <code>libpcap</code>" caveat no longer applies.</p>
-</blockquote>
-<p>The repository <code>Dockerfile</code> pins the final stage to:</p>
-<div class="codehilite"><pre><code class="language-dockerfile">FROM gcr.io/distroless/java21-debian12:${DISTROLESS_VARIANT}
-</code></pre></div>
-<p>with <code>ARG DISTROLESS_VARIANT=nonroot</code>. Unlike the pure <code>gcr.io/distroless/java21</code> image, the <code>java21-debian12</code> variant is built on Debian 12 (bookworm) and includes the <code>libpcap</code> shared library, so the pcap4j → JNA → <code>libpcap.so</code> path resolves at runtime without an additional package-install layer. No <code>apt-get install libpcap0.8</code> step is required, and the choice does not sacrifice the distroless minimal-attack-surface posture (no shell, no package manager) — the Debian-12 distroless variant retains those properties.</p>
-<p>This is the option originally tracked as "(a) drop pure distroless for the Debian-12 distroless base." It is now the committed decision; there is no separate discovery image and no host-deployment-only degradation. See <a href="supply-chain.html">documentation/supply-chain.html</a>, which cites the same <code>gcr.io/distroless/java21-debian12:nonroot</code> base.</p>
-<h2 id="5-linux-only-contract-for-v1">5. Linux-only contract for v1</h2>
-<p><code>/proc/net/arp</code> does not exist on Windows or macOS. The <code>ArpCacheReader</code> returns an empty list when the file is absent (no exception). Future ports could read:</p>
-<ul>
-<li>Windows: <code>GetIpNetTable</code> via JNA.</li>
-<li>macOS: <code>/Library/Preferences/SystemConfiguration/...</code> plus <code>arp -an</code> parsing (sysctl-based).</li>
-</ul>
-<p>Both ports are out of scope for v1. README documents the Linux-only contract operationally.</p>
-<h2 id="6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</h2>
-<p>For systemd or bare-metal deployments where Docker capability dropping is not available, <code>setcap</code> on a Java wrapper script grants <code>CAP_NET_RAW</code> without root:</p>
-<div class="codehilite"><pre><code class="language-bash">sudo setcap cap_net_raw+eip /usr/local/bin/castellum-launcher
-</code></pre></div>
-<p>Caveat: <code>setcap</code> on the JDK binary itself is brittle — <code>java</code> binary updates wipe the capability. Prefer <code>setcap</code> on a wrapper script that exec's the real <code>java</code>.</p>
-<h2 id="7-environment-variables">7. Environment variables</h2>
-<p>Environment-driven configuration. The backend resolves these via Spring's standard <code>Environment</code> bean.</p>
-<h3 id="castellum-integration-key">CASTELLUM_INTEGRATION_KEY</h3>
-<p>AES-256 key (32 bytes, hex- or base64-encoded depending on operator preference; the cipher reads the raw byte length) used to encrypt TAXII / MISP credentials at rest in the <code>integration_config</code> table. Required when the threat-intel-push integrations (TAXII, MISP) are configured. Read by <code>AesGcmCipher</code> at boot — startup fails fast with a clear error if the variable is missing while at least one <code>integration_config</code> row exists. Generation:</p>
-<div class="codehilite"><pre><code class="language-bash">openssl rand -hex 32
-</code></pre></div>
-<p>Rotation is non-trivial: changing the key requires re-encrypting every row in <code>integration_config</code> with the new key. The current implementation does not include a rotation helper; rotation today is "truncate the table, re-enter credentials in the UI under the new key." A future feature will add a <code>ROTATION_KEY</code> env that runs a one-shot re-encrypt on boot.</p>
-<h3 id="castellum-jwt-secret">CASTELLUM_JWT_SECRET</h3>
-<p>HMAC-SHA256 signing key (32+ bytes) for issued JWTs. Read by <code>JwtService</code> at boot. Missing → boot fails with an explicit error. Generate with <code>openssl rand -hex 32</code>. Rotation invalidates every outstanding token instantly; combine with <code>tokenVersion</code> bump in <code>AuthController</code> for per-user invalidation.</p>
-<h3 id="castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</h3>
-<p>Optional. When set on first boot (before the <code>users</code> table has any admin), creates an <code>admin</code> user with this password and marks <code>must_change_password = true</code> so the operator is forced to rotate on first login. Subsequent boots ignore the variable. If unset on first boot, a random 32-character password is generated, logged once at INFO, and the operator must capture it from the log.</p>
+<h2 id="posture-summary">Posture Summary</h2>
+<p>Castellum is a solo-MVP defender tool. This document maps the NIST 800-53 controls that are <strong>genuinely implemented</strong> as of Feature 9. Only controls for which concrete implementation evidence exists are listed as implemented or partially implemented. Controls that are not yet implemented are called out explicitly — bare claims with no evidence are a red flag in any compliance review and are deliberately avoided here.</p>
+<p>This mapping is not a formal Assessment and Authorisation (A&amp;A) package. It is an honest engineering statement of what exists. A formal ATO (Authority to Operate) would require a Security Assessment Report, a System Security Plan, and independent testing. None of those exist for this MVP.</p>
+<p>The control families covered are: AC (Access Control), AU (Audit and Accountability), CM (Configuration Management), IA (Identification and Authentication), RA (Risk Assessment), SC (System and Communications Protection), SI (System and Information Integrity), and SR (Supply Chain Risk Management).</p>
+<p>Out-of-scope families with explicit justification are listed at the end of this document.</p>
+<h2 id="nist-800-53-control-mapping">NIST 800-53 Control Mapping</h2>
+<table>
+<thead>
+<tr><th>Control</th><th>Family</th><th>Castellum Implementation</th><th>Evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>AC-2</td><td>Access Control — Account Management</td><td><code>BootstrapAdminInitializer</code> performs an idempotent upsert of the admin account at startup. <code>Role</code> enum constrains valid roles to <code>ADMIN</code> and <code>VIEWER</code>. No orphaned accounts can be created via the current API (no user-management endpoint in v1).</td><td><a href="auth.html">documentation/auth.html</a> §Bootstrap-admin</td></tr>
+<tr><td>AC-3</td><td>Access Control — Access Enforcement</td><td><code>SecurityConfig</code> enforces role-based access on every endpoint via <code>hasRole('ADMIN')</code> / <code>hasAnyRole('VIEWER','ADMIN')</code> expressions. Mutating endpoints (POST, PUT, DELETE) require <code>ADMIN</code>; read endpoints require <code>VIEWER</code>+.</td><td><a href="auth.html">documentation/auth.html</a> §RBAC matrix</td></tr>
+<tr><td>AC-7</td><td>Access Control — Unsuccessful Logon Attempts</td><td><strong>Implemented.</strong> <code>LoginRateLimiter</code> enforces per-IP and per-username lockout on <code>/api/auth/login</code> (10 failed attempts per 60 seconds by default; tunable via <code>castellum.auth.login.max-attempts</code> / <code>castellum.auth.login.window-seconds</code>). <code>PasswordChangeRateLimiter</code> throttles <code>/api/auth/change-password</code> to 5 attempts per 60 seconds. BCrypt cost factor 12 (~8 s/guess) provides the underlying computational floor; the limiters bound the per-window attempt count on top.</td><td><a href="auth.html">documentation/auth.html</a> §LoginRateLimiter; <code>backend/src/main/java/io/castellum/security/LoginRateLimiter.java</code>; <code>backend/src/main/java/io/castellum/security/PasswordChangeRateLimiter.java</code></td></tr>
+<tr><td>AU-2</td><td>Audit and Accountability — Event Logging</td><td><code>AuditService.recordEvent</code> is wired into all mutating controllers: scan submission, device create/update/delete, OT probe, threat-intel push. The schema captures: actor (username), action (string), resource type + ID, payload snapshot (JSONB), and timestamp.</td><td><code>backend/src/main/java/io/castellum/audit/AuditService.java</code></td></tr>
+<tr><td>AU-3</td><td>Audit and Accountability — Content of Audit Records</td><td>Each <code>AuditLog</code> row captures: <code>id</code> (UUID), <code>actor</code>, <code>action</code>, <code>resource_type</code>, <code>resource_id</code>, <code>payload</code> (JSONB), <code>created_at</code> (timestamp with time zone). These fields satisfy the NIST minimum content requirement (event type, time, source, outcome, actor).</td><td><code>backend/src/main/java/io/castellum/audit/AuditLog.java</code></td></tr>
+<tr><td>AU-9</td><td>Audit and Accountability — Protection of Audit Information</td><td><code>AuditLogRepository</code> extends Spring Data's minimal <code>Repository&lt;AuditLog, Long&gt;</code> plus a sibling <code>AuditLogReadFragment</code>. The fragment intentionally mirrors <code>JpaSpecificationExecutor</code>'s read methods (<code>findAll(Specification)</code>, paged + sorted variants, <code>count(Specification)</code>) WITHOUT inheriting from it — <code>JpaSpecificationExecutor</code> in Spring Data JPA 3.0+ ships a <code>delete(Specification)</code> method that would violate the append-only invariant. <code>AuditLogRepositoryImpl</code> provides the Criteria-API impl. The repository declares no <code>delete*</code>, <code>deleteAll</code>, or bulk-<code>update*</code> methods; a reflection-based unit test (<code>AuditLogRepositoryTest.auditLogRepository_declaresNoDeleteMethods</code>) pins this contract.</td><td><code>backend/src/main/java/io/castellum/audit/AuditLogRepository.java</code>; <code>backend/src/main/java/io/castellum/audit/AuditLogReadFragment.java</code>; <code>backend/src/main/java/io/castellum/audit/AuditLogRepositoryImpl.java</code></td></tr>
+<tr><td>CM-2</td><td>Configuration Management — Baseline Configuration</td><td>Flyway migrations (<code>backend/src/main/resources/db/migration/V*.sql</code>) establish and version-control the database schema baseline. Maven dependency versions are pinned in <code>backend/pom.xml</code>; npm dependency versions are pinned in <code>frontend/package.json</code> + <code>frontend/package-lock.json</code>. Drift from the declared baseline is immediately visible via <code>mvn dependency:resolve</code> or <code>npm ci</code>.</td><td><code>backend/src/main/resources/db/migration/V*.sql</code>; <code>backend/pom.xml</code>; <code>frontend/package.json</code>; <code>frontend/package-lock.json</code></td></tr>
+<tr><td>CM-7</td><td>Configuration Management — Least Functionality</td><td>OT protocol probes are strictly read-only: Modbus probes use Function Code 43 (Device Identification) and FC 04 (Read Input Registers) only. No write function codes (FC 05/06/15/16) are constructed. The Docker image drops all capabilities then adds only <code>NET_RAW</code>. No shell is present in the distroless final image.</td><td><a href="ot-probes.html">documentation/ot-probes.html</a> §Read-only contract; <a href="supply-chain.html">documentation/supply-chain.html</a> §Dockerfile</td></tr>
+<tr><td>IA-2</td><td>Identification and Authentication — User Identification and Authentication</td><td>All API endpoints except <code>/api/auth/login</code> and <code>GET /actuator/health</code> require a valid <code>Authorization: Bearer &lt;token&gt;</code> JWT. <code>JwtAuthenticationFilter</code> validates the HMAC-SHA256 signature on every request.</td><td><a href="auth.html">documentation/auth.html</a> §JWT contract</td></tr>
+<tr><td>IA-5</td><td>Identification and Authentication — Authenticator Management</td><td>Admin passwords are stored as BCrypt strength-12 hashes. The plaintext password is never stored. <code>CASTELLUM_ADMIN_PASSWORD_HASH</code> is set as an environment variable, not embedded in source code or image layers. JWT secret rotation requires restarting the application with a new <code>CASTELLUM_SECURITY_JWT_SECRET</code> value, which invalidates all outstanding tokens.</td><td><a href="auth.html">documentation/auth.html</a> §Bootstrap-admin, §Secret rotation</td></tr>
+<tr><td>RA-5</td><td>Risk Assessment — Vulnerability Monitoring and Scanning</td><td>Castellum maintains a local NVD CVE mirror (~250k records) refreshed via the NVD 2.0 REST API. <code>CveMatcher</code> performs CPE-to-CVE range-aware matching against the mirror. <code>CompositeScorer</code> enriches with EPSS exploitation probability and CISA KEV membership. <code>RiskFeedScheduler</code> runs <code>@Scheduled(cron = "0 0 6 * * *")</code> — a UTC daily refresh of EPSS and KEV feeds at 06:00 — ensuring vulnerability-monitoring cadence is automated and auditable.</td><td><code>backend/src/main/java/io/castellum/cve/CveMatcher.java</code>; <code>backend/src/main/java/io/castellum/risk/CompositeScorer.java</code>; <code>backend/src/main/java/io/castellum/risk/RiskFeedScheduler.java</code></td></tr>
+<tr><td>SC-8</td><td>System and Communications Protection — Transmission Confidentiality and Integrity</td><td><strong>Operator responsibility.</strong> Castellum does not terminate TLS. The application listens on plain HTTP (default port 8080 on loopback). The operator must deploy a TLS-terminating reverse proxy (nginx, Caddy, or Traefik) in front of Castellum. SC-8 is satisfied at the proxy boundary; Castellum itself satisfies it for egress calls to NVD, EPSS, CISA, and MISP/TAXII (HTTPS).</td><td><a href="operations.html">documentation/operations.html</a> §TLS termination guidance</td></tr>
+<tr><td>SC-13</td><td>System and Communications Protection — Cryptographic Protection</td><td>JWT tokens use HMAC-SHA256 (<code>HS256</code>). Password storage uses BCrypt with cost factor 12. Integration credentials (TAXII / MISP API keys, basic-auth passwords) are encrypted at rest with AES-256-GCM (<code>AesGcmCipher</code>): 12-byte random IV per call, 128-bit auth tag, ciphertext format <code>[12-byte IV][ciphertext || 16-byte tag]</code> stored as <code>bytea</code> in <code>integration_config.encrypted_credentials</code>. Master key sourced from <code>CASTELLUM_INTEGRATION_KEY</code> (base64 AES-256, 32 raw bytes → 44 base64 chars) — startup fails fast if the key decodes to the wrong length. No weak algorithms (MD5, SHA-1, DES) are used in the authentication or at-rest paths.</td><td><code>backend/src/main/java/io/castellum/security/JwtService.java</code>; <code>backend/src/main/java/io/castellum/security/AesGcmCipher.java</code>; <code>backend/src/main/java/io/castellum/threatintel/IntegrationConfig.java</code>; <code>backend/src/main/resources/db/migration/V15__integration_config.sql</code>; <a href="auth.html">documentation/auth.html</a> §JWT contract</td></tr>
+<tr><td>SC-28</td><td>System and Communications Protection — Protection of Information at Rest</td><td>Integration credentials in <code>integration_config.encrypted_credentials</code> are AES-256-GCM ciphertext (see SC-13 for cipher details). Other application data (devices, services, CVEs, audit log) is stored in plaintext within the PostgreSQL database — protecting the database volume / disk is an operator responsibility (LUKS, EBS encryption, etc.). The compliance posture here is therefore split: secret material at the application layer is encrypted; bulk operational data is delegated to the storage layer.</td><td><code>backend/src/main/java/io/castellum/security/AesGcmCipher.java</code>; <code>backend/src/main/resources/db/migration/V15__integration_config.sql</code></td></tr>
+<tr><td>SI-3</td><td>System and Information Integrity — Malicious Code Protection</td><td><strong>Conceptual wiring; not fully implemented.</strong> Suricata can write <code>eve.json</code> events that a Castellum tail-consumer would ingest into the audit log with <code>source=suricata</code> tag. The ingest path design is documented but not deployed. See <a href="operations.html">documentation/operations.html</a> §Suricata wiring for the v1 conceptual architecture.</td><td><a href="operations.html">documentation/operations.html</a> §Suricata wiring (direction B)</td></tr>
+<tr><td>SI-4</td><td>System and Information Integrity — System Monitoring</td><td><strong>Conceptual wiring; not fully implemented.</strong> The Suricata eve.json ingest path (see SI-3) is the planned mechanism for feeding IDS alerts into Castellum's audit log. In v1, Castellum's own audit log is the primary monitoring artifact.</td><td><a href="operations.html">documentation/operations.html</a> §Suricata wiring (direction B)</td></tr>
+<tr><td>SI-7</td><td>System and Information Integrity — Software, Firmware, and Information Integrity</td><td>Docker images are signed with cosign by the operator. <code>build-and-scan.sh</code> gates the build on Trivy HIGH/CRITICAL CVE findings and extracts a CycloneDX SBOM (<code>sbom-image.cdx.json</code> and <code>target/bom.xml</code>/<code>target/bom.json</code>).</td><td><a href="supply-chain.html">documentation/supply-chain.html</a> §Build pipeline</td></tr>
+<tr><td>SI-10</td><td>System and Information Integrity — Information Input Validation</td><td>All REST endpoints validate inputs via Bean Validation <code>@Valid</code> on request DTOs across controllers in <code>backend/src/main/java/io/castellum/web/</code>. <code>CidrValidator</code> enforces RFC-correct CIDR notation with octet-range and prefix-length checks (<code>backend/src/main/java/io/castellum/scan/CidrValidator.java</code>). <code>HostValidator</code> enforces dotted-quad IPv4 host addresses with SSRF-blocking logic (<code>backend/src/main/java/io/castellum/ot/HostValidator.java</code>). Invalid inputs are rejected at the controller boundary before reaching service or database layers.</td><td><code>backend/src/main/java/io/castellum/scan/CidrValidator.java</code>; <code>backend/src/main/java/io/castellum/ot/HostValidator.java</code>; <code>backend/src/main/java/io/castellum/web/</code> (Bean Validation <code>@Valid</code>)</td></tr>
+<tr><td>SR-3</td><td>Supply Chain Risk Management — Supply Chain Controls and Processes</td><td>Build uses official <code>maven:3.9-eclipse-temurin-21</code> builder image and <code>gcr.io/distroless/java21-debian12:nonroot</code> runtime image. Trivy scans for known CVEs in both. Maven Central dependencies are resolved at build time; the SBOM captures all JVM transitive dependencies.</td><td><a href="supply-chain.html">documentation/supply-chain.html</a> §Trivy gate, §SBOM</td></tr>
+<tr><td>SR-4</td><td>Supply Chain Risk Management — Provenance</td><td>Three SBOM artefacts are produced per build: <code>target/bom.xml</code> (CycloneDX XML, JVM deps), <code>target/bom.json</code> (CycloneDX JSON, JVM deps), <code>sbom-image.cdx.json</code> (CycloneDX JSON, container image). These provide a full bill of materials for both compile-time and runtime dependencies.</td><td><a href="supply-chain.html">documentation/supply-chain.html</a> §SBOM artifacts</td></tr>
+</tbody>
+</table>
+<h2 id="evidence-link-policy">Evidence-Link Policy</h2>
+<p>Every "implemented" claim in the table above links to a specific file or section that an auditor can read to verify the claim. This policy exists because:</p>
+<ol>
+<li>Bare claims without evidence are unverifiable and meaningless in a compliance review.</li>
+<li>If the linked file does not contain the stated evidence, the compliance claim is false — the mapping should be updated, not the evidence invented.</li>
+<li>For code-level evidence (Java file references), the auditor should read the referenced source file directly. These references use package-relative paths (<code>io/castellum/...</code>) or short class names resolvable from the <code>backend/src/main/java/</code> root.</li>
+</ol>
+<p>Any future update to this table that adds a new "implemented" row without a corresponding evidence link must be treated as a documentation defect.</p>
+<h3 id="distinguishing-implementation-states">Distinguishing implementation states</h3>
+<p>The table uses three implementation states to be precise about what Castellum actually provides:</p>
+<p><strong>Implemented</strong> — the control is actively implemented in Castellum's code. Evidence exists in the linked file. An assessor can verify the claim by reading the referenced source or documentation.</p>
+<p><strong>Deferred / Not implemented</strong> — the control is known to be absent. The gap is acknowledged explicitly, not hidden. No controls currently fall in this state in v1; the category exists so that future deferrals can be recorded honestly rather than re-classed as "not applicable".</p>
+<p><strong>Conceptual wiring</strong> — the architectural path is designed and documented, but the code that runs it is not yet deployed. SI-3 and SI-4 (Suricata IDS integration) fall here. The design decision to use direction-B ingest (Suricata → eve.json → Castellum audit log) is made and documented, but the running file-tailer component does not yet ship with the application. Claiming "implemented" for these would be dishonest; claiming "not applicable" would be equally wrong.</p>
+<p><strong>Operator responsibility</strong> — the control is satisfied, but Castellum relies on the operator to configure an external component. SC-8 (TLS) is the primary example: the operator must deploy a TLS-terminating reverse proxy. Castellum cannot satisfy SC-8 alone; it requires a correctly configured deployment environment.</p>
+<h2 id="operator-responsibility-carve-outs">Operator-Responsibility Carve-Outs</h2>
+<p>Two controls are partially satisfied only through operator action — Castellum does not implement them directly:</p>
+<p><strong>SC-8 — Transmission Confidentiality.</strong> Castellum does not terminate TLS. Deploying a TLS-terminating reverse proxy in front of Castellum is required for this control. See <a href="operations.html">documentation/operations.html</a> §TLS termination guidance for the nginx/Caddy/Traefik setup pattern.</p>
+<p><strong>SC-28 — Information at Rest (bulk operational data).</strong> Castellum encrypts integration credentials at the application layer (AES-256-GCM, see SC-13/SC-28 rows above) but stores device, service, CVE, and audit data in plaintext PostgreSQL columns. Operators must enable disk-level encryption (LUKS, AWS EBS encryption-at-rest, etc.) to fully satisfy SC-28 for bulk data.</p>
+<p><strong>Defence in depth for AC-7.</strong> AC-7 is now satisfied in-application by <code>LoginRateLimiter</code> and <code>PasswordChangeRateLimiter</code> (see the AC-7 row above). Operators are still encouraged to layer reverse-proxy rate limits (nginx <code>limit_req_zone</code>) for defence in depth — the application's per-IP counter resets across process restarts and so does not survive a deliberate-crash brute-force loop.</p>
+<h2 id="explicit-non-claims">Explicit Non-Claims</h2>
+<p>The following NIST 800-53 control families are out of scope for Castellum v1. This is not an oversight — they are genuinely inapplicable or deferred for a solo MVP. A future System Security Plan must address them explicitly if Castellum is deployed in a regulated environment.</p>
+<table>
+<thead>
+<tr><th>Family</th><th>Reason for exclusion</th></tr>
+</thead>
+<tbody>
+<tr><td>CP-* — Contingency Planning</td><td>No backup/recovery procedures, no business continuity plan, no system recovery objectives defined. Solo MVP.</td></tr>
+<tr><td>MP-* — Media Protection</td><td>No removable media policy. Castellum runs as a containerised service. Physical media handling is out of scope.</td></tr>
+<tr><td>PE-* — Physical and Environmental Protection</td><td>Physical security of the deployment host is an operator/facility responsibility. Castellum provides no physical controls.</td></tr>
+<tr><td>AT-* — Awareness and Training</td><td>No formal security awareness training programme. Solo MVP; no organisational training infrastructure.</td></tr>
+<tr><td>IR-* — Incident Response</td><td>No formal incident response plan or team defined. Future operational deployments should establish IR procedures.</td></tr>
+<tr><td>PL-* — Planning</td><td>No formal System Security Plan (SSP). This document is an engineering posture statement, not an SSP.</td></tr>
+<tr><td>PS-* — Personnel Security</td><td>Personnel vetting and separation of duties policies are outside the scope of this application.</td></tr>
+<tr><td>RA-3 — Risk Assessment (formal)</td><td>No formal risk assessment process. This threat model is an engineering artifact, not a formal RA-3 assessment.</td></tr>
+<tr><td>SA-* — System and Services Acquisition</td><td>No formal acquisition process. Open-source MVP.</td></tr>
+</tbody>
+</table>
+<h2 id="cross-references">Cross-References</h2>
+<table>
+<thead>
+<tr><th>Document</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="threat-model.html">documentation/threat-model.html</a></td><td>STRIDE analysis per module; source of truth for threat scenarios mapped to these controls</td></tr>
+<tr><td><a href="auth.html">documentation/auth.html</a></td><td>Implementation evidence for AC-2, AC-3, IA-2, IA-5, SC-13</td></tr>
+<tr><td><a href="supply-chain.html">documentation/supply-chain.html</a></td><td>Implementation evidence for SI-7, SR-3, SR-4, CM-7 (distroless)</td></tr>
+<tr><td><a href="ot-probes.html">documentation/ot-probes.html</a></td><td>Implementation evidence for CM-7 (read-only OT)</td></tr>
+<tr><td><a href="operations.html">documentation/operations.html</a></td><td>Operator guidance for SC-8, AC-7, SI-3 (Suricata)</td></tr>
+</tbody>
+</table>
     </div>
 
     <div class="no-results" id="no-results">

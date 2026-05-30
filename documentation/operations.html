@@ -704,7 +704,7 @@ footer {
 <li><a href="#8-unified-network-scan-scan-this-network">Unified network scan</a> — one-click multi-stage nmap + OT sweep with per-stage isolation and stop control.</li>
 <li><a href="#9-feed-sync-scheduler-durable-auto-pull">Feed-sync scheduler</a> — durable DB-backed EPSS/KEV/NVD auto-pull with retry/backoff and ADMIN enable/disable controls (V23).</li>
 </ol>
-<p>For the security posture underpinning these decisions see <a href="threat-model.html">documentation/threat-model.html</a>. For the NIST 800-53 compliance mapping see <a href="compliance.md">documentation/compliance.md</a>.</p>
+<p>For the security posture underpinning these decisions see <a href="threat-model.html">documentation/threat-model.html</a>. For the NIST 800-53 compliance mapping see <a href="compliance.html">documentation/compliance.html</a>.</p>
 <hr>
 <h2 id="1-nvd-api-key-registration">1. NVD API-Key Registration</h2>
 <h3 id="why-this-matters">Why this matters</h3>
@@ -824,7 +824,7 @@ audit_log table (source=&#39;suricata&#39;, append-only)
 <h2 id="3-tls-termination-guidance">3. TLS Termination Guidance</h2>
 <h3 id="why-castellum-does-not-terminate-tls">Why Castellum does not terminate TLS</h3>
 <p>Castellum is designed to be deployed behind a TLS-terminating reverse proxy. The application listens on plain HTTP (default port 8080) on the loopback or a private network interface. This is a deliberate architectural choice: TLS certificate management, renewal, and cipher-suite configuration are operator responsibilities that vary by deployment context (Let's Encrypt, internal PKI, mutual TLS, FIPS-compliant cipher suites, etc.).</p>
-<p>From the compliance perspective, NIST 800-53 SC-8 (Transmission Confidentiality) is satisfied at the reverse-proxy boundary. See <a href="compliance.md">documentation/compliance.md</a> §SC-8 for the explicit carve-out.</p>
+<p>From the compliance perspective, NIST 800-53 SC-8 (Transmission Confidentiality) is satisfied at the reverse-proxy boundary. See <a href="compliance.html">documentation/compliance.html</a> §SC-8 for the explicit carve-out.</p>
 <h3 id="supported-reverse-proxies">Supported reverse proxies</h3>
 <p>Any TLS-terminating HTTP reverse proxy works. Three common options:</p>
 <p><strong>nginx</strong></p>
@@ -962,7 +962,7 @@ openssl<span class="w"> </span>rand<span class="w"> </span>-base64<span class="w
 <li>[ ] The reverse proxy is configured for TLS (see §3).</li>
 <li>[ ] <code>CASTELLUM_NVD_API_KEY</code> is set (recommended, not required).</li>
 <li>[ ] Container is started with <code>--cap-add=NET_RAW</code> if passive discovery is needed (see §5).</li>
-<li>[ ] The container image is verified with cosign before deployment (see <a href="supply-chain.md">documentation/supply-chain.md</a>).</li>
+<li>[ ] The container image is verified with cosign before deployment (see <a href="supply-chain.html">documentation/supply-chain.html</a>).</li>
 </ul>
 <h3 id="post-bootstrap-verification">Post-bootstrap verification</h3>
 <p>After first start:</p>
@@ -1482,7 +1482,7 @@ ambiguous; it is not itself a finding.</p>
 <td>Full RBAC matrix, JWT contract, BCrypt procedure, secret rotation</td>
 </tr>
 <tr>
-<td><a href="supply-chain.md">documentation/supply-chain.md</a></td>
+<td><a href="supply-chain.html">documentation/supply-chain.html</a></td>
 <td>Dockerfile structure, distroless image, Trivy gate, cosign signing, SBOM artifacts</td>
 </tr>
 <tr>
@@ -1494,7 +1494,7 @@ ambiguous; it is not itself a finding.</p>
 <td>OT probe configuration (timeout env vars, max-concurrent), read-only contract</td>
 </tr>
 <tr>
-<td><a href="compliance.md">documentation/compliance.md</a></td>
+<td><a href="compliance.html">documentation/compliance.html</a></td>
 <td>SC-8 TLS carve-out, AC-7 in-app rate-limiting evidence, SC-13/SC-28 at-rest crypto, Suricata SI-3/SI-4 conceptual wiring</td>
 </tr>
 <tr>

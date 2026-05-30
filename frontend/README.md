@@ -27,5 +27,5 @@ cp .env.example .env  # edit if backend is not on http://localhost:8080
 
 ## Documentation
 
-- [`../documentation/frontend-topology-ui.md`](../documentation/frontend-topology-ui.md) — feature overview, demo data, screenshot evidence
+- [`../documentation/frontend-topology-ui.html`](../documentation/frontend-topology-ui.html) — feature overview, demo data, screenshot evidence
 - [`../docs/analysis-v7.md`](../docs/analysis-v7.md) — design analysis and open-question resolutions
