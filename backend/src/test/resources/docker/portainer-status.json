@@ -1,0 +1,7 @@
+{
+  "Version": "2.19.0",
+  "Edition": "CE",
+  "Authentication": false,
+  "SnapshotInterval": 5,
+  "Status": "OK"
+}

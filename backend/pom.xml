@@ -37,6 +37,7 @@
 		<jgrapht.version>1.5.2</jgrapht.version>
 		<plc4x.version>0.12.0</plc4x.version>
 		<jjwt.version>0.12.6</jjwt.version>
+		<snmp4j.version>3.9.5</snmp4j.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -123,6 +124,12 @@
 			<groupId>org.apache.plc4x</groupId>
 			<artifactId>plc4j-driver-s7</artifactId>
 			<version>${plc4x.version}</version>
+		</dependency>
+		<!-- snmp4j 3.9.5: Apache-2.0. SNMP read-only walk (GET/GETBULK) for network bridge discovery. -->
+		<dependency>
+			<groupId>org.snmp4j</groupId>
+			<artifactId>snmp4j</artifactId>
+			<version>${snmp4j.version}</version>
 		</dependency>
 		<!-- OASIS STIX 2.1 schema validator — test scope only; keeps production jar lean. -->
 		<dependency>

@@ -1,0 +1,16 @@
+[
+  {
+    "entryPoints": ["web"],
+    "service": "frontend-svc",
+    "rule": "Host(`example.com`)",
+    "status": "enabled",
+    "name": "frontend-router"
+  },
+  {
+    "entryPoints": ["websecure"],
+    "service": "api-svc",
+    "rule": "Host(`api.example.com`)",
+    "status": "enabled",
+    "name": "api-router"
+  }
+]
