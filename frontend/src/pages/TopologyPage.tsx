@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useInRouterContext, useSearchParams } from 'react-router-dom';
 import { TopologyView } from '../components/TopologyView';
 import { TopologyLegend } from '../components/TopologyLegend';
 import { DeviceDetailPanel } from '../components/DeviceDetailPanel';
@@ -31,6 +32,39 @@ function loadVisibility(): Record<DiscoveryScope, boolean> {
 }
 
 /**
+ * Reads the `?focus=<id>` search param (requires Router context) and invokes
+ * `onFocus` once when a matching device id is found in `devices`.
+ * Rendered only when TopologyPage is mounted inside a Router.
+ */
+function FocusParamApplier({
+  devices,
+  onFocus,
+}: {
+  devices: Device[];
+  onFocus: (id: number) => void;
+}) {
+  const [searchParams] = useSearchParams();
+  const appliedRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const focusParam = searchParams.get('focus');
+    if (!focusParam) return;
+    const focusId = Number(focusParam);
+    if (!Number.isFinite(focusId)) return;
+    // Apply once per distinct focus id: re-applies if the param changes while
+    // mounted, but never re-fires for the same id (so it won't fight user selection).
+    if (appliedRef.current === focusId) return;
+    if (devices.length === 0) return;
+    const target = devices.find(d => d.id === focusId);
+    if (!target) return;
+    appliedRef.current = focusId;
+    onFocus(focusId);
+  }, [devices, searchParams, onFocus]);
+
+  return null;
+}
+
+/**
  * Topology landing page — replaces the all-in-one shell from the pre-router build.
  *
  * Owns the device / risk / selected-device state that {@link TopologyView} and
@@ -49,6 +83,7 @@ export function TopologyPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scanCount, setScanCount] = useState<number | null>(null);
   const [scopeVisibility, setScopeVisibility] = useState<Record<DiscoveryScope, boolean>>(() => loadVisibility());
+  const inRouterContext = useInRouterContext();
 
   // Single source of truth for the device-and-risk fanout. Used by both the
   // mount-effect below and the `onDeviceMutated` callback passed into
@@ -113,6 +148,7 @@ export function TopologyPage() {
     })();
     return () => { cancelled = true; };
   }, [auth.token]);
+
 
   async function handleNodeClick(id: number) {
     const dev = devices.find(d => d.id === id) ?? null;
@@ -197,6 +233,9 @@ export function TopologyPage() {
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-red-600">Failed to load: {loadError}</p>
           </div>
+        )}
+        {inRouterContext && (
+          <FocusParamApplier devices={devices} onFocus={handleNodeClick} />
         )}
       </main>
     </div>

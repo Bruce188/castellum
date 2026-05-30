@@ -159,7 +159,15 @@ export function ScanDetailPage() {
             <tbody>
               {devices.map((d) => (
                 <tr key={d.id} className="border-b last:border-b-0">
-                  <td className="py-1 pr-4 font-mono">{d.ipAddress}</td>
+                  <td className="py-1 pr-4 font-mono">
+                    <Link
+                      to={`/?focus=${d.id}`}
+                      data-testid={`device-focus-link-${d.id}`}
+                      className="text-blue-700 hover:underline"
+                    >
+                      {d.ipAddress}
+                    </Link>
+                  </td>
                   <td className="py-1 pr-4">{d.hostname ?? '—'}</td>
                   <td className="py-1 pr-4">{d.services.length}</td>
                   <td className="py-1 pr-4">{d.cveIds.length}</td>
