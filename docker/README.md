@@ -4,7 +4,7 @@
 > these compose files (`admin:Password0` for medallion, `admin@admin.test`
 > / `admin` for MISP, `changeme-root` / `example` for MariaDB) are public
 > image baselines — NOT secrets. NEVER deploy these compose files
-> unmodified to any reachable network: change every password, restrict
+> unmodified to any reachable network: rotate every password, restrict
 > port bindings to `127.0.0.1`, and add real network policy first.
 
 Two minimal compose files that stand up real TAXII 2.1 and MISP servers on
@@ -41,8 +41,8 @@ on 2026-05-26.
 - Free host ports `5000`, `8088`, `8081` (backend), `5173` (frontend if
   running).
 - Backend `.env` populated with the variables listed under each section.
-- Castellum backend started with `mvn -f backend/pom.xml spring-boot:run` (or
-  via `bin/dev-up.sh`).
+- Castellum backend started with `mvn -f backend/pom.xml spring-boot:run`.
+  <!-- TODO(ops): confirm actual JVM heap + dev-up entrypoint -->
 
 > Do NOT commit your `.env`. The smoke run records below were captured with
 > the values listed inline; rotate any real secrets after copying them in.
@@ -72,7 +72,7 @@ Add to `.env` (or pass as env vars to `mvn spring-boot:run`):
 TAXII_BASE_URL=http://localhost:5000/trustgroup1
 TAXII_COLLECTION_ID=91a7b528-80eb-42ed-a74d-c6fbd5a26116
 TAXII_USERNAME=admin
-TAXII_PASSWORD=Password0
+TAXII_PASSWORD=<medallion-password>
 ```
 
 Then provision the integration row over the API:
@@ -83,13 +83,16 @@ TOKEN=$(curl -sS -X POST http://localhost:8081/api/auth/login \
   -d '{"username":"admin","password":"<your-admin-password>"}' \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 
+# Note: $TOKEN is a short-lived JWT. If a subsequent step returns 401, re-run
+# the TOKEN= line above to fetch a fresh token.
+
 curl -sS -X PUT http://localhost:8081/api/integrations/TAXII \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
         "baseUrl":"http://localhost:5000/trustgroup1",
         "collectionId":"91a7b528-80eb-42ed-a74d-c6fbd5a26116",
-        "credentials":"admin:Password0",
+        "credentials":"admin:<medallion-password>",
         "enabled":true
       }'
 ```
@@ -149,7 +152,7 @@ Date: Tue, 26 May 2026 19:23:34 GMT
  "path":"/api/threat-intel/push/taxii"}
 ```
 
-Backend log root cause:
+Backend log root cause (inner 422 from medallion, surfaced as outer 500 to the caller):
 
 ```
 o.s.w.client.HttpClientErrorException$UnprocessableEntity:
@@ -164,6 +167,27 @@ bundle (~233 MB at the time of capture); medallion's MemoryBackend rejects
 it as malformed against its STIX-2.1 type cache. This is real behaviour worth
 preserving in the audit trail: see `threat_intel_push.response_excerpt`.
 
+#### Triage: 500 from the push endpoint
+
+All three push failure modes surface to the caller as `HTTP 500`. Distinguish them:
+
+| Symptom | Root cause | First triage step |
+|---------|-----------|-------------------|
+| Backend log: `422 Unprocessable Entity` from medallion | Bundle too large or malformed for MemoryBackend STIX cache | `docker compose -f docker/taxii-medallion.yml logs medallion` — look for `ProcessingError` / `'manifest'` |
+| Backend log: `OutOfMemoryError: Java heap space` | Full export materialised in a single `byte[]` exhausts JVM heap | `docker compose -f docker/misp-minimal.yml logs misp-core`; check backend log for OOM thread dumps |
+| No backend log line; caller gets 500 immediately | IOException short-circuits the push before the audit writer is reached | `docker logs castellum-backend 2>&1 \| grep IOException` |
+
+In all cases, confirm the audit row state:
+
+```bash
+docker exec castellum-pg psql -U castellum -d castellum -c \
+  "SELECT push_target, status_code, LEFT(response_excerpt,120) AS excerpt
+   FROM threat_intel_push ORDER BY occurred_at DESC LIMIT 5;"
+```
+
+A missing row means the IOException path was taken (audit writer never called).
+A row with a non-200 `status_code` means the push reached the upstream server.
+
 ## MISP smoke (coolacid)
 
 ### 1. Start the stack
@@ -173,9 +197,12 @@ docker compose -f docker/misp-minimal.yml up -d
 docker compose -f docker/misp-minimal.yml logs -f misp-core
 ```
 
-First boot takes 1–3 minutes (the image rsyncs the MISP app tree, seeds
+First boot takes **1–3 minutes** (the image rsyncs the MISP app tree, seeds
 mariadb, generates the sample organisation, and starts php-fpm + cron).
-Poll until `http://localhost:8088/users/login` returns `200`.
+Do NOT interrupt (Ctrl-C) the stack during this window — an interrupted seed
+corrupts the MariaDB data directory and requires a `down -v` to recover.
+Poll until `http://localhost:8088/users/login` returns `200` before
+proceeding.
 
 ### 2. Fetch the admin API key
 
@@ -185,21 +212,34 @@ forces a password rotation on first login; the API key in the database is
 not invalidated by that flow, so you can grab it directly:
 
 ```bash
-docker exec castellum-misp-db \
+# Read the key into a shell variable without printing it to the terminal
+# (avoids leaking the key into ~/.bash_history via an intermediate echo).
+MISP_API_KEY=$(docker exec castellum-misp-db \
   mariadb -umisp -pexample -D misp -N -B \
-  -e "SELECT authkey FROM users WHERE id=1;"
+  -e "SELECT authkey FROM users WHERE id=1;")
 ```
 
 Verify with:
 
 ```bash
-curl -sS -H "Authorization: <api-key>" \
+curl -sS -H "Authorization: $MISP_API_KEY" \
   -H 'Accept: application/json' \
   http://localhost:8088/users/view/me.json | head -c 200
 ```
 
-A `200` plus a JSON user document confirms the key is good. Export it as
-`MISP_API_KEY` in `.env`.
+A `200` plus a JSON user document confirms the key is good. Add
+`MISP_API_KEY` to your `.env`:
+
+```bash
+# Append to .env (key value is already in the shell variable):
+echo "MISP_API_KEY=$MISP_API_KEY" >> .env
+```
+
+Then re-export from the file for subsequent shell commands:
+
+```bash
+export MISP_API_KEY=$(grep ^MISP_API_KEY .env | cut -d= -f2-)
+```
 
 ### 3. Configure the backend
 
@@ -213,6 +253,13 @@ MISP_BASE_URL=http://localhost:8088
 Provision the integration row:
 
 ```bash
+# If $TOKEN was fetched before the 1-3 min MISP boot wait, it may have
+# expired. Re-fetch it now to avoid a cryptic 401:
+TOKEN=$(curl -sS -X POST http://localhost:8081/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<your-admin-password>"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
 curl -sS -X PUT http://localhost:8081/api/integrations/MISP \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
@@ -288,14 +335,24 @@ Exception in thread "HttpClient-5-SelectorManager"
 ```
 
 Same upstream cause as the TAXII case: the backend serialised the full
-export (~233 MB) and the default JVM heap (`-Xmx512m` in `bin/dev-up.sh`)
+export (~233 MB) and the JVM heap <!-- TODO(ops): confirm actual JVM heap + dev-up entrypoint -->
 couldn't hold the materialised bundle + the HTTP client buffers. Recommended
 fixes — already captured as deferred work in `docs/progress.md`:
 
-1. Stream the bundle in chunks rather than serialise to a single byte[].
-2. Cap each push at a configurable object-count (`taxii.max-objects-per-push`).
-3. Tune the JVM heap in `bin/dev-up.sh` for installations that need to push
-   the whole fleet at once.
+1. **Stream the bundle in chunks** rather than serialise to a single `byte[]`.
+   Scope: `ThreatIntelService` + `TaxiiClient` + `MispClient` — backend only,
+   no DB migration. High impact; eliminates the OOM class of failures.
+   Cost: medium (requires chunked HTTP client + iterator pattern).
+
+2. **Cap each push at a configurable object-count** (`taxii.max-objects-per-push`).
+   Scope: `application.yml` property + guard in `TaxiiClient`/`MispClient`.
+   Low cost; reduces blast radius immediately even without streaming.
+
+3. **Tune the JVM heap** for installations that need to push the whole fleet at once.
+   <!-- TODO(ops): confirm actual JVM heap + dev-up entrypoint -->
+   Scope: deployment configuration only — no code change.
+   Cost: trivial; applies only when streaming is not feasible.
+   # TODO(ops): set mem_limit/cpus for compose services after profiling
 
 ## Audit-table snapshot
 
@@ -351,6 +408,14 @@ finding is noted in the F6 review file under `audit-write semantics`.
 
 All four entries 7-9 are tracked in `docs/progress.md` under Deferred for a
 future "bundle streaming" feature.
+
+> **Cross-feature ledger note (Nit6 / spec-tracer):** The feature spec
+> (`features-runtime-fixes-v2.md` AC1) named `oasis-open/medallion` as the
+> target image. That image does not exist on Docker Hub — OASIS publishes the
+> Python source only. The implementer correctly substituted
+> `sbirtane/medallion-taxii-server` (a community-packaged image that bundles
+> the same OASIS `medallion` Python package). This substitution is intentional
+> and documented; it is not a spec deviation.
 
 ## Tear-down
 

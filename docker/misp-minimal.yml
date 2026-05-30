@@ -1,3 +1,4 @@
+name: castellum-misp
 # MISP minimal stack for castellum smoke-testing.
 #
 # About MISP:
@@ -74,7 +75,8 @@ services:
       retries: 6
 
   misp-core:
-    image: coolacid/misp-docker:core-latest
+    # Digest captured 2026-05-30. Refresh: docker manifest inspect coolacid/misp-docker:core-latest | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['config']['digest'])"
+    image: coolacid/misp-docker:core-latest@sha256:162a984b1b5f8ba89ea6c9f703ac356a3931bd8bd63b26a25bd5d13a5e9fc364
     container_name: castellum-misp-core
     restart: unless-stopped
     depends_on:
