@@ -29,6 +29,13 @@ public class BundleAssembler {
     private static final double INDICATOR_COMPOSITE_THRESHOLD = 7.0;
     // TODO Q1 follow-up: make configurable via castellum.threat-intel.indicator-threshold
 
+    /**
+     * Maximum number of CVE IDs per IN-list query.
+     * PostgreSQL and Oracle both degrade or error above ~1000 bind parameters;
+     * 500 is a safe practical ceiling that keeps query plans stable.
+     */
+    private static final int CVE_ID_QUERY_CHUNK = 500;
+
     private final DeviceRepository deviceRepository;
     private final NetworkServiceRepository networkServiceRepository;
     private final CveRepository cveRepository;
@@ -127,15 +134,17 @@ public class BundleAssembler {
             if (device.getIpAddress() != null) deviceIds.add(device.getId());
         }
         Map<Long, List<NetworkService>> servicesByDevice = new LinkedHashMap<>();
-        for (NetworkService svc : networkServiceRepository.findByDeviceIdIn(deviceIds)) {
-            servicesByDevice.computeIfAbsent(svc.getDeviceId(), k -> new ArrayList<>()).add(svc);
+        if (!deviceIds.isEmpty()) {
+            for (NetworkService svc : networkServiceRepository.findByDeviceIdIn(deviceIds)) {
+                servicesByDevice.computeIfAbsent(svc.getDeviceId(), k -> new ArrayList<>()).add(svc);
+            }
         }
 
-        // CPE-memoized matcher: build matched CVE id set across all services
+        // CPE-memoized matcher: build matched CVE id set across all fetched services
         Map<String, List<Cve>> matchedByCpe = new HashMap<>();
         Set<String> matchedCveIds = new LinkedHashSet<>();
-        for (Long deviceId : deviceIds) {
-            for (NetworkService svc : servicesByDevice.getOrDefault(deviceId, List.of())) {
+        for (List<NetworkService> svcs : servicesByDevice.values()) {
+            for (NetworkService svc : svcs) {
                 String cpe = CpeMapper.toCpe23(svc);
                 if (cpe == null) continue;
                 List<Cve> matched = matchedByCpe.computeIfAbsent(cpe, cveMatcher::findVulnerable);
@@ -145,13 +154,22 @@ public class BundleAssembler {
             }
         }
 
-        // Batch EPSS and KEV lookups
+        // Batch EPSS and KEV lookups — chunked to avoid IN-list exceeding DB limits
         Map<String, Double> epssByCve = new HashMap<>();
-        for (EpssScore e : epssScoreRepository.findAllByCveIdIn(matchedCveIds)) {
-            epssByCve.put(e.getCveId(), e.getEpss().doubleValue()); // EXACT doubleValue() — AC4
+        if (!matchedCveIds.isEmpty()) {
+            for (List<String> chunk : partition(matchedCveIds, CVE_ID_QUERY_CHUNK)) {
+                for (EpssScore e : epssScoreRepository.findAllByCveIdIn(chunk)) {
+                    epssByCve.put(e.getCveId(), e.getEpss().doubleValue()); // EXACT doubleValue() — AC4
+                }
+            }
         }
-        Set<String> kevCveIds = kevEntryRepository.findAllByCveIdIn(matchedCveIds).stream()
-            .map(KevEntry::getCveId).collect(java.util.stream.Collectors.toSet());
+        Set<String> kevCveIds = new HashSet<>();
+        if (!matchedCveIds.isEmpty()) {
+            for (List<String> chunk : partition(matchedCveIds, CVE_ID_QUERY_CHUNK)) {
+                kevEntryRepository.findAllByCveIdIn(chunk).stream()
+                    .map(KevEntry::getCveId).forEach(kevCveIds::add);
+            }
+        }
 
         // Per-device, per-service: match CVEs, emit affects relationships and indicators
         for (Device device : devices) {
@@ -218,5 +236,18 @@ public class BundleAssembler {
 
         // AC5: bundle materialized in-memory (no streaming, no size cap) — see plan-v55 §AC5.
         return StixBundle.of(StixIds.forBundle(), new ArrayList<>(objects.values()));
+    }
+
+    /**
+     * Splits {@code source} into consecutive sub-lists of at most {@code chunkSize} elements.
+     * The returned lists are independent copies safe for passing directly to repository methods.
+     */
+    private static List<List<String>> partition(Collection<String> source, int chunkSize) {
+        List<String> flat = new ArrayList<>(source);
+        List<List<String>> parts = new ArrayList<>();
+        for (int i = 0; i < flat.size(); i += chunkSize) {
+            parts.add(new ArrayList<>(flat.subList(i, Math.min(i + chunkSize, flat.size()))));
+        }
+        return parts;
     }
 }
