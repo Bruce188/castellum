@@ -1153,4 +1153,212 @@ class DockerHostProbeServiceTest {
             deviceRepository.findByIpAddressAndOriginHostIp("172.17.0.1", probedIp).orElseThrow();
         assertThat(gw.getHostname()).startsWith("docker-net:");
     }
+
+    // -----------------------------------------------------------------------
+    // R2 / F3 review-v83 NB1 — audit symmetry in probe8080
+    //
+    // Bug: when traefikEnabled=false, the TRAEFIK switch case falls through
+    // the inner `if (traefikEnabled)` and emits NO audit event (silent scan).
+    // Fix: audit must be emitted even when the surface flag is disabled.
+    // -----------------------------------------------------------------------
+
+    /** Build probe with UI clients + explicit k8s/registry disabled, Portainer noop. */
+    private DockerHostProbeService buildProbeWithUiClientsAndFlags(
+            Predicate<HostPort> reachable,
+            TraefikApiClient traefikClient,
+            CAdvisorApiClient cadvisorClient,
+            boolean traefikEnabled,
+            boolean cadvisorEnabled) {
+        SnmpClient snmpClient = new SnmpClient((h, c, o) -> Optional.empty());
+        SnmpBridgeMapper snmpMapper = new SnmpBridgeMapper();
+        TraefikRouterMapper traefikMapper = new TraefikRouterMapper(TEST_OM);
+        PortainerApiClient portainerClient = noopPortainerClient();
+        CAdvisorContainerMapper cadvisorMapper = new CAdvisorContainerMapper(TEST_OM);
+        Port8080Fingerprinter fingerprinter =
+            new Port8080Fingerprinter(traefikClient, cadvisorClient, TEST_OM);
+        DockerEngineApiClient apiClient = new DockerEngineApiClient(uri -> Optional.empty());
+        return new DockerHostProbeService(
+            deviceUpsertService, deviceRepository, discoveryService(),
+            apiClient, networkMapper, containerListMapper, inspectParser,
+            networkServiceRepository, auditService,
+            snmpClient, snmpMapper, "public", false,
+            traefikClient, traefikMapper, portainerClient, cadvisorClient, cadvisorMapper,
+            fingerprinter, traefikEnabled, false, cadvisorEnabled,
+            noopK8sClient(), noopKubeletClient(), new K8sPodMapper(TEST_OM), false,
+            noopRegistryClient(), new RegistryCatalogMapper(TEST_OM), false,
+            /* maxConcurrent */ 4, reachable);
+    }
+
+    /**
+     * F3 review-v83 NB1 — audit symmetry in probe8080.
+     *
+     * <p>A host that fingerprints as Traefik on :8080 but has {@code traefik.enabled=false}
+     * (while {@code cadvisor.enabled=true} so the outer guard still opens :8080) must still
+     * record an audit event — the scan touched the surface even though the flag is off.
+     *
+     * <p>RED until the implementer hoists {@code emitAuditSuccess} out of the
+     * {@code if (traefikEnabled)} inner block (or equivalent refactor).
+     */
+    @Test
+    void probe8080_traefikDetected_traefikDisabled_auditEventStillEmitted() {
+        String ip = "10.0.2.1";
+        seedLocalDevice(ip);
+
+        // Fingerprinter identifies :8080 as Traefik (overview endpoint answers)
+        TraefikApiClient traefikClient = new TraefikApiClient(uri -> {
+            if (uri.getPath().equals("/api/overview")) return Optional.of(TRAEFIK_OVERVIEW);
+            return Optional.empty();
+        });
+        // cAdvisor must be enabled so the outer `(traefikEnabled || cadvisorEnabled)` guard
+        // still opens port 8080; but it does NOT fingerprint as cAdvisor (returns empty).
+        CAdvisorApiClient cadvisorClient = new CAdvisorApiClient(uri -> Optional.empty());
+
+        // :8080 reachable
+        Predicate<HostPort> reachable = hp -> hp.port() == 8080 && hp.host().equals(ip);
+
+        // traefikEnabled=false, cadvisorEnabled=true (outer guard opens :8080 via cadvisor flag)
+        DockerHostProbeService probe = buildProbeWithUiClientsAndFlags(
+            reachable, traefikClient, cadvisorClient,
+            /* traefikEnabled */ false, /* cadvisorEnabled */ true);
+
+        probe.probeHosts(List.of(ip));
+
+        // ASSERT: an audit event for port 8080 must have been recorded even though
+        // traefikEnabled=false (the scan touched this surface — silence is wrong).
+        verify(auditService, atLeastOnce()).recordEvent(
+            eq("system"), eq("DOCKER_PROBE"), eq("docker_probe"),
+            eq(ip + ":8080"), any());
+
+        // No TRAEFIK_EXPOSURE finding must be raised (the surface is disabled)
+        Optional<NetworkService> finding = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(
+                deviceRepository.findByIpAddressAndOriginHostIp(ip, "local").get().getId(),
+                8080, "tcp");
+        assertThat(finding)
+            .as("no TRAEFIK_EXPOSURE finding when traefikEnabled=false")
+            .isEmpty();
+    }
+
+    // -----------------------------------------------------------------------
+    // R2 / F4 review-v84 NB1 — k8s anonymous secret-read CRITICAL escalation
+    //
+    // Bug: K8sApiClient.getSecrets("default") is coded + unit-tested but NOT
+    // wired into probeK8s. A cluster that blocks pod-list but leaks secrets
+    // raises no CRITICAL today.
+    // Fix: wire getSecrets into probeK8s; raise CRITICAL on non-empty secret body.
+    // -----------------------------------------------------------------------
+
+    /**
+     * F4 review-v84 NB1 — anonymous secret read CRITICAL escalation in probeK8s.
+     *
+     * <p>Scenario: anonymous {@code GET /api/v1/pods} fails/returns empty (simulating a cluster
+     * that requires auth for pod-list) BUT {@code GET /api/v1/namespaces/default/secrets}
+     * succeeds (returns secret data). The probe must raise a CRITICAL K8S_API_EXPOSURE finding
+     * citing anonymous secret read.
+     *
+     * <p>RED until {@code getSecrets} is wired into {@code probeK8s}.
+     */
+    @Test
+    void k8sApi6443_podsBlocked_secretsLeaked_criticalFinding() {
+        String probedIp = "10.0.2.2";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // Minimal SecretList response — non-empty body = anonymous read succeeded
+        String secretsJson = """
+            {"kind":"SecretList","items":[{"metadata":{"name":"my-secret"}}]}
+            """;
+
+        // getPods returns empty (401/403 — pod-list blocked)
+        // getSecrets returns a body (anonymous secret read succeeded)
+        K8sApiClient k8sClient = new K8sApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/api/v1/pods")) return Optional.empty();
+            if (path.startsWith("/api/v1/namespaces/") && path.endsWith("/secrets"))
+                return Optional.of(secretsJson);
+            return Optional.empty();
+        });
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
+
+        // :6443 reachable, :10255 not
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_6443 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // CRITICAL K8S_API_EXPOSURE finding must be raised on the probed host
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_6443, "tcp");
+        assertThat(svc)
+            .as("a finding must exist on :6443 when anonymous secret read succeeds")
+            .isPresent();
+        assertThat(svc.get().getPostureSeverity())
+            .as("severity must be CRITICAL when secrets are anonymously readable")
+            .isEqualTo(DockerHostProbeService.SEVERITY_CRITICAL);
+        assertThat(svc.get().getProtocolFamily())
+            .isEqualTo(DockerHostProbeService.PROTOCOL_FAMILY_K8S_API_EXPOSURE);
+    }
+
+    // -----------------------------------------------------------------------
+    // R2 / F4 review-v84 NB3 — optional getTags → registry_images enrichment
+    //
+    // Bug: RegistryApiClient.getTags(name) is coded + unit-tested but NOT wired
+    // into probeRegistry.  registry_images currently stores bare repo names only.
+    // Fix: after getCatalog, call getTags for each repo and fold name:tag into blob.
+    // -----------------------------------------------------------------------
+
+    /**
+     * F4 review-v84 NB3 — getTags wired into probeRegistry → name:tag enrichment.
+     *
+     * <p>A registry surface with a known repository must, after probe, have the device's
+     * {@code registry_images} contain at least one {@code name:tag} entry (e.g. {@code nginx:latest}).
+     *
+     * <p>RED until {@code getTags} is wired into {@code probeRegistry} and the blob is enriched.
+     */
+    @Test
+    void registry5000_getTags_enrichesRegistryImagesWithNameColonTag() {
+        String probedIp = "10.0.2.3";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        String catalogJson = "{\"repositories\":[\"nginx\"]}";
+        String tagsJson = "{\"name\":\"nginx\",\"tags\":[\"latest\",\"1.25\"]}";
+
+        // getCatalog returns catalog; getTags returns tags for "nginx"
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/v2/_catalog")) return Optional.of(catalogJson);
+            if (path.equals("/v2/nginx/tags/list")) return Optional.of(tagsJson);
+            return Optional.empty();
+        });
+
+        // :5000 reachable
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // registry_images must contain at least one name:tag entry
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        String images = reloadedHost.getRegistryImages();
+        assertThat(images)
+            .as("registry_images must contain a name:tag entry after getTags enrichment")
+            .isNotBlank()
+            .contains("nginx:");
+
+        // At least one of the known tags must appear
+        assertThat(images)
+            .as("registry_images must contain 'nginx:latest' or 'nginx:1.25' after getTags wiring")
+            .satisfiesAnyOf(
+                s -> assertThat(s).contains("nginx:latest"),
+                s -> assertThat(s).contains("nginx:1.25"));
+    }
 }
