@@ -1,0 +1,2 @@
+ALTER TABLE device ADD COLUMN role_confidence VARCHAR(16) NOT NULL DEFAULT 'HIGH';
+ALTER TABLE device ADD COLUMN registry_images TEXT;

@@ -501,6 +501,53 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    void v28RoleConfidenceColumnRoundTrip() {
+        // (a) Column presence — role_confidence and registry_images on device.
+        Number roleConfCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'ROLE_CONFIDENCE'",
+            Number.class);
+        assertNotNull(roleConfCol, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(roleConfCol.intValue() > 0,
+            "role_confidence column must exist in device table after V28 migration");
+
+        Number registryImagesCol = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+            "WHERE UPPER(TABLE_NAME) = 'DEVICE' AND UPPER(COLUMN_NAME) = 'REGISTRY_IMAGES'",
+            Number.class);
+        assertNotNull(registryImagesCol, "INFORMATION_SCHEMA query must return a result");
+        assertTrue(registryImagesCol.intValue() > 0,
+            "registry_images column must exist in device table after V28 migration");
+
+        // (b) Round-trip INSERT with role_confidence='LOW' + registry_images, SELECT back.
+        Instant now = Instant.now();
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, " +
+            "device_role, role_confidence, registry_images) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "10.99.28.1", now, now, "MEDIUM", "HOME", "CONTAINER", "LOW", "nginx,redis"
+        );
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT role_confidence, registry_images FROM device WHERE ip_address = '10.99.28.1'"
+        );
+        assertEquals("LOW", row.get("role_confidence"),
+            "role_confidence must round-trip after V28 migration");
+        assertEquals("nginx,redis", row.get("registry_images"),
+            "registry_images must round-trip after V28 migration");
+
+        // (c) Default applies — INSERT omitting role_confidence; column must default to 'HIGH'.
+        jdbcTemplate.update(
+            "INSERT INTO device (ip_address, first_seen, last_seen, criticality, discovery_scope, device_role) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            "10.99.28.2", now, now, "MEDIUM", "HOME", "UNKNOWN"
+        );
+        Map<String, Object> defaultRow = jdbcTemplate.queryForMap(
+            "SELECT role_confidence FROM device WHERE ip_address = '10.99.28.2'"
+        );
+        assertEquals("HIGH", defaultRow.get("role_confidence"),
+            "role_confidence must default to 'HIGH' when omitted");
+    }
+
+    @Test
     void v18DeviceLastSeenIfaceRoundTrip() {
         // Confirm column existence via INFORMATION_SCHEMA.
         Number colCount = jdbcTemplate.queryForObject(

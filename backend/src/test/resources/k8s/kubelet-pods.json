@@ -1,0 +1,21 @@
+{
+  "apiVersion": "v1",
+  "kind": "PodList",
+  "items": [
+    {
+      "metadata": {
+        "name": "coredns-abc",
+        "uid": "uid-coredns-0001"
+      },
+      "spec": {
+        "containers": [
+          { "name": "coredns", "image": "registry.k8s.io/coredns/coredns:v1.10.1" }
+        ]
+      },
+      "status": {
+        "podIP": "10.244.0.2",
+        "phase": "Running"
+      }
+    }
+  ]
+}
