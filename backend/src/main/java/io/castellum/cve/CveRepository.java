@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -52,4 +53,11 @@ public interface CveRepository extends JpaRepository<Cve, Long> {
     // KEV catalog (cveId IN), keeping paging at the DB level. Same derivation
     // convention as findByIdInAndCvssV31ScoreIsNotNull above.
     Page<Cve> findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(Set<Long> ids, Collection<String> cveIds, Pageable pageable);
+
+    /**
+     * Lightweight projection for STIX bundle assembly: selects only cveId and description,
+     * leaving the heavy raw_json column out of the result set to bound heap usage.
+     */
+    @Query("SELECT c.cveId AS cveId, c.description AS description FROM Cve c")
+    List<CveStixView> findAllStixViews();
 }

@@ -5,6 +5,7 @@ import io.castellum.cve.CveCpeMatch;
 import io.castellum.cve.CveCpeMatchRepository;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.CveStixView;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -34,6 +35,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -95,6 +97,16 @@ class BundleAssemblerChunkingTest {
         return cve;
     }
 
+    /**
+     * Builds a minimal CveStixView mock for the corpus stub (findAllStixViews).
+     */
+    private static CveStixView buildCveView(String cveId) {
+        CveStixView view = mock(CveStixView.class);
+        when(view.getCveId()).thenReturn(cveId);
+        when(view.getDescription()).thenReturn("chunking test CVE " + cveId);
+        return view;
+    }
+
     @BeforeEach
     void setUp() {
         assembler = new BundleAssembler(
@@ -125,8 +137,12 @@ class BundleAssemblerChunkingTest {
         d.setCriticality(Criticality.MEDIUM);
         when(deviceRepository.findAll()).thenReturn(List.of(d));
 
-        // CVE corpus (all 1500)
-        when(cveRepository.findAll()).thenReturn(largeCveList);
+        // CVE corpus (all 1500) — lightweight projection stubs
+        List<CveStixView> largeCveViewList = new ArrayList<>(LARGE_CVE_COUNT);
+        for (int i = 0; i < LARGE_CVE_COUNT; i++) {
+            largeCveViewList.add(buildCveView(String.format("CVE-2025-%05d", i + 1)));
+        }
+        when(cveRepository.findAllStixViews()).thenReturn(largeCveViewList);
 
         // One service whose CPE resolves and matches all 1500 CVEs
         NetworkService svc = new NetworkService();
@@ -189,7 +205,12 @@ class BundleAssemblerChunkingTest {
         d.setLastSeen(Instant.now());
         d.setCriticality(Criticality.MEDIUM);
         when(deviceRepository.findAll()).thenReturn(List.of(d));
-        when(cveRepository.findAll()).thenReturn(largeCveList);
+
+        List<CveStixView> largeCveViewList = new ArrayList<>(LARGE_CVE_COUNT);
+        for (int i = 0; i < LARGE_CVE_COUNT; i++) {
+            largeCveViewList.add(buildCveView(String.format("CVE-2025-%05d", i + 1)));
+        }
+        when(cveRepository.findAllStixViews()).thenReturn(largeCveViewList);
 
         NetworkService svc = new NetworkService();
         svc.setDeviceId(1L);

@@ -8,6 +8,7 @@ import io.castellum.security.JwtService;
 import io.castellum.security.RbacAccessDeniedHandler;
 import io.castellum.security.RbacAuthenticationEntryPoint;
 import io.castellum.security.UserRepository;
+import io.castellum.threatintel.ExportJobService;
 import io.castellum.threatintel.ThreatIntelService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +34,9 @@ class ThreatIntelControllerTest {
     @MockBean
     AuditService auditService;
     @MockBean ThreatIntelService service;
+    // Required so the @WebMvcTest slice can satisfy the REQUIRED ExportJobService
+    // dependency on ThreatIntelController once @Autowired(required=false) is removed.
+    @MockBean ExportJobService exportJobService;
     @MockBean CastellumUserDetailsService castellumUserDetailsService;
     @MockBean
     JwtService jwtService;
