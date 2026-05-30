@@ -1,6 +1,7 @@
 package io.castellum.discovery;
 
 import io.castellum.audit.AuditService;
+import io.castellum.discovery.DockerContainer.DockerNetworkAttachment;
 import io.castellum.domain.Device;
 import io.castellum.domain.NetworkService;
 import io.castellum.domain.NetworkServiceRepository;
@@ -157,6 +158,87 @@ public class DockerDiscoveryService {
         // Gateways are DOCKER_BRIDGE-scoped so they are grouped under their Docker network zone
         // in the topology renderer. They are NOT the host node — host.docker.internal is a
         // separate HOME device seeded by the host/passive discovery path.
+        List<Long> gatewayDeviceIds = new ArrayList<>();
+        int gatewayCount = upsertGateways(gatewaysByIp, origin, observedAt, gatewayDeviceIds);
+        deviceIds.addAll(gatewayDeviceIds);
+
+        int updated = containerCount + gatewayCount;
+        auditService.recordEvent(
+            "discovery",
+            "DOCKER_DISCOVERY",
+            "discovery",
+            "docker",
+            Map.of(
+                "containers", containerCount,
+                "gateways", gatewayCount,
+                "updated", updated));
+
+        log.info("Docker discovery upserted {} containers + {} gateways ({} devices)",
+            containerCount, gatewayCount, updated);
+        return new DockerDiscoveryResponse(containerCount, gatewayCount, updated, deviceIds);
+    }
+
+    /**
+     * Subnets-only network ingest: persists gateway devices for each SNMP-discovered docker
+     * bridge attachment. No container rows are created — gateways only (R2/R7).
+     *
+     * <p>Reuses {@code source=DOCKER} and {@link DiscoveryScope#DOCKER_BRIDGE} (no new
+     * DiscoverySource). Uses the synthetic {@code docker-net:*} gateway naming convention.
+     *
+     * <p>Intentionally NOT {@code @Transactional}: each gateway upsert commits independently.
+     *
+     * @param attachments gateway-only attachments from {@link io.castellum.discovery.probe.SnmpBridgeMapper}
+     * @param origin      origin context (the probed host)
+     * @param observedAt  the observation timestamp
+     * @return a summary with containerCount=0 and gatewayCount=number of upserted gateways
+     */
+    public DockerDiscoveryResponse ingestNetworks(List<DockerNetworkAttachment> attachments,
+                                                  OriginContext origin,
+                                                  Instant observedAt) {
+        // Build gatewaysByIp from attachments (skip blank or null gateway IPs)
+        Map<String, String> gatewaysByIp = new LinkedHashMap<>();
+        if (attachments != null) {
+            for (DockerNetworkAttachment att : attachments) {
+                String gwIp = att.gatewayIp();
+                if (gwIp == null || gwIp.isBlank()) continue;
+                // networkName stored as "snmp-bridge:<ifName>"; strip prefix for the synthetic name
+                String networkName = att.networkName();
+                gatewaysByIp.putIfAbsent(gwIp, networkName);
+            }
+        }
+
+        List<Long> gatewayDeviceIds = new ArrayList<>();
+        int gatewayCount = upsertGateways(gatewaysByIp, origin, observedAt, gatewayDeviceIds);
+
+        auditService.recordEvent(
+            "discovery",
+            "DOCKER_DISCOVERY",
+            "discovery",
+            "docker-snmp",
+            Map.of(
+                "containers", 0,
+                "gateways", gatewayCount,
+                "updated", gatewayCount));
+
+        log.info("SNMP bridge ingest upserted {} gateways for origin {}", gatewayCount, origin.originHostIp());
+        return new DockerDiscoveryResponse(0, gatewayCount, gatewayCount, gatewayDeviceIds);
+    }
+
+    /**
+     * Shared gateway upsert loop.
+     * Extracted from {@link #ingest} so both the container path and the SNMP-only path
+     * ({@link #ingestNetworks}) share the same logic (R2 — byte-identical gateway semantics).
+     *
+     * @param gatewaysByIp   map of gatewayIp → networkName
+     * @param origin         origin context
+     * @param observedAt     observation timestamp
+     * @param deviceIds      accumulator for upserted device IDs (mutated by this method)
+     * @return count of upserted gateways
+     */
+    private int upsertGateways(Map<String, String> gatewaysByIp,
+                                OriginContext origin,
+                                Instant observedAt,
+                                List<Long> deviceIds) {
         int gatewayCount = 0;
         for (Map.Entry<String, String> gw : gatewaysByIp.entrySet()) {
             String gwIp = gw.getKey();
@@ -173,21 +255,7 @@ public class DockerDiscoveryService {
             deviceIds.add(saved.getId());
             gatewayCount++;
         }
-
-        int updated = containerCount + gatewayCount;
-        auditService.recordEvent(
-            "discovery",
-            "DOCKER_DISCOVERY",
-            "discovery",
-            "docker",
-            Map.of(
-                "containers", containerCount,
-                "gateways", gatewayCount,
-                "updated", updated));
-
-        log.info("Docker discovery upserted {} containers + {} gateways ({} devices)",
-            containerCount, gatewayCount, updated);
-        return new DockerDiscoveryResponse(containerCount, gatewayCount, updated, deviceIds);
+        return gatewayCount;
     }
 
     /**

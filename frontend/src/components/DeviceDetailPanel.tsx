@@ -194,7 +194,7 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
                   ? 'ml-1 bg-orange-100 text-orange-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle'
                   : s.postureSeverity === 'MEDIUM'
                   ? 'ml-1 bg-amber-100 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle'
-                  : 'ml-1 bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle';
+                  : /* LOW and INFO */ 'ml-1 bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 text-[10px] font-semibold align-middle';
                 return (
                   <tr key={s.id}>
                     <td>{s.port}</td>
@@ -212,6 +212,7 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
                         <span
                           data-testid="posture-severity-badge"
                           className={postureBadgeClass}
+                          title={s.protocolFamily ?? undefined}
                         >
                           {s.postureSeverity}
                         </span>

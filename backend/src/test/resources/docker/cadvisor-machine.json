@@ -1,0 +1,11 @@
+{
+  "num_cores": 4,
+  "cpu_frequency_khz": 2400000,
+  "memory_capacity": 8589934592,
+  "machine_id": "abc123",
+  "boot_id": "def456",
+  "filesystems": [],
+  "disk_map": {},
+  "network_devices": [],
+  "topology": []
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "name": "frontend-svc",
+    "loadBalancer": {
+      "servers": [{"url": "http://frontend:3000"}]
+    },
+    "type": "loadbalancer",
+    "status": "enabled"
+  },
+  {
+    "name": "api-svc",
+    "loadBalancer": {
+      "servers": [{"url": "http://api:8080"}]
+    },
+    "type": "loadbalancer",
+    "status": "enabled"
+  }
+]

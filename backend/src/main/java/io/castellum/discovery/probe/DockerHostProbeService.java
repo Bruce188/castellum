@@ -65,6 +65,18 @@ public class DockerHostProbeService {
     /** Value stored in {@code service.protocol_family} for docker-exposure findings. */
     public static final String PROTOCOL_FAMILY_DOCKER_EXPOSURE = "DOCKER_EXPOSURE";
 
+    /** Value stored in {@code service.protocol_family} for SNMP-exposure findings. */
+    public static final String PROTOCOL_FAMILY_SNMP_EXPOSURE = "SNMP_EXPOSURE";
+
+    /** Value stored in {@code service.protocol_family} for Traefik-exposure findings. */
+    public static final String PROTOCOL_FAMILY_TRAEFIK_EXPOSURE = "TRAEFIK_EXPOSURE";
+
+    /** Value stored in {@code service.protocol_family} for Portainer-exposure findings. */
+    public static final String PROTOCOL_FAMILY_PORTAINER_EXPOSURE = "PORTAINER_EXPOSURE";
+
+    /** Value stored in {@code service.protocol_family} for cAdvisor-exposure findings. */
+    public static final String PROTOCOL_FAMILY_CADVISOR_EXPOSURE = "CADVISOR_EXPOSURE";
+
     /** Service name stored on a docker-engine-api-exposed finding row. */
     static final String FINDING_NAME = "docker-engine-api-exposed";
 
@@ -77,6 +89,8 @@ public class DockerHostProbeService {
     static final int PORT_2377 = 2377;
     static final String SEVERITY_CRITICAL = "CRITICAL";
     static final String SEVERITY_HIGH = "HIGH";
+    static final String SEVERITY_MEDIUM = "MEDIUM";
+    static final String SEVERITY_LOW = "LOW";
 
     private final DeviceUpsertService deviceUpsertService;
     private final DeviceRepository deviceRepository;
@@ -89,6 +103,19 @@ public class DockerHostProbeService {
     private final AuditService auditService;
     private final Semaphore concurrencyLimiter;
     private final Predicate<HostPort> reachable;
+    private final SnmpClient snmpClient;
+    private final SnmpBridgeMapper snmpBridgeMapper;
+    private final String snmpCommunity;
+    private final boolean snmpEnabled;
+    private final TraefikApiClient traefikClient;
+    private final TraefikRouterMapper traefikRouterMapper;
+    private final PortainerApiClient portainerClient;
+    private final CAdvisorApiClient cadvisorClient;
+    private final CAdvisorContainerMapper cadvisorMapper;
+    private final Port8080Fingerprinter port8080Fingerprinter;
+    private final boolean traefikEnabled;
+    private final boolean portainerEnabled;
+    private final boolean cadvisorEnabled;
 
     @org.springframework.beans.factory.annotation.Autowired
     public DockerHostProbeService(
@@ -101,12 +128,28 @@ public class DockerHostProbeService {
             DockerInspectParser inspectParser,
             NetworkServiceRepository networkServiceRepository,
             AuditService auditService,
+            SnmpClient snmpClient,
+            SnmpBridgeMapper snmpBridgeMapper,
+            TraefikApiClient traefikClient,
+            TraefikRouterMapper traefikRouterMapper,
+            PortainerApiClient portainerClient,
+            CAdvisorApiClient cadvisorClient,
+            CAdvisorContainerMapper cadvisorMapper,
+            Port8080Fingerprinter port8080Fingerprinter,
             @Value("${castellum.docker.probe.connect-timeout-ms:2000}") int connectTimeoutMs,
             @Value("${castellum.docker.probe.read-timeout-ms:5000}") int readTimeoutMs,
-            @Value("${castellum.docker.probe.max-concurrent:8}") int maxConcurrent) {
+            @Value("${castellum.docker.probe.max-concurrent:8}") int maxConcurrent,
+            @Value("${castellum.docker.probe.snmp.community:public}") String snmpCommunity,
+            @Value("${castellum.docker.probe.snmp.enabled:true}") boolean snmpEnabled,
+            @Value("${castellum.docker.probe.traefik.enabled:true}") boolean traefikEnabled,
+            @Value("${castellum.docker.probe.portainer.enabled:true}") boolean portainerEnabled,
+            @Value("${castellum.docker.probe.cadvisor.enabled:true}") boolean cadvisorEnabled) {
         this(deviceUpsertService, deviceRepository, dockerDiscoveryService, apiClient,
              networkMapper, containerListMapper, inspectParser, networkServiceRepository,
-             auditService, maxConcurrent,
+             auditService, snmpClient, snmpBridgeMapper, snmpCommunity, snmpEnabled,
+             traefikClient, traefikRouterMapper, portainerClient, cadvisorClient, cadvisorMapper,
+             port8080Fingerprinter, traefikEnabled, portainerEnabled, cadvisorEnabled,
+             maxConcurrent,
              // Default reachability seam: real TCP connect
              hp -> {
                  try (Socket s = new Socket()) {
@@ -118,7 +161,7 @@ public class DockerHostProbeService {
              });
     }
 
-    /** Test seam constructor — caller supplies reachability predicate. */
+    /** Test seam constructor — caller supplies reachability predicate and all probe seams. */
     public DockerHostProbeService(
             DeviceUpsertService deviceUpsertService,
             DeviceRepository deviceRepository,
@@ -129,6 +172,19 @@ public class DockerHostProbeService {
             DockerInspectParser inspectParser,
             NetworkServiceRepository networkServiceRepository,
             AuditService auditService,
+            SnmpClient snmpClient,
+            SnmpBridgeMapper snmpBridgeMapper,
+            String snmpCommunity,
+            boolean snmpEnabled,
+            TraefikApiClient traefikClient,
+            TraefikRouterMapper traefikRouterMapper,
+            PortainerApiClient portainerClient,
+            CAdvisorApiClient cadvisorClient,
+            CAdvisorContainerMapper cadvisorMapper,
+            Port8080Fingerprinter port8080Fingerprinter,
+            boolean traefikEnabled,
+            boolean portainerEnabled,
+            boolean cadvisorEnabled,
             int maxConcurrent,
             Predicate<HostPort> reachable) {
         this.deviceUpsertService = deviceUpsertService;
@@ -140,6 +196,19 @@ public class DockerHostProbeService {
         this.inspectParser = inspectParser;
         this.networkServiceRepository = networkServiceRepository;
         this.auditService = auditService;
+        this.snmpClient = snmpClient;
+        this.snmpBridgeMapper = snmpBridgeMapper;
+        this.snmpCommunity = snmpCommunity;
+        this.snmpEnabled = snmpEnabled;
+        this.traefikClient = traefikClient;
+        this.traefikRouterMapper = traefikRouterMapper;
+        this.portainerClient = portainerClient;
+        this.cadvisorClient = cadvisorClient;
+        this.cadvisorMapper = cadvisorMapper;
+        this.port8080Fingerprinter = port8080Fingerprinter;
+        this.traefikEnabled = traefikEnabled;
+        this.portainerEnabled = portainerEnabled;
+        this.cadvisorEnabled = cadvisorEnabled;
         this.concurrencyLimiter = new Semaphore(maxConcurrent);
         this.reachable = reachable;
     }
@@ -184,7 +253,8 @@ public class DockerHostProbeService {
                     // Find or create the local host device
                     Optional<Device> selfDevice = deviceRepository.findByIpAddressAndOriginHostIp(ip, "local");
                     if (selfDevice.isPresent()) {
-                        raiseExposureFinding(selfDevice.get().getId(), PORT_2375, SEVERITY_CRITICAL);
+                        raiseExposureFinding(selfDevice.get().getId(), PORT_2375, "tcp",
+                        PROTOCOL_FAMILY_DOCKER_EXPOSURE, SEVERITY_CRITICAL);
                     } else {
                         log.debug("DockerHostProbeService: self-check — no local device row for {}, skipping finding", ip);
                     }
@@ -204,25 +274,35 @@ public class DockerHostProbeService {
         if (reachable.test(new HostPort(ip, PORT_2375))) {
             log.info("DockerHostProbeService: {} :2375 reachable — probing and ingesting", ip);
             probe2375(ip, startMs);
-            return;
-        }
-
-        // :2376 (TLS) — finding only, no extraction
-        if (reachable.test(new HostPort(ip, PORT_2376))) {
+        } else if (reachable.test(new HostPort(ip, PORT_2376))) {
+            // :2376 (TLS) — finding only, no extraction
             log.info("DockerHostProbeService: {} :2376 reachable — raising HIGH finding (no extraction)", ip);
             probe2376or2377(ip, PORT_2376, startMs);
-            return;
-        }
-
-        // :2377 (Swarm) — finding only, no extraction
-        if (reachable.test(new HostPort(ip, PORT_2377))) {
+        } else if (reachable.test(new HostPort(ip, PORT_2377))) {
+            // :2377 (Swarm) — finding only, no extraction
             log.info("DockerHostProbeService: {} :2377 reachable — raising HIGH finding (no extraction)", ip);
             probe2376or2377(ip, PORT_2377, startMs);
-            return;
+        } else {
+            // All ports closed — fast no-op
+            log.debug("DockerHostProbeService: {} all probe ports closed — no-op", ip);
         }
 
-        // All ports closed — fast no-op
-        log.debug("DockerHostProbeService: {} all probe ports closed — no-op", ip);
+        // SNMP probe: unconditional per host (runs regardless of Docker port state)
+        if (snmpEnabled) {
+            probeSnmp(ip, startMs);
+        }
+
+        // HTTP-UI probes: :8080 (Traefik/cAdvisor fingerprinted) and :9000/:9443 (Portainer)
+        if ((traefikEnabled || cadvisorEnabled) && reachable.test(new HostPort(ip, 8080))) {
+            probe8080(ip, startMs);
+        }
+        if (portainerEnabled) {
+            if (reachable.test(new HostPort(ip, 9000))) {
+                probePortainer(ip, 9000, startMs);
+            } else if (reachable.test(new HostPort(ip, 9443))) {
+                probePortainer(ip, 9443, startMs);
+            }
+        }
     }
 
     private void probe2375(String ip, long startMs) {
@@ -231,7 +311,8 @@ public class DockerHostProbeService {
             Optional<String> containerListOpt = apiClient.getContainers(ip, PORT_2375);
             if (containerListOpt.isEmpty()) {
                 log.debug("DockerHostProbeService: {} :2375 container list empty — raising finding only", ip);
-                raiseFindingForExistingDevice(ip, PORT_2375, SEVERITY_CRITICAL);
+                raiseFindingForExistingDevice(ip, PORT_2375, "tcp",
+                    PROTOCOL_FAMILY_DOCKER_EXPOSURE, SEVERITY_CRITICAL);
                 emitAuditSuccess(ip, PORT_2375, "reachable-no-data", startMs);
                 return;
             }
@@ -268,7 +349,8 @@ public class DockerHostProbeService {
             dockerDiscoveryService.ingest(containers, origin, now);
 
             // Raise CRITICAL posture finding for the probed host device
-            raiseFindingForExistingDevice(ip, PORT_2375, SEVERITY_CRITICAL);
+            raiseFindingForExistingDevice(ip, PORT_2375, "tcp",
+                PROTOCOL_FAMILY_DOCKER_EXPOSURE, SEVERITY_CRITICAL);
 
             emitAuditSuccess(ip, PORT_2375, "success containers=" + containers.size(), startMs);
 
@@ -280,7 +362,8 @@ public class DockerHostProbeService {
 
     private void probe2376or2377(String ip, int port, long startMs) {
         try {
-            raiseFindingForExistingDevice(ip, port, SEVERITY_HIGH);
+            raiseFindingForExistingDevice(ip, port, "tcp",
+                PROTOCOL_FAMILY_DOCKER_EXPOSURE, SEVERITY_HIGH);
             emitAuditSuccess(ip, port, "reachable-tls-no-extraction", startMs);
         } catch (Exception e) {
             log.warn("DockerHostProbeService: {} :{} finding upsert failed: {}", ip, port, e.getMessage());
@@ -289,31 +372,168 @@ public class DockerHostProbeService {
     }
 
     /**
+     * Probe SNMP on the given host — unconditional per-host, runs after Docker port dispatch.
+     *
+     * <p>Walks bridges with the configured community first; if the "public" community answers,
+     * raises a LOW udp/161 finding. Injects SNMP-discovered gateways via
+     * {@link DockerDiscoveryService#ingestNetworks} (subnets-only, no phantom containers).
+     *
+     * <p>READ-ONLY: only SNMP GET/GETBULK via {@link SnmpClient} (no SET). (R9 per-host try/catch)
+     */
+    private void probeSnmp(String ip, long startMs) {
+        try {
+            // Walk interfaces + addresses with configured community
+            Optional<List<SnmpClient.SnmpRow>> ifaceOpt =
+                snmpClient.walkInterfaces(ip, snmpCommunity);
+            Optional<List<SnmpClient.SnmpAddr>> addrOpt =
+                snmpClient.walkIpAddresses(ip, snmpCommunity);
+
+            if (ifaceOpt.isPresent() && !ifaceOpt.get().isEmpty()) {
+                // Map to bridge attachments and ingest gateway-only (subnets-only, R2)
+                List<io.castellum.discovery.DockerContainer.DockerNetworkAttachment> attachments =
+                    snmpBridgeMapper.mapBridges(ifaceOpt.get(), addrOpt.orElse(List.of()));
+                if (!attachments.isEmpty()) {
+                    OriginContext origin = OriginContext.of(ip, ip);
+                    dockerDiscoveryService.ingestNetworks(attachments, origin, Instant.now());
+                    log.info("DockerHostProbeService: {} SNMP bridges recovered: {}", ip, attachments.size());
+                }
+            }
+
+            // Check if "public" community answers — raise LOW udp/161 finding if so
+            Optional<List<SnmpClient.SnmpRow>> publicWalk =
+                snmpClient.walkInterfaces(ip, "public");
+            if (publicWalk.isPresent() && !publicWalk.get().isEmpty()) {
+                log.info("DockerHostProbeService: {} SNMP 'public' community answers — raising LOW udp/161 finding", ip);
+                // Re-walk with public to ingest bridges
+                Optional<List<SnmpClient.SnmpAddr>> publicAddr =
+                    snmpClient.walkIpAddresses(ip, "public");
+                List<io.castellum.discovery.DockerContainer.DockerNetworkAttachment> pubAttachments =
+                    snmpBridgeMapper.mapBridges(publicWalk.get(), publicAddr.orElse(List.of()));
+                if (!pubAttachments.isEmpty()) {
+                    OriginContext origin = OriginContext.of(ip, ip);
+                    dockerDiscoveryService.ingestNetworks(pubAttachments, origin, Instant.now());
+                }
+                raiseFindingForExistingDevice(ip, 161, "udp",
+                    PROTOCOL_FAMILY_SNMP_EXPOSURE, SEVERITY_LOW);
+            }
+
+            emitAuditSuccess(ip, 161, "snmp-probe", startMs);
+        } catch (Exception e) {
+            log.warn("DockerHostProbeService: {} SNMP probe failed: {}", ip, e.getMessage());
+            emitAuditFailure(ip, 161, e, startMs);
+        }
+    }
+
+    /**
+     * Probe port 8080 — fingerprint Traefik vs cAdvisor vs UNKNOWN (R3).
+     *
+     * <p>UNKNOWN → no extraction, no finding (required disambiguation test).
+     * READ-ONLY: GET-only via TraefikApiClient/CAdvisorApiClient.
+     */
+    private void probe8080(String ip, long startMs) {
+        try {
+            Port8080Fingerprinter.Identity identity = port8080Fingerprinter.identify(ip, 8080);
+            switch (identity) {
+                case TRAEFIK -> {
+                    if (traefikEnabled) {
+                        log.info("DockerHostProbeService: {}:8080 is TRAEFIK — extracting routes", ip);
+                        Optional<String> routersOpt = traefikClient.getRouters(ip, 8080);
+                        Optional<String> servicesOpt = traefikClient.getServices(ip, 8080);
+                        if (routersOpt.isPresent()) {
+                            traefikRouterMapper.backendContainerNames(
+                                routersOpt.get(), servicesOpt.orElse(null));
+                        }
+                        raiseFindingForExistingDevice(ip, 8080, "tcp",
+                            PROTOCOL_FAMILY_TRAEFIK_EXPOSURE, SEVERITY_MEDIUM);
+                        emitAuditSuccess(ip, 8080, "traefik", startMs);
+                    }
+                }
+                case CADVISOR -> {
+                    if (cadvisorEnabled) {
+                        log.info("DockerHostProbeService: {}:8080 is CADVISOR — extracting containers", ip);
+                        Optional<String> subOpt = cadvisorClient.getSubcontainers(ip, 8080);
+                        if (subOpt.isPresent()) {
+                            cadvisorMapper.containerNames(subOpt.get());
+                        }
+                        raiseFindingForExistingDevice(ip, 8080, "tcp",
+                            PROTOCOL_FAMILY_CADVISOR_EXPOSURE, SEVERITY_MEDIUM);
+                        emitAuditSuccess(ip, 8080, "cadvisor", startMs);
+                    }
+                }
+                case UNKNOWN -> {
+                    // R3: unknown fingerprint → no extraction, no finding
+                    log.debug("DockerHostProbeService: {}:8080 fingerprint UNKNOWN — no finding (R3)", ip);
+                    emitAuditSuccess(ip, 8080, "unknown-fingerprint", startMs);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("DockerHostProbeService: {} :8080 probe failed: {}", ip, e.getMessage());
+            emitAuditFailure(ip, 8080, e, startMs);
+        }
+    }
+
+    /**
+     * Probe Portainer on the given port (:9000 or :9443) — detect always, extract only no-auth (R10).
+     *
+     * <p>getStatus = detection; getEndpoints = extraction only when no-auth (401 → empty → skip).
+     * READ-ONLY: GET-only, no login/POST.
+     */
+    private void probePortainer(String ip, int port, long startMs) {
+        try {
+            Optional<String> statusOpt = portainerClient.getStatus(ip, port);
+            if (statusOpt.isEmpty()) {
+                log.debug("DockerHostProbeService: {}:{} not a Portainer instance", ip, port);
+                return;
+            }
+            log.info("DockerHostProbeService: {}:{} is PORTAINER — raising MEDIUM finding", ip, port);
+            raiseFindingForExistingDevice(ip, port, "tcp",
+                PROTOCOL_FAMILY_PORTAINER_EXPOSURE, SEVERITY_MEDIUM);
+
+            // Extract endpoints only if no-auth (401 → empty → no extraction)
+            Optional<String> endpointsOpt = portainerClient.getEndpoints(ip, port);
+            if (endpointsOpt.isPresent() && !endpointsOpt.get().isBlank()) {
+                log.info("DockerHostProbeService: {}:{} Portainer endpoints accessible (no-auth)", ip, port);
+                // Endpoints are logged/recorded but not upserted as devices (informational only)
+            }
+
+            emitAuditSuccess(ip, port, "portainer", startMs);
+        } catch (Exception e) {
+            log.warn("DockerHostProbeService: {} :{} Portainer probe failed: {}", ip, port, e.getMessage());
+            emitAuditFailure(ip, port, e, startMs);
+        }
+    }
+
+    /**
      * Raise a posture finding for the host device identified by the given IP.
      * If the host device does not exist in the inventory (not yet scan-discovered), skip.
      */
-    private void raiseFindingForExistingDevice(String ip, int port, String severity) {
+    private void raiseFindingForExistingDevice(String ip, int port, String protocol,
+                                               String protocolFamily, String severity) {
         Optional<Device> deviceOpt = deviceRepository.findByIpAddressAndOriginHostIp(ip, "local");
         if (deviceOpt.isEmpty()) {
             log.debug("DockerHostProbeService: no inventory row for {} — skipping finding", ip);
             return;
         }
-        raiseExposureFinding(deviceOpt.get().getId(), port, severity);
+        raiseExposureFinding(deviceOpt.get().getId(), port, protocol, protocolFamily, severity);
     }
 
     /**
-     * Upsert a posture finding row on the given device's (port, "tcp") NetworkService.
+     * Upsert a posture finding row on the given device's (port, protocol) NetworkService.
      * Mirrors {@link io.castellum.ot.OtFingerprintService} L188-200.
+     *
+     * @param protocol       transport protocol ("tcp" or "udp")
+     * @param protocolFamily one of the PROTOCOL_FAMILY_* constants
      */
-    private void raiseExposureFinding(Long deviceId, int port, String severity) {
+    private void raiseExposureFinding(Long deviceId, int port, String protocol,
+                                      String protocolFamily, String severity) {
         NetworkService svc = networkServiceRepository
-            .findByDeviceIdAndPortAndProtocol(deviceId, port, "tcp")
+            .findByDeviceIdAndPortAndProtocol(deviceId, port, protocol)
             .orElseGet(NetworkService::new);
         svc.setDeviceId(deviceId);
         svc.setPort(port);
-        svc.setProtocol("tcp");
+        svc.setProtocol(protocol);
         svc.setName(FINDING_NAME);
-        svc.setProtocolFamily(PROTOCOL_FAMILY_DOCKER_EXPOSURE);
+        svc.setProtocolFamily(protocolFamily);
         svc.setPostureSeverity(severity);
         svc.setObservedAt(Instant.now());
         networkServiceRepository.save(svc);

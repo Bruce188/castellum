@@ -119,6 +119,17 @@ castellum:
       connect-timeout-ms: ${DOCKER_PROBE_CONNECT_TIMEOUT_MS:2000}
       read-timeout-ms: ${DOCKER_PROBE_READ_TIMEOUT_MS:5000}
       max-concurrent: ${DOCKER_PROBE_MAX_CONCURRENT:8}
+      snmp:
+        community: ${DOCKER_PROBE_SNMP_COMMUNITY:public}
+        enabled: ${DOCKER_PROBE_SNMP_ENABLED:true}
+        timeout-ms: ${DOCKER_PROBE_SNMP_TIMEOUT_MS:1500}
+        retries: ${DOCKER_PROBE_SNMP_RETRIES:1}
+      traefik:
+        enabled: ${DOCKER_PROBE_TRAEFIK_ENABLED:true}
+      portainer:
+        enabled: ${DOCKER_PROBE_PORTAINER_ENABLED:true}
+      cadvisor:
+        enabled: ${DOCKER_PROBE_CADVISOR_ENABLED:true}
   taxii:
     base-url: ${TAXII_BASE_URL:}
     collection-id: ${TAXII_COLLECTION_ID:}

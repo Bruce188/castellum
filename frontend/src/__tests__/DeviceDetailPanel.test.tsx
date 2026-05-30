@@ -396,4 +396,40 @@ describe('<DeviceDetailPanel />', () => {
     );
     expect(screen.queryByTestId('posture-severity-badge')).toBeNull();
   });
+
+  it('rendersPostureBadge_forSnmpLowFinding', () => {
+    const snmpService: NetworkService = {
+      id: 102, deviceId: 1, port: 161, protocol: 'udp',
+      name: 'docker-engine-api-exposed', version: null,
+      observedAt: null, vendor: null, product: null,
+      protocolFamily: 'SNMP_EXPOSURE', postureSeverity: 'LOW',
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[snmpService]} onClose={() => {}} />
+    );
+    const badge = screen.getByTestId('posture-severity-badge');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent('LOW');
+    // LOW maps to gray colour
+    expect(badge.className).toMatch(/gray/);
+    // protocolFamily surfaces as title
+    expect(badge).toHaveAttribute('title', 'SNMP_EXPOSURE');
+  });
+
+  it('rendersPostureBadge_forTraefikMedium', () => {
+    const traefikService: NetworkService = {
+      id: 103, deviceId: 1, port: 8080, protocol: 'tcp',
+      name: 'docker-engine-api-exposed', version: null,
+      observedAt: null, vendor: null, product: null,
+      protocolFamily: 'TRAEFIK_EXPOSURE', postureSeverity: 'MEDIUM',
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[traefikService]} onClose={() => {}} />
+    );
+    const badge = screen.getByTestId('posture-severity-badge');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent('MEDIUM');
+    expect(badge.className).toMatch(/amber/);
+    expect(badge).toHaveAttribute('title', 'TRAEFIK_EXPOSURE');
+  });
 });

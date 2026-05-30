@@ -1,0 +1,28 @@
+[
+  {
+    "id": "abc123",
+    "name": "/docker/abc123",
+    "aliases": ["my-container", "abc123"],
+    "namespace": "docker",
+    "labels": {
+      "com.docker.compose.service": "webapp"
+    },
+    "spec": {
+      "image": "nginx:1.25"
+    },
+    "stats": []
+  },
+  {
+    "id": "def456",
+    "name": "/docker/def456",
+    "aliases": ["my-db", "def456"],
+    "namespace": "docker",
+    "labels": {
+      "com.docker.compose.service": "database"
+    },
+    "spec": {
+      "image": "postgres:15"
+    },
+    "stats": []
+  }
+]

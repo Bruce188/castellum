@@ -653,6 +653,77 @@ class DockerDiscoveryServiceTest {
     }
 
     // -----------------------------------------------------------------------
+    // Task 2.3 — ingestNetworks: subnets-only, no phantom container rows (R2)
+    // -----------------------------------------------------------------------
+
+    /**
+     * ingestNetworks with 2 docker bridge attachments must upsert 2 gateway Device rows
+     * and ZERO container rows (R2 — subnets-only).
+     */
+    @Test
+    void ingestNetworks_subnetsOnly_upsertsGatewaysNoContainers() {
+        DockerDiscoveryService svc = newService("[]", List.of());
+        OriginContext origin = OriginContext.of("10.0.0.50", "probe-host");
+
+        List<io.castellum.discovery.DockerContainer.DockerNetworkAttachment> attachments = List.of(
+            new io.castellum.discovery.DockerContainer.DockerNetworkAttachment(
+                "snmp-bridge:docker0", null, "172.17.0.1"),
+            new io.castellum.discovery.DockerContainer.DockerNetworkAttachment(
+                "snmp-bridge:br-abc", null, "172.18.0.1"));
+
+        DockerDiscoveryResponse result = svc.ingestNetworks(attachments, origin, FIXED_NOW);
+
+        // Response: 0 containers, 2 gateways
+        assertThat(result.containers()).isZero();
+        assertThat(result.gateways()).isEqualTo(2);
+
+        // Only gateway rows in DB (containerIp is null for bridge attachments, no container upserted)
+        long totalDevices = repo.count();
+        assertThat(totalDevices).isEqualTo(2);
+
+        // Both gateway rows must have the remote origin
+        Device gw1 = repo.findByIpAddressAndOriginHostIp("172.17.0.1", "10.0.0.50").orElseThrow();
+        assertThat(gw1.getOriginHostIp()).isEqualTo("10.0.0.50");
+        Device gw2 = repo.findByIpAddressAndOriginHostIp("172.18.0.1", "10.0.0.50").orElseThrow();
+        assertThat(gw2.getOriginHostIp()).isEqualTo("10.0.0.50");
+    }
+
+    /**
+     * ingestNetworks with a remote origin must attribute gateway devices to that origin.
+     */
+    @Test
+    void ingestNetworks_remoteOrigin_attributesGateways() {
+        DockerDiscoveryService svc = newService("[]", List.of());
+        OriginContext remote = OriginContext.of("192.168.1.10", "remote-host");
+
+        List<io.castellum.discovery.DockerContainer.DockerNetworkAttachment> attachments = List.of(
+            new io.castellum.discovery.DockerContainer.DockerNetworkAttachment(
+                "snmp-bridge:docker0", null, "172.17.0.1"));
+
+        svc.ingestNetworks(attachments, remote, FIXED_NOW);
+
+        Device gw = repo.findByIpAddressAndOriginHostIp("172.17.0.1", "192.168.1.10").orElseThrow();
+        assertThat(gw.getOriginHostName()).isEqualTo("remote-host");
+    }
+
+    /**
+     * ingestNetworks with a blank gateway IP must skip that attachment.
+     */
+    @Test
+    void ingestNetworks_blankGateway_skipped() {
+        DockerDiscoveryService svc = newService("[]", List.of());
+        OriginContext origin = OriginContext.of("10.0.0.50", "probe");
+
+        List<io.castellum.discovery.DockerContainer.DockerNetworkAttachment> attachments = List.of(
+            new io.castellum.discovery.DockerContainer.DockerNetworkAttachment("snmp-bridge:docker0", null, ""),
+            new io.castellum.discovery.DockerContainer.DockerNetworkAttachment("snmp-bridge:docker0", null, null));
+
+        DockerDiscoveryResponse result = svc.ingestNetworks(attachments, origin, FIXED_NOW);
+        assertThat(result.gateways()).isZero();
+        assertThat(repo.count()).isZero();
+    }
+
+    // -----------------------------------------------------------------------
     // Task 1.2 — local docker-CLI path writes origin='local' (R6 regression)
     // -----------------------------------------------------------------------
 
