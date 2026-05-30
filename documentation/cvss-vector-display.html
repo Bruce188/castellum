@@ -3,9 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CVSS Vector Display — pipelinekit</title>
+<title>CVSS Vector Display</title>
 <meta name="description" content="CvssVectorBreakdown component: full-word metric grid as primary display, raw vector as secondary reference, graceful degradation for malformed and absent vectors.">
-<meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
 <style>
 /* === Reset + variables === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -594,7 +593,7 @@ footer {
 <header class="topbar">
   <a class="brand" href="index.html">
     <span class="logo">P</span>
-    <span>pipelinekit docs</span>
+    <span>Castellum docs</span>
   </a>
   <div class="crumbs">
     <a href="index.html">Home</a> &nbsp;/&nbsp; <span>CVSS Vector Display</span>
@@ -648,136 +647,6 @@ understand the risk profile of a vulnerability.</p>
 <p>PR #66 promotes the decoded metric grid — already computed by
 <code>frontend/src/lib/cvss.ts</code> — to the primary display, and moves the raw string
 to a smaller, labelled "Raw vector" reference below the grid.</p>
-<!-- usage:
-     <div data-snippet="before-after-slider">
-       <div data-bas-before><!-- arbitrary markup --></div>
-       <div data-bas-after><!-- arbitrary markup --></div>
-     </div>
--->
-<div class="pkit-bas" data-snippet-mount="before-after-slider">
-  <style>
-    .pkit-bas { margin: 1.5rem 0; }
-    .pkit-bas .pkit-bas__viewport {
-      position: relative;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--bg-elev);
-      min-height: 120px;
-      user-select: none;
-    }
-    .pkit-bas .pkit-bas__layer {
-      position: absolute;
-      inset: 0;
-      padding: 1rem;
-      overflow: hidden;
-    }
-    .pkit-bas .pkit-bas__layer--before {
-      background: var(--bg-elev);
-      z-index: 1;
-    }
-    .pkit-bas .pkit-bas__layer--after {
-      background: var(--bg);
-      z-index: 2;
-      clip-path: inset(0 var(--pkit-bas-clip, 50%) 0 0);
-      transition: clip-path 60ms linear;
-    }
-    .pkit-bas .pkit-bas__handle {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: var(--accent);
-      z-index: 3;
-      left: 50%;
-      transform: translateX(-50%);
-      pointer-events: none;
-      transition: left 60ms linear;
-    }
-    .pkit-bas .pkit-bas__handle::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: var(--accent);
-      border: 2px solid var(--bg);
-      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-    }
-    .pkit-bas .pkit-bas__labels {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 0.3rem;
-      font-family: var(--sans);
-      font-size: 0.75rem;
-      color: var(--fg-subtle);
-    }
-    .pkit-bas .pkit-bas__range {
-      width: 100%;
-      margin-top: 0.6rem;
-      accent-color: var(--accent);
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .pkit-bas * { transition: none !important; animation: none !important; }
-    }
-  </style>
-
-  <div class="pkit-bas__viewport">
-    <div class="pkit-bas__layer pkit-bas__layer--before"></div>
-    <div class="pkit-bas__layer pkit-bas__layer--after" style="--pkit-bas-clip: 50%"></div>
-    <div class="pkit-bas__handle" aria-hidden="true"></div>
-  </div>
-  <div class="pkit-bas__labels">
-    <span>Before</span>
-    <span>After</span>
-  </div>
-  <input type="range" class="pkit-bas__range" min="0" max="100" value="50"
-         aria-label="Reveal slider — drag to compare before and after">
-</div>
-
-<script>
-(function() {
-  'use strict';
-  document.querySelectorAll('.pkit-bas[data-snippet-mount="before-after-slider"]').forEach(function(root) {
-    if (root.dataset.pkitInit) return;
-    root.dataset.pkitInit = '1';
-
-    var beforeChild = root.querySelector('[data-bas-before]');
-    var afterChild  = root.querySelector('[data-bas-after]');
-    var layerBefore = root.querySelector('.pkit-bas__layer--before');
-    var layerAfter  = root.querySelector('.pkit-bas__layer--after');
-    var handle      = root.querySelector('.pkit-bas__handle');
-    var rangeInput  = root.querySelector('.pkit-bas__range');
-
-    if (beforeChild && layerBefore) {
-      layerBefore.innerHTML = beforeChild.innerHTML;
-      beforeChild.style.display = 'none';
-    }
-    if (afterChild && layerAfter) {
-      layerAfter.innerHTML = afterChild.innerHTML;
-      afterChild.style.display = 'none';
-    }
-
-    function applyValue(val) {
-      var pct = Math.min(100, Math.max(0, parseInt(val, 10)));
-      var clipRight = (100 - pct) + '%';
-      if (layerAfter) layerAfter.style.setProperty('--pkit-bas-clip', clipRight);
-      if (handle) handle.style.left = pct + '%';
-    }
-
-    rangeInput && rangeInput.addEventListener('input', function() {
-      applyValue(rangeInput.value);
-    });
-
-    applyValue(rangeInput ? rangeInput.value : 50);
-  });
-})();
-</script>
-
-
 <hr>
 <h2 id="metric-value-mapping">Metric/value mapping</h2>
 <p>The component decodes the eight CVSS v3.1 base metrics in fixed output order
@@ -981,7 +850,7 @@ and fall back to the raw-string display.</p>
 </div>
 
 <footer>
-  <div>Generated by <a href="https://github.com/Bruce188/pipelinekit">pipelinekit</a> · <code>docs-writer/2</code> · <a href="credits.html">Credits</a></div>
+  <div><a href="credits.html">Credits</a></div>
   <div>Self-contained HTML · no CDN · no remote assets</div>
 </footer>
 
@@ -995,7 +864,7 @@ and fall back to the raw-string display.</p>
   const iconLight = document.getElementById('theme-icon-light');
   const iconDark = document.getElementById('theme-icon-dark');
   const root = document.documentElement;
-  const STORE_KEY = 'pkit-docs-theme';
+  const STORE_KEY = 'castellum-docs-theme';
 
   function applyTheme(mode) {
     if (mode === 'auto') {

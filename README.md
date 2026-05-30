@@ -101,9 +101,9 @@ Application docs live under `documentation/`; the `docs/` directory is workflow 
 export CASTELLUM_ADMIN_USERNAME=admin
 export CASTELLUM_ADMIN_PASSWORD_HASH="$(htpasswd -bnBC 12 '' 'your-password' | tr -d ':\n')"
 export CASTELLUM_SECURITY_JWT_SECRET="$(openssl rand -base64 48)"
-export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/castellum
-export SPRING_DATASOURCE_USERNAME=castellum
-export SPRING_DATASOURCE_PASSWORD=<db-password>
+export DATABASE_URL=jdbc:postgresql://localhost:5432/castellum
+export DATABASE_USERNAME=castellum
+export DATABASE_PASSWORD=<db-password>
 
 # 2. Run backend (Flyway migrations run automatically):
 cd backend && ./mvnw spring-boot:run
@@ -112,7 +112,7 @@ cd backend && ./mvnw spring-boot:run
 cd frontend && npm install && npm run dev
 
 # 4. (Optional) Register an NVD API key and pull the CVE corpus:
-export CASTELLUM_NVD_API_KEY=<your-key>
+export NVD_API_KEY=<your-key>
 ./scripts/nvd-bulk-sync.sh --since 2002-01-01
 ```
 
