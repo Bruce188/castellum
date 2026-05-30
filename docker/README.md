@@ -41,8 +41,18 @@ on 2026-05-26.
 - Free host ports `5000`, `8088`, `8081` (backend), `5173` (frontend if
   running).
 - Backend `.env` populated with the variables listed under each section.
-- Castellum backend started with `mvn -f backend/pom.xml spring-boot:run`.
-  <!-- TODO(ops): confirm actual JVM heap + dev-up entrypoint -->
+- Castellum backend running. There is no app-wide root compose file or
+  `bin/` bring-up script; the files under `docker/` are only the MISP/TAXII
+  smoke fixtures below. Bring the rest of the stack up yourself:
+  - **Postgres 16** — provided by the operator: a native install, or e.g.
+    `docker run -d --name castellum-pg -e POSTGRES_USER=castellum \
+    -e POSTGRES_PASSWORD=castellum -e POSTGRES_DB=castellum \
+    -p 5432:5432 postgres:16`.
+  - **Backend** (Spring Boot 3.5.13 / Java 21): `cd backend && ./mvnw spring-boot:run`.
+  - **Frontend** (React 19 + Vite): `cd frontend && npm install && npm run dev`.
+  - **Production / CI** builds and runs the jar instead:
+    `cd backend && ./mvnw -q -B -DskipTests package` then `java -jar target/*.jar`.
+    The container `Dockerfile` ENTRYPOINT is `["java","-jar","/app/castellum.jar"]`.
 
 > Do NOT commit your `.env`. The smoke run records below were captured with
 > the values listed inline; rotate any real secrets after copying them in.
@@ -335,9 +345,12 @@ Exception in thread "HttpClient-5-SelectorManager"
 ```
 
 Same upstream cause as the TAXII case: the backend serialised the full
-export (~233 MB) and the JVM heap <!-- TODO(ops): confirm actual JVM heap + dev-up entrypoint -->
-couldn't hold the materialised bundle + the HTTP client buffers. Recommended
-fixes — already captured as deferred work in `docs/progress.md`:
+export (~233 MB) and the JVM heap couldn't hold the materialised bundle +
+the HTTP client buffers. Nothing in the repo sets `-Xmx`, so the backend
+runs on the JVM default max-heap of `-XX:MaxRAMPercentage=25.0` (about 25%
+of the host's RAM); on a small host that ceiling is what the 233 MB bundle
+blew through. Recommended fixes — already captured as deferred work in
+`docs/progress.md`:
 
 1. **Stream the bundle in chunks** rather than serialise to a single `byte[]`.
    Scope: `ThreatIntelService` + `TaxiiClient` + `MispClient` — backend only,
@@ -349,10 +362,27 @@ fixes — already captured as deferred work in `docs/progress.md`:
    Low cost; reduces blast radius immediately even without streaming.
 
 3. **Tune the JVM heap** for installations that need to push the whole fleet at once.
-   <!-- TODO(ops): confirm actual JVM heap + dev-up entrypoint -->
+   No `-Xmx` is configured anywhere in the repo (not the `Dockerfile`, not
+   `application.yml`, no `JAVA_OPTS` / `JAVA_TOOL_OPTIONS`, no
+   `.mvn/jvm.config`), so the backend runs on the JVM default max-heap of
+   `-XX:MaxRAMPercentage=25.0` — roughly 25% of the host's RAM.
+   - Check the default this host will pick:
+     ```bash
+     java -XX:+PrintFlagsFinal -version 2>/dev/null \
+       | awk '/ MaxHeapSize/{print $4/1024/1024" MB"}'
+     ```
+   - Inspect the running backend — `jps -l` to find the pid, then:
+     ```bash
+     jcmd <pid> GC.heap_info
+     ```
+   - Pin it explicitly via the backend's environment, e.g.
+     `JAVA_TOOL_OPTIONS=-Xmx<N>` (or `-XX:MaxRAMPercentage=<pct>`).
    Scope: deployment configuration only — no code change.
    Cost: trivial; applies only when streaming is not feasible.
-   # TODO(ops): set mem_limit/cpus for compose services after profiling
+
+The smoke-fixture compose files now ship operator-approved resource limits
+(`mem_limit` / `cpus`) on each service so a runaway push cannot exhaust the
+host; see `docker/misp-minimal.yml` and `docker/taxii-medallion.yml`.
 
 ## Audit-table snapshot
 
