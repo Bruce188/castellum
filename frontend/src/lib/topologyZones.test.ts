@@ -14,6 +14,8 @@ import {
   presentZoneIds,
   ZONE_DEFINITIONS,
   ZONE_ORDER,
+  behindGatewayZoneId,
+  presentBehindGatewayZones,
 } from './topologyZones';
 import type { ZoneId } from './topologyZones';
 import type { Device, DiscoveryScope } from '../api/types';
@@ -44,6 +46,9 @@ function makeDevice(
     osCpe: null,
     publishesHostPort,
     deviceRole: 'UNKNOWN',
+    originHostIp: 'local',
+    originHostName: null,
+    networkName: null,
   };
 }
 
@@ -153,5 +158,45 @@ describe('ZONE_DEFINITIONS legend (AC5)', () => {
   it('(d) DOCKER_BRIDGE scope appears only in zone-docker definition, not zone-home', () => {
     expect(ZONE_DEFINITIONS['zone-docker'].scopes).toContain('DOCKER_BRIDGE');
     expect(ZONE_DEFINITIONS['zone-home'].scopes).not.toContain('DOCKER_BRIDGE');
+  });
+});
+
+// ─── Task 3.3: behindGatewayZoneId + presentBehindGatewayZones ───────────────
+
+describe('Task 3.3: behindGatewayZoneId', () => {
+  it('local origin collapses to zone-docker (no new zone for single-host data)', () => {
+    expect(behindGatewayZoneId('local')).toBe('zone-docker');
+  });
+
+  it('non-local origin produces behind-gw:<ip> id', () => {
+    expect(behindGatewayZoneId('192.168.1.50')).toBe('behind-gw:192.168.1.50');
+  });
+});
+
+describe('Task 3.3: presentBehindGatewayZones', () => {
+  it('single-origin (local-only) device set yields NO behind-gw zones', () => {
+    const devices: Device[] = [
+      makeDevice(1, '172.17.0.2', 'DOCKER_BRIDGE'),
+      makeDevice(2, '172.17.0.3', 'DOCKER_BRIDGE'),
+    ];
+    const zones = presentBehindGatewayZones(devices);
+    expect(zones).toHaveLength(0);
+  });
+
+  it('two-origin set yields exactly one behind-gw zone for the remote origin', () => {
+    const localDocker = makeDevice(1, '172.17.0.2', 'DOCKER_BRIDGE');
+    const remoteDocker = { ...makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'), originHostIp: '192.168.1.50' };
+    const zones = presentBehindGatewayZones([localDocker, remoteDocker]);
+    expect(zones).toHaveLength(1);
+    expect(zones[0].zoneId).toBe('behind-gw:192.168.1.50');
+  });
+
+  it('existing scopeToZoneId/presentZoneIds/zone-order contracts unchanged', () => {
+    // Static 4-zone contract stays intact after adding helpers.
+    expect(scopeToZoneId('DOCKER_BRIDGE')).toBe('zone-docker');
+    expect(scopeToZoneId('HOME')).toBe('zone-home');
+    const scopes: DiscoveryScope[] = ['HOME', 'DOCKER_BRIDGE', 'LINK_LOCAL', 'LOOPBACK', 'PUBLIC'];
+    const ids = presentZoneIds(scopes);
+    expect(ids).toEqual(['zone-home', 'zone-docker', 'zone-local', 'zone-public']);
   });
 });

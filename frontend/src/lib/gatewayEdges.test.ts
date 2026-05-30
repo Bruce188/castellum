@@ -26,6 +26,9 @@ function makeDevice(
     osCpe: null,
     publishesHostPort,
     deviceRole: 'UNKNOWN',
+    originHostIp: 'local',
+    originHostName: null,
+    networkName: null,
   };
 }
 
@@ -598,5 +601,45 @@ describe('buildGatewayEdges', () => {
       );
       expect(allEdgesForUnattached).toHaveLength(0);
     });
+  });
+});
+
+// ─── Task 3.4: per-origin pivot map + localStorage fallback ──────────────────
+
+describe('Task 3.4: per-origin pivot + localStorage fallback', () => {
+  it('NEW per-origin: two origins each bridge only their own docker members', () => {
+    // Local pivot (192.168.68.51) and its local docker member
+    const localPivot  = makeDevice(1, '192.168.68.51', 'HOME');
+    const localDocker = makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE', 'docker-net:bridge');
+    // localDocker.originHostIp defaults to 'local' from makeDevice
+
+    // Remote pivot (192.168.1.50) and its remote docker member
+    const remotePivot = makeDevice(10, '192.168.1.50', 'HOME');
+    const remoteDocker = { ...makeDevice(11, '172.18.0.2', 'DOCKER_BRIDGE', 'docker-net:app_net'), originHostIp: '192.168.1.50' };
+
+    const edges = buildGatewayEdges([localPivot, localDocker, remotePivot, remoteDocker]);
+
+    const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+
+    // Each pivot edges to its own docker member
+    expect(dbEdges.some(e => e.data.source === '1' && e.data.target === '2')).toBe(true);
+    expect(dbEdges.some(e => e.data.source === '10' && e.data.target === '11')).toBe(true);
+
+    // Cross-origin edges must NOT exist
+    expect(dbEdges.some(e => e.data.source === '1' && e.data.target === '11'))
+      .toBe(false);
+    expect(dbEdges.some(e => e.data.source === '10' && e.data.target === '2'))
+      .toBe(false);
+  });
+
+  it('NEW fallback: DOCKER_BRIDGE with no matching HOME pivot becomes orphan (no crash)', () => {
+    // Only a remote docker member, no HOME pivot at 192.168.1.99
+    const remoteDocker = { ...makeDevice(20, '172.19.0.2', 'DOCKER_BRIDGE', 'docker-net:orphan_net'), originHostIp: '192.168.1.99' };
+
+    const edges = buildGatewayEdges([remoteDocker]);
+
+    // No db- edges for the orphan
+    const dbEdges = edges.filter(e => e.data.kind === 'docker-bridge');
+    expect(dbEdges.filter(e => e.data.source === '20' || e.data.target === '20')).toHaveLength(0);
   });
 });

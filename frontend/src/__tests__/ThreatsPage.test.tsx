@@ -44,6 +44,10 @@ const makeDevice = (id: number) => ({
   discoveryScope: 'HOME' as const,
   discoverySource: null,
   deviceRole: 'UNKNOWN' as const,
+  publishesHostPort: false,
+  originHostIp: 'local',
+  originHostName: null,
+  networkName: null,
 });
 
 const makeRisk = (deviceId: number) => ({

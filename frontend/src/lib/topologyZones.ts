@@ -17,7 +17,7 @@
  * meaningful network-boundary distinction from the operator's perspective.
  */
 
-import type { DiscoveryScope } from '../api/types';
+import type { Device, DiscoveryScope } from '../api/types';
 
 // ─── Zone IDs ───────────────────────────────────────────────────────────────
 
@@ -104,4 +104,54 @@ export function presentZoneIds(scopes: Iterable<DiscoveryScope>): ZoneId[] {
     present.add(SCOPE_TO_ZONE[s]);
   }
   return ZONE_ORDER.filter(z => present.has(z));
+}
+
+// ─── Per-origin behind-gateway zone helpers ──────────────────────────────────
+// These are ADDITIVE — the static ZoneId / SCOPE_TO_ZONE / ZONE_DEFINITIONS /
+// ZONE_ORDER / ZONE_COLORS / ZONE_BORDER_COLORS / ZONE_LABEL_COLORS contracts
+// above are untouched.
+
+/**
+ * Returns the compound-node zone id for a device's `originHostIp`.
+ *
+ * The `"local"` origin collapses to the existing `"zone-docker"` so the
+ * single-host topology is byte-identical to today — no new zone for local data.
+ * Non-local origins produce a `"behind-gw:<originHostIp>"` id.
+ */
+export function behindGatewayZoneId(originHostIp: string): string {
+  return originHostIp === 'local' ? 'zone-docker' : `behind-gw:${originHostIp}`;
+}
+
+/** Definition for a dynamically derived behind-gateway zone. */
+export interface BehindGatewayZone {
+  /** Compound-node id, e.g. `"behind-gw:192.168.1.50"`. */
+  zoneId: string;
+  /** Human-readable label, e.g. `"Behind 192.168.1.50"`. */
+  label: string;
+  /** Origin host IP (the remote docker-probe host). */
+  originHostIp: string;
+}
+
+/**
+ * Returns the ordered set of behind-gateway zones for non-local origins
+ * among DOCKER_BRIDGE devices in `devices`.
+ *
+ * For single-origin (`"local"` only) device sets this returns an empty array —
+ * all devices stay under `"zone-docker"` and the graph is unchanged.
+ */
+export function presentBehindGatewayZones(devices: Device[]): BehindGatewayZone[] {
+  const seen = new Map<string, BehindGatewayZone>();
+  for (const d of devices) {
+    if (d.discoveryScope !== 'DOCKER_BRIDGE') continue;
+    const origin = d.originHostIp;
+    if (origin === 'local') continue;
+    if (seen.has(origin)) continue;
+    const displayName = d.originHostName ?? origin;
+    seen.set(origin, {
+      zoneId: `behind-gw:${origin}`,
+      label: `Behind ${displayName}`,
+      originHostIp: origin,
+    });
+  }
+  return Array.from(seen.values());
 }

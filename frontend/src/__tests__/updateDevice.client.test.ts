@@ -25,6 +25,9 @@ const current: Device = {
   osCpe: null,
   publishesHostPort: false,
   deviceRole: 'UNKNOWN',
+  originHostIp: 'local',
+  originHostName: null,
+  networkName: null,
 };
 
 describe('api.updateDevice()', () => {

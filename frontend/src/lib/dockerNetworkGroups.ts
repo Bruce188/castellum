@@ -78,53 +78,95 @@ export function dockerNetworkGroupId(networkName: string): string {
 }
 
 /**
+ * Returns the display label for a docker network name.
+ * The raw `bridge` network (Docker's default) is labeled `bridge (default)`
+ * to communicate its role without changing its `groupId` (which stays
+ * `docker-net-group-bridge` so existing Cytoscape selectors are unaffected).
+ */
+function networkDisplayLabel(networkName: string): string {
+  return networkName === 'bridge' ? 'bridge (default)' : networkName;
+}
+
+/**
  * Builds the list of per-network sub-box groups for all DOCKER_BRIDGE devices.
  *
- * Algorithm:
- * 1. Collect all docker-net gateway devices (hostname starts with `docker-net:`).
- * 2. Build a /24 → networkName map from those gateways.
- * 3. For every DOCKER_BRIDGE device assign it to the group whose gateway /24
- *    matches the container's /24.  Gateways assign to their own group.
- * 4. DOCKER_BRIDGE devices with no matching gateway go to the unattached group.
- * 5. Return only non-empty groups; omit empty ones.
+ * Primary algorithm (when `networkName` is present on a container):
+ * 1. Group containers by `networkName` — keyed via `dockerNetworkGroupId(networkName)`.
+ *    The raw `bridge` network renders as `bridge (default)` (display-only; groupId unchanged).
+ * 2. Co-group synthetic gateway devices (hostname `docker-net:<name>`) with their
+ *    same-name containers — the gateway's `dockerNetworkName(hostname)` must equal the
+ *    container's `networkName` for the 1:1 NO-OP invariant.
+ *
+ * Fallback (when `networkName` is null):
+ * 3. Build a /24 → networkName map from gateway hostnames.
+ * 4. Assign the device to the group whose gateway /24 matches the container's /24.
+ * 5. Devices with neither a `networkName` nor a matching gateway → unattached group.
+ *
+ * Return only non-empty groups in stable insertion order.
  */
 export function buildDockerNetworkGroups(devices: Device[]): DockerNetworkGroup[] {
-  // Step 1: find all docker-net gateway devices.
-  const gateways = devices.filter(isDockerNetGateway);
-
-  // Step 2: map /24 prefix → group info.
-  // Note: two docker networks can never share a /24 — docker guarantees distinct subnets
-  // per network, so the first gateway for a given /24 always wins if duplicates ever appear.
+  // Build a name→group map and a /24→group map from gateway devices.
+  // Gateways are always assigned to their own group (they have no networkName, just hostname).
+  const nameToGroup = new Map<string, DockerNetworkGroup>();
   const slash24ToGroup = new Map<string, DockerNetworkGroup>();
+
+  // First pass: create groups from gateway devices (they anchor the name→group mapping).
+  const gateways = devices.filter(isDockerNetGateway);
   for (const gw of gateways) {
-    const slash24 = ipv4Slash24(gw.ipAddress);
-    if (slash24 === null) continue;
     const name = dockerNetworkName(gw.hostname!);
     const gid = dockerNetworkGroupId(name);
-    if (!slash24ToGroup.has(slash24)) {
-      slash24ToGroup.set(slash24, { groupId: gid, label: name, memberIds: new Set(), muted: false });
+    if (!nameToGroup.has(name)) {
+      nameToGroup.set(name, {
+        groupId: gid,
+        label: networkDisplayLabel(name),
+        memberIds: new Set(),
+        muted: false,
+      });
     }
-    // Add the gateway itself to its own group.
-    slash24ToGroup.get(slash24)!.memberIds.add(gw.id);
+    nameToGroup.get(name)!.memberIds.add(gw.id);
+
+    // Also register by /24 for the fallback path (null-networkName containers).
+    const slash24 = ipv4Slash24(gw.ipAddress);
+    if (slash24 !== null && !slash24ToGroup.has(slash24)) {
+      slash24ToGroup.set(slash24, nameToGroup.get(name)!);
+    }
   }
 
-  // Step 3 + 4: assign every DOCKER_BRIDGE device to its group.
+  // Second pass: assign DOCKER_BRIDGE non-gateway devices.
   const unattachedIds = new Set<number>();
   for (const d of devices) {
     if (d.discoveryScope !== 'DOCKER_BRIDGE') continue;
     if (isDockerNetGateway(d)) continue; // already added above
-    const slash24 = ipv4Slash24(d.ipAddress);
-    const group = slash24 !== null ? slash24ToGroup.get(slash24) : undefined;
-    if (group) {
-      group.memberIds.add(d.id);
+
+    if (d.networkName !== null) {
+      // Primary path: group by networkName.
+      const name = d.networkName;
+      const gid = dockerNetworkGroupId(name);
+      if (!nameToGroup.has(name)) {
+        // Create the group if no gateway has been seen yet for this network.
+        nameToGroup.set(name, {
+          groupId: gid,
+          label: networkDisplayLabel(name),
+          memberIds: new Set(),
+          muted: false,
+        });
+      }
+      nameToGroup.get(name)!.memberIds.add(d.id);
     } else {
-      unattachedIds.add(d.id);
+      // Fallback path: group by /24 → gateway inference (legacy behaviour).
+      const slash24 = ipv4Slash24(d.ipAddress);
+      const group = slash24 !== null ? slash24ToGroup.get(slash24) : undefined;
+      if (group) {
+        group.memberIds.add(d.id);
+      } else {
+        unattachedIds.add(d.id);
+      }
     }
   }
 
-  // Step 5: collect non-empty groups in stable insertion order.
+  // Collect non-empty groups in stable insertion order.
   const result: DockerNetworkGroup[] = [];
-  for (const g of slash24ToGroup.values()) {
+  for (const g of nameToGroup.values()) {
     if (g.memberIds.size > 0) result.push(g);
   }
   if (unattachedIds.size > 0) {

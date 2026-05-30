@@ -84,7 +84,7 @@ class DockerHostProbeServiceTest {
     private DockerDiscoveryService discoveryService() {
         DockerCliClient.CommandRunner noOp = argv -> new DockerCliClient.CommandResult(0, "[]", "");
         return new DockerDiscoveryService(
-            new DockerCliClient(noOp), inspectParser, deviceUpsertService,
+            new DockerCliClient(noOp), inspectParser, deviceUpsertService, deviceRepository,
             networkServiceRepository, auditService,
             Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
     }
@@ -1030,5 +1030,127 @@ class DockerHostProbeServiceTest {
         assertThat(callCount.get())
             .as("registry client must not be called when registry is disabled")
             .isEqualTo(0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 2.2 — probe2375 wires getNetworks → ingestNetworks (F2 NB1)
+    // -----------------------------------------------------------------------
+
+    /** Minimal /networks response with one bridge network (bridge, 172.17.0.0/16). */
+    private static final String NETWORKS_JSON_ONE_BRIDGE = """
+        [
+          {
+            "Id":"abc123",
+            "Name":"bridge",
+            "IPAM":{"Config":[{"Subnet":"172.17.0.0/16","Gateway":"172.17.0.1"}]}
+          }
+        ]
+        """;
+
+    /**
+     * (1) :2375 reachable, getNetworks returns a body → ingestNetworks is invoked once
+     * with mapped attachments; the gateway device is persisted.
+     */
+    @Test
+    void probe2375_getNetworksReturnsBody_ingestsGateways() throws Exception {
+        String probedIp = "10.0.0.90";
+        seedLocalDevice(probedIp);
+
+        // Container list empty (no running containers) so only network gateway will appear.
+        DockerEngineApiClient.HttpGetter getter = uri -> {
+            String path = uri.getPath();
+            if (path.equals("/containers/json")) return Optional.of("[]");
+            if (path.equals("/networks")) return Optional.of(NETWORKS_JSON_ONE_BRIDGE);
+            return Optional.empty();
+        };
+
+        Predicate<HostPort> reachable = hp -> hp.port() == DockerHostProbeService.PORT_2375
+            && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbe(getter, reachable);
+        probe.probeHosts(List.of(probedIp));
+
+        // Gateway device at 172.17.0.1 attributed to probedIp must be persisted.
+        Optional<io.castellum.domain.Device> gw =
+            deviceRepository.findByIpAddressAndOriginHostIp("172.17.0.1", probedIp);
+        assertThat(gw).as("gateway from /networks must be ingested").isPresent();
+
+        // CRITICAL finding still raised (probe continues after networks wiring)
+        io.castellum.domain.Device host =
+            deviceRepository.findByIpAddressAndOriginHostIp(probedIp, "local").orElseThrow();
+        Optional<NetworkService> finding = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(host.getId(), 2375, "tcp");
+        assertThat(finding).isPresent();
+        assertThat(finding.get().getPostureSeverity()).isEqualTo("CRITICAL");
+    }
+
+    /**
+     * (2) getNetworks returns Optional.empty() → ingestNetworks NOT invoked;
+     * container ingest + CRITICAL finding still happen (no regression).
+     */
+    @Test
+    void probe2375_getNetworksEmpty_ingestNetworksNotInvoked() throws Exception {
+        String probedIp = "10.0.0.91";
+        seedLocalDevice(probedIp);
+
+        // Container list empty; /networks returns empty → no gateway row.
+        DockerEngineApiClient.HttpGetter getter = uri -> {
+            String path = uri.getPath();
+            if (path.equals("/containers/json")) return Optional.of("[]");
+            // /networks is missing → returns Optional.empty()
+            return Optional.empty();
+        };
+
+        Predicate<HostPort> reachable = hp -> hp.port() == DockerHostProbeService.PORT_2375
+            && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbe(getter, reachable);
+        probe.probeHosts(List.of(probedIp));
+
+        // No gateway row created (networks path was empty).
+        long devicesBelongingToProbe = deviceRepository.findAll().stream()
+            .filter(d -> probedIp.equals(d.getOriginHostIp())).count();
+        assertThat(devicesBelongingToProbe).as("no gateway from empty /networks").isEqualTo(0);
+
+        // CRITICAL finding still raised.
+        io.castellum.domain.Device host =
+            deviceRepository.findByIpAddressAndOriginHostIp(probedIp, "local").orElseThrow();
+        Optional<NetworkService> finding = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(host.getId(), 2375, "tcp");
+        assertThat(finding).isPresent();
+        assertThat(finding.get().getPostureSeverity()).isEqualTo("CRITICAL");
+    }
+
+    /**
+     * (4) NO phantom containers: ingestNetworks produces only gateway devices (containerIp=null).
+     * A host with reachable :2375 returning /networks → only the gateway row, no container row.
+     */
+    @Test
+    void probe2375_ingestNetworks_gatewayOnlyNoPhantomContainers() throws Exception {
+        String probedIp = "10.0.0.92";
+        seedLocalDevice(probedIp);
+
+        DockerEngineApiClient.HttpGetter getter = uri -> {
+            String path = uri.getPath();
+            if (path.equals("/containers/json")) return Optional.of("[]");
+            if (path.equals("/networks")) return Optional.of(NETWORKS_JSON_ONE_BRIDGE);
+            return Optional.empty();
+        };
+
+        Predicate<HostPort> reachable = hp -> hp.port() == DockerHostProbeService.PORT_2375
+            && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbe(getter, reachable);
+        probe.probeHosts(List.of(probedIp));
+
+        // Count rows attributed to probedIp — must be exactly 1 (the gateway) not 2+.
+        long remoteRows = deviceRepository.findAll().stream()
+            .filter(d -> probedIp.equals(d.getOriginHostIp())).count();
+        assertThat(remoteRows)
+            .as("only 1 gateway row (no phantom containers) must exist for the probed origin")
+            .isEqualTo(1);
+        io.castellum.domain.Device gw =
+            deviceRepository.findByIpAddressAndOriginHostIp("172.17.0.1", probedIp).orElseThrow();
+        assertThat(gw.getHostname()).startsWith("docker-net:");
     }
 }

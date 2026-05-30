@@ -98,6 +98,9 @@ const sampleDevice: Device = {
   osCpe: null,
   publishesHostPort: false,
   deviceRole: 'UNKNOWN',
+  originHostIp: 'local',
+  originHostName: null,
+  networkName: null,
 };
 
 function renderWith(initialPath = '/cves') {

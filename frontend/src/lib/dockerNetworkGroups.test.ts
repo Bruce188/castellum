@@ -59,6 +59,9 @@ function makeDevice(
     osCpe: null,
     publishesHostPort,
     deviceRole: 'UNKNOWN',
+    originHostIp: 'local',
+    originHostName: null,
+    networkName: null,
   };
 }
 
@@ -390,5 +393,93 @@ describe('Invariant: no empty group objects ever returned', () => {
     }
     // In this specific case it must NOT be present at all
     expect(unattached).toBeUndefined();
+  });
+});
+
+// ─── Task 3.2: group-by-networkName + bridge(default) label ─────────────────
+
+describe('Task 3.2: group-by-networkName + bridge(default)', () => {
+  /**
+   * NO-OP invariant (HARD): containers with networkName matching their /24's
+   * gateway produce identical groupIds and memberSets as the /24-inference path.
+   * Simulate current data: container at 172.30.0.2 with networkName="alpha_net",
+   * gateway at 172.30.0.1 with hostname "docker-net:alpha_net".
+   */
+  it('groupByNetworkName_noOp_identicalToSlash24Inference', () => {
+    // Containers carrying networkName matching their gateway's network name.
+    const gwAlpha = { ...GW_ALPHA };                           // gateway, networkName=null
+    const c1 = { ...PUB_ALPHA, networkName: 'alpha_net' };    // container with networkName set
+    const c2 = { ...INT_ALPHA, networkName: 'alpha_net' };
+
+    const gwBeta = { ...GW_BETA };
+    const c3 = { ...INT_BETA, networkName: 'beta_net' };
+
+    const groups = buildDockerNetworkGroups([gwAlpha, c1, c2, gwBeta, c3]);
+
+    // Baseline (legacy /24): same devices without networkName
+    const c1Legacy = { ...PUB_ALPHA, networkName: null };
+    const c2Legacy = { ...INT_ALPHA, networkName: null };
+    const c3Legacy = { ...INT_BETA,  networkName: null };
+    const groupsLegacy = buildDockerNetworkGroups([gwAlpha, c1Legacy, c2Legacy, gwBeta, c3Legacy]);
+
+    // GroupIds must match
+    const groupIds     = new Set(groups.map(g => g.groupId));
+    const groupIdsLegacy = new Set(groupsLegacy.map(g => g.groupId));
+    expect(groupIds).toEqual(groupIdsLegacy);
+
+    // MemberSets must match for each groupId
+    for (const g of groups) {
+      const lgacy = groupsLegacy.find(gl => gl.groupId === g.groupId);
+      expect(lgacy).toBeDefined();
+      expect(g.memberIds).toEqual(lgacy!.memberIds);
+    }
+  });
+
+  /**
+   * bridge(default) label: a container on the raw "bridge" network renders
+   * label === 'bridge (default)' while groupId === 'docker-net-group-bridge'.
+   */
+  it('bridgeNetwork_displayLabel_bridgeDefault_groupIdUnchanged', () => {
+    const gwBridge = makeDevice(50, '172.17.0.1', 'DOCKER_BRIDGE', 'docker-net:bridge');
+    const container = { ...makeDevice(51, '172.17.0.2', 'DOCKER_BRIDGE', 'my-container'), networkName: 'bridge' };
+
+    const groups = buildDockerNetworkGroups([gwBridge, container]);
+
+    const bridgeGroup = groups.find(g => g.groupId === dockerNetworkGroupId('bridge'));
+    expect(bridgeGroup).toBeDefined();
+    expect(bridgeGroup!.label).toBe('bridge (default)');
+    expect(bridgeGroup!.groupId).toBe('docker-net-group-bridge');
+  });
+
+  /**
+   * Null fallback: a DOCKER_BRIDGE device with networkName === null still groups
+   * via the /24 + gateway path (legacy behaviour preserved).
+   */
+  it('nullNetworkName_fallsBackTo_slash24Inference', () => {
+    const gw = makeDevice(60, '172.40.0.1', 'DOCKER_BRIDGE', 'docker-net:mynet');
+    const containerWithNull = makeDevice(61, '172.40.0.2', 'DOCKER_BRIDGE', 'no-name-container');
+    // containerWithNull has networkName=null (from makeDevice default)
+
+    const groups = buildDockerNetworkGroups([gw, containerWithNull]);
+
+    // Must land in mynet group (via /24 fallback), not unattached
+    const mynetGroup = groups.find(g => g.groupId === dockerNetworkGroupId('mynet'));
+    expect(mynetGroup).toBeDefined();
+    expect(mynetGroup!.memberIds.has(containerWithNull.id)).toBe(true);
+
+    const unattached = groups.find(g => g.groupId === DOCKER_UNATTACHED_GROUP_ID);
+    expect(unattached).toBeUndefined();
+  });
+
+  /**
+   * Device with neither networkName nor matching gateway → unattached group.
+   */
+  it('noNetworkName_noMatchingGateway_goesToUnattachedGroup', () => {
+    const stale = makeDevice(70, '172.99.0.5', 'DOCKER_BRIDGE', null); // networkName=null, no gateway
+    const groups = buildDockerNetworkGroups([stale]);
+
+    const unattached = groups.find(g => g.groupId === DOCKER_UNATTACHED_GROUP_ID);
+    expect(unattached).toBeDefined();
+    expect(unattached!.memberIds.has(stale.id)).toBe(true);
   });
 });

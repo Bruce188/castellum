@@ -59,9 +59,9 @@ const mockApi = api as unknown as {
 };
 
 const DEVICES: Device[] = [
-  { id: 1, ipAddress: '10.0.0.1', hostname: 'a', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false, deviceRole: 'UNKNOWN' },
-  { id: 2, ipAddress: '10.0.0.2', hostname: 'b', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false, deviceRole: 'UNKNOWN' },
-  { id: 3, ipAddress: '10.0.0.3', hostname: 'c', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false, deviceRole: 'UNKNOWN' },
+  { id: 1, ipAddress: '10.0.0.1', hostname: 'a', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false, deviceRole: 'UNKNOWN', originHostIp: 'local', originHostName: null, networkName: null },
+  { id: 2, ipAddress: '10.0.0.2', hostname: 'b', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false, deviceRole: 'UNKNOWN', originHostIp: 'local', originHostName: null, networkName: null },
+  { id: 3, ipAddress: '10.0.0.3', hostname: 'c', macAddress: null, firstSeen: '2026-01-01T00:00:00Z', lastSeen: '2026-01-01T00:00:00Z', criticality: 'MEDIUM', discoveryScope: 'HOME', discoverySource: null, lastSeenIface: null, serviceCount: 0, osName: null, osAccuracy: null, osCpe: null, publishesHostPort: false, deviceRole: 'UNKNOWN', originHostIp: 'local', originHostName: null, networkName: null },
 ];
 
 const DEVICES_PAGE: Page<Device> = {

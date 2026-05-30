@@ -74,6 +74,9 @@ function makeDevice(
     osCpe: null,
     publishesHostPort,
     deviceRole: 'UNKNOWN',
+    originHostIp: 'local',
+    originHostName: null,
+    networkName: null,
   };
 }
 

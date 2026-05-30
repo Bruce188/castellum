@@ -60,6 +60,9 @@ function makeDevice(id: number, ip: string, scope: DiscoveryScope, discoverySour
     osCpe: null,
     publishesHostPort: false,
     deviceRole: 'UNKNOWN',
+    originHostIp: 'local',
+    originHostName: null,
+    networkName: null,
   };
 }
 
@@ -235,6 +238,9 @@ describe('<TopologyView /> alias-label guard (AC4)', () => {
       osCpe: null,
       publishesHostPort: false,
       deviceRole: 'UNKNOWN',
+      originHostIp: 'local',
+      originHostName: null,
+      networkName: null,
     };
   }
 
@@ -349,5 +355,56 @@ describe('<TopologyView /> role badge (Task 3.2)', () => {
 
     expect(byId('1')?.data.deviceRole).toBe('SERVER');
     expect(byId('2')?.data.deviceRole).toBe('UNKNOWN');
+  });
+});
+
+// ─── Task 3.5: per-origin behind-gateway render ───────────────────────────────
+
+describe('<TopologyView /> Task 3.5: per-origin behind-gateway zones', () => {
+  it('single-origin (local-only) render has NO behind-gw zone node', () => {
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.51', 'HOME'),
+      { ...makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE'), networkName: null },
+    ];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string } }>;
+    const hasBehindGw = addArgs.some(e => e.data.id.startsWith('behind-gw:'));
+    expect(hasBehindGw).toBe(false);
+  });
+
+  it('two-origin render has exactly one behind-gw zone node for the remote origin', () => {
+    const localPivot   = makeDevice(1, '192.168.68.51', 'HOME');
+    const localDocker  = { ...makeDevice(2, '172.17.0.2', 'DOCKER_BRIDGE'), networkName: null };
+    const remoteDocker = {
+      ...makeDevice(3, '172.18.0.2', 'DOCKER_BRIDGE'),
+      originHostIp: '192.168.1.50',
+      networkName: null,
+    };
+
+    render(
+      <TopologyView devices={[localPivot, localDocker, remoteDocker]} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string } }>;
+    const behindGwNodes = addArgs.filter(e => e.data.id.startsWith('behind-gw:'));
+    expect(behindGwNodes).toHaveLength(1);
+    expect(behindGwNodes[0].data.id).toBe('behind-gw:192.168.1.50');
+  });
+
+  it('pivot HOME device with deviceRole LAPTOP carries role class on node', () => {
+    const laptopPivot  = { ...makeDevice(1, '192.168.1.50', 'HOME'), deviceRole: 'LAPTOP' as const };
+    const remoteDocker = {
+      ...makeDevice(2, '172.18.0.2', 'DOCKER_BRIDGE'),
+      originHostIp: '192.168.1.50',
+      networkName: null,
+    };
+
+    render(
+      <TopologyView devices={[laptopPivot, remoteDocker]} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string }; classes: string }>;
+    const pivotNode = addArgs.find(e => e.data.id === '1');
+    expect(pivotNode?.classes).toContain('role-laptop');
   });
 });

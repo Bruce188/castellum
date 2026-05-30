@@ -66,7 +66,7 @@ class DockerDiscoveryServiceTest {
             return new DockerCliClient.CommandResult(0, inspectJson, "");
         };
         DockerCliClient cli = new DockerCliClient(runner);
-        return new DockerDiscoveryService(cli, parser, upsertService, serviceRepo, auditService,
+        return new DockerDiscoveryService(cli, parser, upsertService, repo, serviceRepo, auditService,
             Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
     }
 
@@ -347,7 +347,7 @@ class DockerDiscoveryServiceTest {
             throw new IOException("docker: command not found");
         };
         DockerDiscoveryService svc = new DockerDiscoveryService(
-            new DockerCliClient(failing), parser, upsertService, serviceRepo, auditService,
+            new DockerCliClient(failing), parser, upsertService, repo, serviceRepo, auditService,
             Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
 
         assertThatThrownBy(svc::discover)
@@ -721,6 +721,88 @@ class DockerDiscoveryServiceTest {
         DockerDiscoveryResponse result = svc.ingestNetworks(attachments, origin, FIXED_NOW);
         assertThat(result.gateways()).isZero();
         assertThat(repo.count()).isZero();
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 1.3 — ingest populates network_name on container devices
+    // -----------------------------------------------------------------------
+
+    /**
+     * A container on network "pingpay_default" must have its networkName populated
+     * to "pingpay_default" after ingest().
+     */
+    @Test
+    void ingest_populatesNetworkName_fromContainerPrimaryNetwork() throws Exception {
+        newService(fixture("inspect-reference.json"), List.of("c3")).discover();
+
+        // pingpay-db at 172.18.0.2 on network "pingpay_default"
+        Device db = repo.findByIpAddress("172.18.0.2").orElseThrow();
+        assertThat(db.getNetworkName())
+            .as("container's networkName must be populated from its primary docker network")
+            .isEqualTo("pingpay_default");
+    }
+
+    /**
+     * NO-OP grouping invariant: a container at 172.18.0.5 on network "app_net"
+     * whose synthetic gateway is docker-net:app_net at 172.18.0.1 carries
+     * networkName="app_net" — matching the gateway-derived group.
+     */
+    @Test
+    void ingest_networkName_matchesGatewayDerivedGroup() throws Exception {
+        String json = """
+            [
+              {
+                "Id": "app1",
+                "Name": "/app-svc",
+                "Config": { "Image": "nginx:1.25" },
+                "NetworkSettings": {
+                  "Ports": { "80/tcp": null },
+                  "Networks": {
+                    "app_net": { "IPAddress": "172.18.0.5", "Gateway": "172.18.0.1" }
+                  }
+                }
+              }
+            ]
+            """;
+        newService(json, List.of("app1")).discover();
+
+        Device app = repo.findByIpAddress("172.18.0.5").orElseThrow();
+        assertThat(app.getNetworkName())
+            .as("container networkName must equal the network key 'app_net'")
+            .isEqualTo("app_net");
+
+        // Synthetic gateway at 172.18.0.1 is named "docker-net:app_net";
+        // the group derived from it should match the container's networkName.
+        Device gw = repo.findByIpAddress("172.18.0.1").orElseThrow();
+        assertThat(gw.getHostname())
+            .as("synthetic gateway hostname must include the network name")
+            .isEqualTo("docker-net:app_net");
+    }
+
+    /**
+     * ingestNetworks (gateway-only path) must NOT create phantom container rows
+     * (containerIp=null by contract) — only gateways.
+     */
+    @Test
+    void ingestNetworks_gatewayOnly_noPhantomContainers() {
+        DockerDiscoveryService svc = newService("[]", List.of());
+        OriginContext origin = OriginContext.of("10.0.0.50", "probe-host");
+
+        List<io.castellum.discovery.DockerContainer.DockerNetworkAttachment> attachments = List.of(
+            new io.castellum.discovery.DockerContainer.DockerNetworkAttachment(
+                "bridge", null, "172.17.0.1"));
+
+        DockerDiscoveryResponse result = svc.ingestNetworks(attachments, origin, FIXED_NOW);
+
+        // Exactly 1 gateway, 0 containers
+        assertThat(result.containers()).isZero();
+        assertThat(result.gateways()).isEqualTo(1);
+
+        // Only the gateway row — no container row with a real IP
+        long totalRows = repo.count();
+        assertThat(totalRows).isEqualTo(1);
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        assertThat(gw.getHostname()).isEqualTo("docker-net:bridge");
     }
 
     // -----------------------------------------------------------------------
