@@ -159,6 +159,112 @@ class RegistryApiClientTest {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // R5 — REPO_NAME_PATTERN boundary characterization tests
+    //
+    // Characterization tests that lock behaviour already required by the
+    // REPO_NAME_PATTERN = ^[a-z0-9]+([._\-/][a-z0-9]+)*$  grammar:
+    //   - uppercase         → rejected (no network call)
+    //   - multi-slash path  → accepted (single network call with correct path)
+    //   - digit-only        → accepted (single network call with correct path)
+    //   - null              → rejected (no network call)
+    // GREEN: the production guard already handles all four cases.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Uppercase name (e.g. "Nginx") must be rejected by the REPO_NAME_PATTERN validation
+     * before any network call is made.
+     */
+    @Test
+    void getTags_uppercaseName_rejectedNoRequest() {
+        List<URI> captured = new ArrayList<>();
+        RegistryApiClient client = new RegistryApiClient(uri -> {
+            captured.add(uri);
+            return Optional.of("{\"name\":\"nginx\",\"tags\":[\"latest\"]}");
+        });
+
+        Optional<String> result = client.getTags("registry.internal", 5000, "Nginx");
+
+        assertThat(result)
+            .as("uppercase 'Nginx' must be rejected — Docker grammar requires lowercase only")
+            .isEmpty();
+        assertThat(captured)
+            .as("getter must NOT be called for uppercase name — validation must short-circuit before network")
+            .isEmpty();
+    }
+
+    /**
+     * Multi-slash path "a/b/c" must be ACCEPTED — Docker allows multi-component namespaces
+     * separated by single '/' characters. The getter must be called once with the correct
+     * path /v2/a/b/c/tags/list on the original host.
+     */
+    @Test
+    void getTags_multiSlashName_acceptedCorrectPath() {
+        List<URI> captured = new ArrayList<>();
+        RegistryApiClient client = new RegistryApiClient(uri -> {
+            captured.add(uri);
+            return Optional.of("{\"name\":\"a/b/c\",\"tags\":[\"latest\"]}");
+        });
+
+        Optional<String> result = client.getTags("registry.internal", 5000, "a/b/c");
+
+        assertThat(captured)
+            .as("getter must be called exactly once for valid multi-slash name 'a/b/c'")
+            .hasSize(1);
+        URI issued = captured.get(0);
+        assertThat(issued.getPath())
+            .as("URI path must be /v2/a/b/c/tags/list for multi-slash name")
+            .isEqualTo("/v2/a/b/c/tags/list");
+        assertThat(issued.getHost())
+            .as("URI host must remain the original host (no off-host redirect)")
+            .isEqualTo("registry.internal");
+        assertThat(result).isPresent();
+    }
+
+    /**
+     * Digit-only component "123" must be ACCEPTED — Docker grammar allows [a-z0-9] runs,
+     * so a name consisting entirely of digits is valid.
+     */
+    @Test
+    void getTags_digitOnlyName_acceptedCorrectPath() {
+        List<URI> captured = new ArrayList<>();
+        RegistryApiClient client = new RegistryApiClient(uri -> {
+            captured.add(uri);
+            return Optional.of("{\"name\":\"123\",\"tags\":[\"v1\"]}");
+        });
+
+        Optional<String> result = client.getTags("registry.internal", 5000, "123");
+
+        assertThat(captured)
+            .as("getter must be called exactly once for valid digit-only name '123'")
+            .hasSize(1);
+        assertThat(captured.get(0).getPath())
+            .as("URI path must be /v2/123/tags/list for digit-only name")
+            .isEqualTo("/v2/123/tags/list");
+        assertThat(result).isPresent();
+    }
+
+    /**
+     * {@code null} name must be rejected without any network call — same as malformed names.
+     */
+    @Test
+    void getTags_nullName_rejectedNoRequest() {
+        List<URI> captured = new ArrayList<>();
+        RegistryApiClient client = new RegistryApiClient(uri -> {
+            captured.add(uri);
+            return Optional.of("{\"name\":\"null\",\"tags\":[]}");
+        });
+
+        Optional<String> result = client.getTags("registry.internal", 5000, null);
+
+        assertThat(result)
+            .as("null name must return empty — no null-deref, no network call")
+            .isEmpty();
+        assertThat(captured)
+            .as("getter must NOT be called for null name")
+            .isEmpty();
+    }
+
     /**
      * Legitimate Docker repository names must still reach the getter with the
      * correct URI — host/authority must equal the ORIGINAL host:port, and the path

@@ -1435,4 +1435,236 @@ class DockerHostProbeServiceTest {
                 + "actual cap is implementer's choice but this assertion sets the ceiling)")
             .isLessThanOrEqualTo(64);
     }
+
+    // -----------------------------------------------------------------------
+    // R5 — Aggregate image cap (GENUINE RED)
+    //
+    // probeRegistry has a per-repo cap (MAX_TAGS_PER_REPO=64) but NO aggregate cap.
+    // 50 repos × 64 tags/repo = 3200 repo:tag entries with no aggregate guard.
+    // The implementer must add a MAX_IMAGES_TOTAL constant (value <= 2000) and break
+    // the accumulation loop once that bound is reached.  This test is RED until that
+    // cap is present.
+    // -----------------------------------------------------------------------
+
+    /**
+     * A registry catalog with many repos (50), each returning many tags (64), must produce
+     * a {@code registry_images} blob whose TOTAL entry count is at most 2000.
+     *
+     * <p>Without an aggregate cap the total would be 50 × 64 = 3200 entries, which exceeds
+     * the bound. With an aggregate cap in place the loop must stop and the entry count must
+     * be {@code <= 2000}.
+     *
+     * <p>The implementer should introduce a {@code MAX_IMAGES_TOTAL} constant. Its exact
+     * value is the implementer's choice, but it must be {@code <= 2000} so this assertion
+     * continues to hold.
+     *
+     * <p><b>RED</b> until {@code probeRegistry} breaks out of the repo loop once the
+     * aggregate image count reaches {@code MAX_IMAGES_TOTAL}.
+     */
+    @Test
+    void registry5000_manyReposManyTags_aggregateCapEnforced() {
+        String probedIp = "10.0.3.1";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // 50 repos, each returning 64 tags → without aggregate cap: 50×64 = 3200 entries
+        int repoCount = 50;
+        int tagsPerRepo = 64;
+
+        // Build catalog JSON: {"repositories":["repo0","repo1",...,"repo49"]}
+        StringBuilder catalogBuilder = new StringBuilder("{\"repositories\":[");
+        for (int i = 0; i < repoCount; i++) {
+            if (i > 0) catalogBuilder.append(",");
+            catalogBuilder.append("\"repo").append(i).append("\"");
+        }
+        catalogBuilder.append("]}");
+        String catalogJson = catalogBuilder.toString();
+
+        // Build a tags response with tagsPerRepo tags for any repo
+        StringBuilder tagsBuilder = new StringBuilder();
+        tagsBuilder.append("{\"name\":\"repo\",\"tags\":[");
+        for (int t = 0; t < tagsPerRepo; t++) {
+            if (t > 0) tagsBuilder.append(",");
+            tagsBuilder.append("\"tag").append(t).append("\"");
+        }
+        tagsBuilder.append("]}");
+        String tagsJson = tagsBuilder.toString();
+
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/v2/_catalog")) return Optional.of(catalogJson);
+            // All repos return the same tag list
+            if (path.endsWith("/tags/list")) return Optional.of(tagsJson);
+            return Optional.empty();
+        });
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // registry_images must be set (some data was stored)
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        String images = reloadedHost.getRegistryImages();
+        assertThat(images)
+            .as("registry_images must be non-blank — at least some repos were probed")
+            .isNotBlank();
+
+        // Count total entries in the blob (comma-separated)
+        // Without an aggregate cap this would be 50×64 = 3200 — far above 2000.
+        // The implementer must add a MAX_IMAGES_TOTAL constant (value <= 2000) and
+        // break the accumulation loop once that bound is reached.
+        long totalEntries = java.util.Arrays.stream(images.split(","))
+            .filter(s -> !s.isBlank())
+            .count();
+
+        assertThat(totalEntries)
+            .as("total registry_images entry count must be <= 2000 across ALL repos "
+                + "(implementer must add MAX_IMAGES_TOTAL aggregate cap; "
+                + "50 repos × 64 tags = 3200 without the cap — clearly above 2000)")
+            .isLessThanOrEqualTo(2000);
+    }
+
+    // -----------------------------------------------------------------------
+    // R5 — 200-OK/empty-items secrets still CRITICAL (characterization, GREEN)
+    //
+    // probeK8s: pods blocked (empty) → falls into the escalation else-branch →
+    // getSecrets called → returns 200 with body {"kind":"SecretList","items":[]}
+    // (a non-empty body string). The secretsOpt.isPresent() check fires on a
+    // non-empty string regardless of item count → CRITICAL must still be raised.
+    // -----------------------------------------------------------------------
+
+    /**
+     * When pod-list is blocked AND secrets endpoint returns a 200 with an EMPTY items
+     * array (body is {@code {"kind":"SecretList","items":[]}}), the finding must still
+     * be CRITICAL.
+     *
+     * <p>Rationale: {@code secretsOpt.isPresent()} triggers on ANY non-empty body string.
+     * Anonymous access to the secrets endpoint is itself a CRITICAL breach, regardless
+     * of whether the current secret set happens to be empty. The probe tests reachability
+     * of the privileged path, not the cardinality of secrets.
+     *
+     * <p><b>GREEN</b> — the existing {@code if (secretsOpt.isPresent())} logic already
+     * handles this correctly; this test locks the behaviour against future regression.
+     */
+    @Test
+    void k8sApi6443_podsBlocked_secretsEmptyItems_stillCritical() {
+        String probedIp = "10.0.3.2";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // 200-OK secrets response with an empty items array (non-empty body string)
+        String emptySecretListJson = "{\"kind\":\"SecretList\",\"items\":[]}";
+
+        K8sApiClient k8sClient = new K8sApiClient(uri -> {
+            String path = uri.getPath();
+            if ("/api/v1/pods".equals(path)) {
+                return Optional.empty(); // pods blocked
+            }
+            if (path.startsWith("/api/v1/namespaces/") && path.endsWith("/secrets")) {
+                return Optional.of(emptySecretListJson); // 200 with empty items
+            }
+            return Optional.empty();
+        });
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_6443 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // :6443 must carry a CRITICAL finding even though the SecretList items array is empty
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_6443, "tcp");
+        assertThat(svc)
+            .as(":6443 NetworkService must exist after empty-items secrets probe")
+            .isPresent();
+        assertThat(svc.get().getPostureSeverity())
+            .as("anonymous access to secrets endpoint is CRITICAL regardless of item count "
+                + "(empty items list still proves the path is reachable without auth)")
+            .isEqualTo(DockerHostProbeService.SEVERITY_CRITICAL);
+        assertThat(svc.get().getProtocolFamily())
+            .isEqualTo(DockerHostProbeService.PROTOCOL_FAMILY_K8S_API_EXPOSURE);
+    }
+
+    // -----------------------------------------------------------------------
+    // R5 — getSecrets NOT called when pods succeed (characterization, GREEN)
+    //
+    // probeK8s: anonymous pod-read succeeds (podsOpt.isPresent()) → CRITICAL via
+    // the first branch → the else-branch (getSecrets escalation) must NOT be entered.
+    // This guards against accidental removal of the `else` gate.
+    // -----------------------------------------------------------------------
+
+    /**
+     * When anonymous pod-list succeeds (returns a non-empty body), the escalation
+     * branch ({@code getSecrets}) must NOT be called.
+     *
+     * <p>The probe logic is:
+     * <pre>
+     *   if (podsOpt.isPresent()) { CRITICAL; ingest; }
+     *   else { getSecrets(...); ... }
+     * </pre>
+     * The {@code else} gate ensures the secrets escalation only fires when pods are
+     * blocked. If the gate were removed, a successful pod-read would additionally
+     * invoke {@code getSecrets}, causing an unnecessary privileged request on every
+     * open cluster.
+     *
+     * <p><b>GREEN</b> — the existing {@code else} gate already prevents double-dispatch;
+     * this test locks the invariant.
+     */
+    @Test
+    void k8sApi6443_podsSucceed_secretsNotCalled() throws Exception {
+        String probedIp = "10.0.3.3";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        String k8sPodsJson = new String(
+            DockerHostProbeServiceTest.class.getResourceAsStream("/k8s/k8s-pods.json").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8);
+
+        java.util.concurrent.atomic.AtomicInteger secretsCallCount =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+        K8sApiClient k8sClient = new K8sApiClient(uri -> {
+            String path = uri.getPath();
+            if ("/api/v1/pods".equals(path)) {
+                return Optional.of(k8sPodsJson); // pods succeed
+            }
+            if (path.startsWith("/api/v1/namespaces/") && path.endsWith("/secrets")) {
+                secretsCallCount.incrementAndGet();
+                return Optional.of("{\"kind\":\"SecretList\",\"items\":[]}");
+            }
+            return Optional.empty();
+        });
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_6443 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // Pod-read succeeded → CRITICAL finding via first branch
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_6443, "tcp");
+        assertThat(svc).isPresent();
+        assertThat(svc.get().getPostureSeverity()).isEqualTo(DockerHostProbeService.SEVERITY_CRITICAL);
+
+        // The escalation else-branch must NOT have fired
+        assertThat(secretsCallCount.get())
+            .as("getSecrets must NOT be called when pod-list already succeeded — "
+                + "else-gate in probeK8s must be preserved")
+            .isEqualTo(0);
+    }
 }
