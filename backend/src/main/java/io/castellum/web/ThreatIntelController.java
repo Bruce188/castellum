@@ -5,6 +5,7 @@ import io.castellum.threatintel.ExportJobService;
 import io.castellum.threatintel.ThreatIntelService;
 import io.castellum.web.dto.MispPushResponseDto;
 import io.castellum.web.dto.TaxiiPushResponseDto;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -79,7 +80,8 @@ public class ThreatIntelController {
      */
     @GetMapping("/export/async/{jobId}")
     @PreAuthorize("hasAnyRole('ADMIN','VIEWER')")
-    public ResponseEntity<StreamingResponseBody> getExportAsync(@PathVariable String jobId) {
+    public ResponseEntity<StreamingResponseBody> getExportAsync(
+            @PathVariable String jobId, HttpServletResponse response) throws IOException {
         Optional<ExportJob> found = exportJobService.get(jobId);
         if (found.isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -87,20 +89,29 @@ public class ThreatIntelController {
         ExportJob job = found.get();
 
         if (job.status() == ExportJob.Status.DONE) {
+            // Stream the (potentially large) bundle file so it is never fully buffered in heap.
+            // Spring dispatches this branch asynchronously because a non-null StreamingResponseBody
+            // is returned; the status branch below returns null, keeping that poll synchronous.
             Path file = Path.of(job.filePath());
+            long fileSize = Files.size(file);
             StreamingResponseBody stream = (OutputStream out) -> Files.copy(file, out);
             return ResponseEntity.ok()
                     .contentType(MediaType.APPLICATION_JSON)
+                    .contentLength(fileSize)
                     .body(stream);
         }
 
-        // PENDING / RUNNING / FAILED — return status JSON
-        String json = buildStatusJson(job);
-        StreamingResponseBody stream = (OutputStream out) ->
-                out.write(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(stream);
+        // PENDING / RUNNING / FAILED — small status payload written synchronously to the response.
+        // Returning it as a StreamingResponseBody would force the same async dispatch as the DONE
+        // branch; status pollers issue a single GET and read the body immediately (no async
+        // dispatch), so an async body would arrive racily. Writing the bytes directly keeps the
+        // poll fully synchronous; returning null tells Spring the response is already handled.
+        byte[] payload = buildStatusJson(job).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        response.setStatus(HttpStatus.OK.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setContentLength(payload.length);
+        response.getOutputStream().write(payload);
+        return null;
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────
@@ -117,9 +128,30 @@ public class ThreatIntelController {
     }
 
     private static String jsonEscape(String s) {
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r");
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"'  -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                // U+2028/U+2029 are legal raw in JSON but break JS string literals in legacy
+                // engines if the bundle is ever interpolated into a script context — escape them.
+                case 0x2028 -> sb.append("\\u2028");
+                case 0x2029 -> sb.append("\\u2029");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 }
