@@ -27,4 +27,4 @@ cp frontend-topology-ui-detail.png /home/bruce/projects/castellum/documentation/
 rm /home/bruce/projects/castellum/documentation/img/frontend-topology-ui-detail.png.TODO.md
 ```
 
-See `documentation/frontend-topology-ui.md` Visual reference section for context.
+See `documentation/frontend-topology-ui.html` Visual reference section for context.

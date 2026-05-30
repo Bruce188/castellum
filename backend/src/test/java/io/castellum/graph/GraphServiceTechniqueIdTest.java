@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
  * <p>Tested at the {@link GraphService} unit level because the in-graph weight model
  * (SAME_SUBNET weight 1.0 ≤ EXPLOITABLE_VULN min weight 1.0) makes a Dijkstra path that
  * actually traverses an EXPLOITABLE_VULN edge unreachable end-to-end through the public
- * REST surface in the current model — see analysis-v15 D1=R / documentation/attack-graph.md
+ * REST surface in the current model — see analysis-v15 D1=R / documentation/attack-graph.html
  * § "Acceptance test note". This test mocks the {@link ShortestPathFinder} so the response
  * builder is exercised over an EXPLOITABLE_VULN edge directly, proving the field is read.
  */

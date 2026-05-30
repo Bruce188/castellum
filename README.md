@@ -32,7 +32,7 @@ Full threat model: [documentation/threat-model.html](documentation/threat-model.
 
 ## Compliance Posture
 
-Full NIST 800-53 mapping: [documentation/compliance.md](documentation/compliance.md)
+Full NIST 800-53 mapping: [documentation/compliance.html](documentation/compliance.html)
 
 Mapped control families: AC (access control), AU (audit), CM (configuration), IA (authentication), RA (vulnerability scanning), SC (cryptography), SI (integrity), SR (supply chain).
 
@@ -47,7 +47,7 @@ Mapped control families: AC (access control), AU (audit), CM (configuration), IA
 
 ## NATO Context
 
-Full alignment notes: [documentation/stanag-notes.md](documentation/stanag-notes.md)
+Full alignment notes: [documentation/stanag-notes.html](documentation/stanag-notes.html)
 
 > This section is not based on restricted-circulation directive text. Alignment with NATO standards is aspirational, based on public NATO communications only.
 
@@ -61,7 +61,7 @@ The MISP push capability (`POST /api/threat-intel/push/misp`) is the natural int
 
 ![Castellum scans a /24, discovers devices, fingerprints OT endpoints, scores risk, computes the shortest exploit path, exports a STIX 2.1 bundle, and pushes to MISP](documentation/img/demo.gif)
 
-*The GIF above is a placeholder pending live recording. See [documentation/demo-script.md](documentation/demo-script.md) for the full 3-minute storyboard with cue-by-cue voice-over text, curl commands for each beat, and the ffmpeg pipeline for GIF capture.*
+*The GIF above is a placeholder pending live recording. See [documentation/demo-script.html](documentation/demo-script.html) for the full 3-minute storyboard with cue-by-cue voice-over text, curl commands for each beat, and the ffmpeg pipeline for GIF capture.*
 
 ---
 
@@ -75,7 +75,7 @@ Application docs live under `documentation/`; the `docs/` directory is workflow 
 | Passive discovery | `discovery/` | pcap4j ARP sniffer, mDNS probe, LLDP/CDP decoder, ARP cache reader |
 | Threat-intel ingest | `cve/`, `risk/` | Local NVD mirror (V2.0 API), EPSS daily fetch, CISA KEV ingestion |
 | Risk scorer | `risk/CompositeScorer` | Pure function: CVSS × EPSS × KEV × criticality, range [0, 10] |
-| Attack graph | `graph/` | JGraphT DijkstraShortestPath; ATT&CK technique annotation per edge — see [documentation/attack-graph.md](documentation/attack-graph.md) |
+| Attack graph | `graph/` | JGraphT DijkstraShortestPath; ATT&CK technique annotation per edge — see [documentation/attack-graph.html](documentation/attack-graph.html) |
 | OT/ICS probes | `ot/` | Read-only Modbus/TCP, DNP3, S7comm, BACnet/IP fingerprinters |
 | Threat-intel export | `threatintel/` | STIX 2.1 bundle assembly, TAXII 2.1 push, MISP push |
 | Auth/RBAC | `security/` | JWT HS256, BCrypt-12, ADMIN/VIEWER roles, bootstrap initializer |
@@ -125,7 +125,7 @@ For the full operator runbook — including Suricata wiring, TLS termination wit
 bash scripts/build-and-scan.sh
 ```
 
-See [documentation/supply-chain.md](documentation/supply-chain.md) for the full supply-chain posture, including SBOM artifact locations and cosign signing procedure.
+See [documentation/supply-chain.html](documentation/supply-chain.html) for the full supply-chain posture, including SBOM artifact locations and cosign signing procedure.
 
 ---
 
@@ -135,7 +135,7 @@ Full documentation for auth and RBAC: [documentation/auth.html](documentation/au
 OT probe reference: [documentation/ot-probes.html](documentation/ot-probes.html)
 STIX/TAXII/MISP reference: [documentation/threat-intel-integrations.html](documentation/threat-intel-integrations.html)
 Runtime flags (pcap4j, CAP_NET_RAW): [documentation/runtime-flags.html](documentation/runtime-flags.html)
-Supply-chain pipeline: [documentation/supply-chain.md](documentation/supply-chain.md)
+Supply-chain pipeline: [documentation/supply-chain.html](documentation/supply-chain.html)
 
 All endpoints except `POST /api/auth/login` and `GET /actuator/health` require `Authorization: Bearer <token>`.
 

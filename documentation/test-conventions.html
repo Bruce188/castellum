@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Runtime Flags &amp; Native Dependencies — Castellum — pipelinekit</title>
-<meta name="description" content="Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.">
+<title>Test Conventions — Castellum — pipelinekit</title>
+<meta name="description" content="Castellum backend test conventions: the inline OASIS STIX 2.1 JSON schema refresh cadence, the load-bearing slice-test @Import set for @PreAuthorize controllers, the cap-net-raw-smoke Maven profile and its skip semantics, and the H2 context-isolation @DirtiesContext pattern.">
 <meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
 <style>
 /* === Reset + variables === */
@@ -598,7 +598,7 @@ footer {
     <span>pipelinekit docs</span>
   </a>
   <div class="crumbs">
-    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Runtime Flags &amp; Native Dependencies — Castellum</span>
+    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Test Conventions — Castellum</span>
   </div>
   <div class="search-box">
     <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -619,92 +619,122 @@ footer {
   <aside class="toc" id="toc">
     <h2 class="toc-heading">On this page</h2>
     <ul>
-      <li class="lvl-2"><a href="#1-jvm-flags">1. JVM flags</a></li>
-      <li class="lvl-2"><a href="#2-linux-capability">2. Linux capability</a></li>
-      <li class="lvl-2"><a href="#3-native-library">3. Native library</a></li>
-      <li class="lvl-2"><a href="#4-distroless-base-resolved">4. Distroless base (resolved)</a></li>
-      <li class="lvl-2"><a href="#5-linux-only-contract-for-v1">5. Linux-only contract for v1</a></li>
-      <li class="lvl-2"><a href="#6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</a></li>
-      <li class="lvl-2"><a href="#7-environment-variables">7. Environment variables</a></li>
-      <li class="lvl-3"><a href="#castellum-integration-key">CASTELLUM_INTEGRATION_KEY</a></li>
-      <li class="lvl-3"><a href="#castellum-jwt-secret">CASTELLUM_JWT_SECRET</a></li>
-      <li class="lvl-3"><a href="#castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</a></li>
+      <li class="lvl-2"><a href="#stix-21-schemas-refresh-cadence">STIX 2.1 schemas — refresh cadence</a></li>
+      <li class="lvl-2"><a href="#slice-test-imports-for-preauthorize-controllers">Slice-test imports for <code>@PreAuthorize</code> controllers</a></li>
+      <li class="lvl-2"><a href="#maven-profile-cap-net-raw-smoke">Maven profile <code>cap-net-raw-smoke</code></a></li>
+      <li class="lvl-2"><a href="#h2-context-isolation-pattern">H2 context-isolation pattern</a></li>
     </ul>
   </aside>
 
   <main>
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
-      <h1>Runtime Flags &amp; Native Dependencies</h1>
-      <p class="description">Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.</p>
-      <div class="page-meta"><span class="meta-item"><strong>Section:</strong> operations</span> · <span class="meta-item"><strong>Audience:</strong> operators &amp; sysadmins</span></div>
+      <h1>Test Conventions</h1>
+      <p class="description">Castellum backend test conventions: the inline OASIS STIX 2.1 JSON schema refresh cadence, the load-bearing slice-test <code>@Import</code> set for <code>@PreAuthorize</code> controllers, the <code>cap-net-raw-smoke</code> Maven profile and its skip semantics, and the H2 context-isolation <code>@DirtiesContext</code> pattern.</p>
+      <div class="page-meta"><span class="meta-item"><strong>Section:</strong> testing</span> · <span class="meta-item"><strong>Audience:</strong> backend developers</span></div>
     </header>
 
     <div id="page-content">
-<blockquote>
-<p>[NOTE] <strong>TODO (feature 9):</strong> wire the JVM flags into the <code>ENTRYPOINT java</code> line. The distroless base is resolved — see §4.</p>
-</blockquote>
-<p>This document is the single source of truth for the pcap4j runtime requirements introduced in feature 4 (<code>feat/passive-discovery</code>). Feature 9 (<code>feat/security-hardening-and-supply-chain</code>) will read from this file when wiring the production Dockerfile.</p>
-<h2 id="1-jvm-flags">1. JVM flags</h2>
-<p>The pcap4j 1.8.x library uses JNA to call into the native <code>libpcap.so</code> library. JNA reflectively accesses internals of <code>sun.nio.ch</code> and triggers JDK 21's restricted-native-access guard. Two JVM flags are required:</p>
+<h2 id="stix-21-schemas-refresh-cadence">STIX 2.1 schemas — refresh cadence</h2>
+<p>The repository ships inline OASIS STIX 2.1 JSON schemas under
+<code>backend/src/test/resources/schemas/stix-2.1/</code>. This is a sandboxed-
+network workaround: tests must validate generated STIX bundles without
+making live HTTPS calls to <code>raw.githubusercontent.com</code>.</p>
+<p>To refresh:</p>
+<div class="codehilite"><pre><code class="language-bash">bash scripts/refresh-stix-schemas.sh
+cd backend &amp;&amp; ./mvnw test -Dtest=StixBundleSchemaTest
+</code></pre></div>
+<p>Run the refresh on STIX-spec point releases (~12-month cadence) or
+whenever <code>StixBundleSchemaTest</code> reports a structural mismatch traced to
+a spec change. Commit the refreshed schemas in the same change as the
+bundle producer update; do NOT commit live-network test fixtures.</p>
+<p>A future CI workflow should invoke the refresh and run the bundle
+schema test as a single gate:</p>
+<div class="codehilite"><pre><code class="language-bash">bash scripts/refresh-stix-schemas.sh &amp;&amp; cd backend &amp;&amp; ./mvnw test
+</code></pre></div>
+<h2 id="slice-test-imports-for-preauthorize-controllers">Slice-test imports for <code>@PreAuthorize</code> controllers</h2>
+<p><code>@WebMvcTest(&lt;Controller&gt;.class)</code> does not autowire <code>SecurityConfig</code> by
+default. Without it, slice tests run with method-level <code>@PreAuthorize</code>
+silently disabled — every request appears authenticated and ADMIN-only
+endpoints return 200 instead of 403 for unprivileged callers. The
+required imports for any slice test of a <code>@PreAuthorize</code>-protected
+controller are:</p>
+<!-- @Import(SecurityConfig.class) is load-bearing: @WebMvcTest without it causes 403 checks to be silently skipped. -->
+<div class="codehilite"><pre><code class="language-java">@Import({SecurityConfig.class, JwtAuthenticationFilter.class,
+         RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class})
+</code></pre></div>
+<p>Plus <code>@MockBean</code> declarations for <code>JwtService</code>, <code>UserRepository</code>,
+<code>CastellumUserDetailsService</code>, and the controller's service collaborator.</p>
+<p>This idiom is load-bearing across every slice test in
+<code>backend/src/test/java/io/castellum/web/</code> and
+<code>backend/src/test/java/io/castellum/security/</code>. Adding a new slice test
+without the four <code>@Import</code>s causes role enforcement to be silently
+permissive — tests pass even when the production controller would 403.</p>
+<p>Anonymous-401 cases inside an <code>@WithMockUser</code>-annotated class use
+<code>SecurityMockMvcRequestPostProcessors.anonymous()</code> to override the
+class-level <code>@WithMockUser</code> on a per-request basis:</p>
+<div class="codehilite"><pre><code class="language-java">import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
+
+@Test
+void anon_returns401() throws Exception {
+    mvc.perform(get(&quot;/api/devices&quot;).with(anonymous()))
+        .andExpect(status().isUnauthorized());
+}
+</code></pre></div>
+<h2 id="maven-profile-cap-net-raw-smoke">Maven profile <code>cap-net-raw-smoke</code></h2>
+<p>The default <code>cd backend &amp;&amp; ./mvnw test</code> profile does NOT run the
+container-cap smoke test. To run it (CI or operator):</p>
+<div class="codehilite"><pre><code class="language-bash">docker build -t castellum:latest .
+cd backend &amp;&amp; ./mvnw -P cap-net-raw-smoke test -Dtest=CapNetRawSmokeTest
+</code></pre></div>
+<p>The test additionally <code>Assumptions.abort</code>s when:</p>
 <ul>
-<li><code>--enable-native-access=ALL-UNNAMED</code></li>
-<li><code>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</code></li>
+<li><code>docker --version</code> is not available (Docker not installed).</li>
+<li><code>docker image inspect castellum:latest</code> exits non-zero (image not
+built).</li>
 </ul>
-<p>These flags are wired in <strong>Maven Surefire</strong> (<code>backend/pom.xml</code> → <code>&lt;build&gt;&lt;plugins&gt;</code> → <code>maven-surefire-plugin</code> → <code>&lt;argLine&gt;</code>) so tests run with the same flag set as production.</p>
-<p>When feature 9 lands the production Dockerfile, the <code>ENTRYPOINT java</code> line MUST include both flags. Example:</p>
-<div class="codehilite"><pre><code class="language-dockerfile">ENTRYPOINT ["java", \
-  "--enable-native-access=ALL-UNNAMED", \
-  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED", \
-  "-jar", "/app/backend.jar"]
+<p>In either case JUnit reports the test as skipped, not failed. The
+default <code>mvn test</code> profile runs without ever activating the
+<code>castellum.cap-net-raw-smoke</code> system property, so <code>CapNetRawSmokeTest</code>
+remains disabled (<code>@EnabledIfSystemProperty</code> evaluates to false) and is
+absent from the default test count.</p>
+<h2 id="h2-context-isolation-pattern">H2 context-isolation pattern</h2>
+<p>The default H2 datasource (<code>jdbc:h2:mem:test</code>) is shared across every
+Spring test context in the JVM. When one <code>@SpringBootTest</code> class uses
+<code>@DirtiesContext</code> to evict its context, Spring closes the
+<code>HikariDataSource</code> and H2 drops the in-memory schema. Subsequent
+<code>@SpringBootTest</code> classes that reuse the same context cache key get a
+live <code>EntityManagerFactory</code> pointing at a schema-less H2, which
+manifests as <code>JdbcSQLSyntaxErrorException: Table &quot;...&quot; not found</code>
+errors deep inside repository calls. The failures are order-dependent
+and do not reproduce when classes run individually.</p>
+<p>Mitigation: every <code>@SpringBootTest</code>-annotated test class adds
+<code>@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)</code> at
+the class level. This forces Spring to close the context (and the
+underlying H2 datasource) after the class finishes, so the next class
+that triggers context loading rebuilds the schema from scratch via
+Hibernate <code>ddl-auto=create-drop</code> or the Flyway-managed migration
+sequence (depending on the class).</p>
+<div class="codehilite"><pre><code class="language-java">import org.springframework.test.annotation.DirtiesContext;
+
+@SpringBootTest
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+class MyIntegrationTest { ... }
 </code></pre></div>
-<h2 id="2-linux-capability">2. Linux capability</h2>
-<p>The PCAP source (<code>PcapSniffer</code>) opens raw sockets via libpcap. Raw-socket open requires the <code>CAP_NET_RAW</code> Linux capability.</p>
-<p>The production container MUST run with <code>CAP_NET_RAW</code> and <strong>all other capabilities dropped</strong>. Example Docker run:</p>
-<div class="codehilite"><pre><code class="language-bash">docker run --cap-drop=ALL --cap-add=NET_RAW castellum:latest
-</code></pre></div>
-<p>Equivalent Kubernetes <code>securityContext</code>:</p>
-<div class="codehilite"><pre><code class="language-yaml">securityContext:
-  capabilities:
-    drop: ["ALL"]
-    add: ["NET_RAW"]
-</code></pre></div>
-<p>The ARP and MDNS sources do NOT require <code>CAP_NET_RAW</code>. ARP reads <code>/proc/net/arp</code> (filesystem only). MDNS uses the JVM's standard multicast socket.</p>
-<h2 id="3-native-library">3. Native library</h2>
-<p><code>libpcap.so</code> (Linux package: <code>libpcap0.8</code>, version &gt;= 1.0.0). NOT a Maven dependency — provided by the host OS or container layer.</p>
-<p>On Debian/Ubuntu: <code>apt-get install libpcap0.8</code>.</p>
-<h2 id="4-distroless-base-resolved">4. Distroless base (resolved)</h2>
-<blockquote>
-<p>[NOTE] <strong>Resolved.</strong> The production image is built on the Debian-12 distroless variant, which ships <code>libpcap</code>, so the PCAP source works in containerized deployments. The earlier "pure-distroless lacks <code>libpcap</code>" caveat no longer applies.</p>
-</blockquote>
-<p>The repository <code>Dockerfile</code> pins the final stage to:</p>
-<div class="codehilite"><pre><code class="language-dockerfile">FROM gcr.io/distroless/java21-debian12:${DISTROLESS_VARIANT}
-</code></pre></div>
-<p>with <code>ARG DISTROLESS_VARIANT=nonroot</code>. Unlike the pure <code>gcr.io/distroless/java21</code> image, the <code>java21-debian12</code> variant is built on Debian 12 (bookworm) and includes the <code>libpcap</code> shared library, so the pcap4j → JNA → <code>libpcap.so</code> path resolves at runtime without an additional package-install layer. No <code>apt-get install libpcap0.8</code> step is required, and the choice does not sacrifice the distroless minimal-attack-surface posture (no shell, no package manager) — the Debian-12 distroless variant retains those properties.</p>
-<p>This is the option originally tracked as "(a) drop pure distroless for the Debian-12 distroless base." It is now the committed decision; there is no separate discovery image and no host-deployment-only degradation. See <a href="supply-chain.html">documentation/supply-chain.html</a>, which cites the same <code>gcr.io/distroless/java21-debian12:nonroot</code> base.</p>
-<h2 id="5-linux-only-contract-for-v1">5. Linux-only contract for v1</h2>
-<p><code>/proc/net/arp</code> does not exist on Windows or macOS. The <code>ArpCacheReader</code> returns an empty list when the file is absent (no exception). Future ports could read:</p>
-<ul>
-<li>Windows: <code>GetIpNetTable</code> via JNA.</li>
-<li>macOS: <code>/Library/Preferences/SystemConfiguration/...</code> plus <code>arp -an</code> parsing (sysctl-based).</li>
-</ul>
-<p>Both ports are out of scope for v1. README documents the Linux-only contract operationally.</p>
-<h2 id="6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</h2>
-<p>For systemd or bare-metal deployments where Docker capability dropping is not available, <code>setcap</code> on a Java wrapper script grants <code>CAP_NET_RAW</code> without root:</p>
-<div class="codehilite"><pre><code class="language-bash">sudo setcap cap_net_raw+eip /usr/local/bin/castellum-launcher
-</code></pre></div>
-<p>Caveat: <code>setcap</code> on the JDK binary itself is brittle — <code>java</code> binary updates wipe the capability. Prefer <code>setcap</code> on a wrapper script that exec's the real <code>java</code>.</p>
-<h2 id="7-environment-variables">7. Environment variables</h2>
-<p>Environment-driven configuration. The backend resolves these via Spring's standard <code>Environment</code> bean.</p>
-<h3 id="castellum-integration-key">CASTELLUM_INTEGRATION_KEY</h3>
-<p>AES-256 key (32 bytes, hex- or base64-encoded depending on operator preference; the cipher reads the raw byte length) used to encrypt TAXII / MISP credentials at rest in the <code>integration_config</code> table. Required when the threat-intel-push integrations (TAXII, MISP) are configured. Read by <code>AesGcmCipher</code> at boot — startup fails fast with a clear error if the variable is missing while at least one <code>integration_config</code> row exists. Generation:</p>
-<div class="codehilite"><pre><code class="language-bash">openssl rand -hex 32
-</code></pre></div>
-<p>Rotation is non-trivial: changing the key requires re-encrypting every row in <code>integration_config</code> with the new key. The current implementation does not include a rotation helper; rotation today is "truncate the table, re-enter credentials in the UI under the new key." A future feature will add a <code>ROTATION_KEY</code> env that runs a one-shot re-encrypt on boot.</p>
-<h3 id="castellum-jwt-secret">CASTELLUM_JWT_SECRET</h3>
-<p>HMAC-SHA256 signing key (32+ bytes) for issued JWTs. Read by <code>JwtService</code> at boot. Missing → boot fails with an explicit error. Generate with <code>openssl rand -hex 32</code>. Rotation invalidates every outstanding token instantly; combine with <code>tokenVersion</code> bump in <code>AuthController</code> for per-user invalidation.</p>
-<h3 id="castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</h3>
-<p>Optional. When set on first boot (before the <code>users</code> table has any admin), creates an <code>admin</code> user with this password and marks <code>must_change_password = true</code> so the operator is forced to rotate on first login. Subsequent boots ignore the variable. If unset on first boot, a random 32-character password is generated, logged once at INFO, and the operator must capture it from the log.</p>
+<p><strong>When to escalate to <code>AFTER_EACH_TEST_METHOD</code>:</strong> Only when nested
+<code>@Nested @SpringBootTest</code> classes share mutable field state across
+methods, or when a single test method mutates context-scoped beans in a
+way that contaminates downstream methods in the same class. The
+escalation triggers full context teardown between every <code>@Test</code>, which
+is correct for those rare cases but multiplies the per-class cost by
+the test count. Default to <code>AFTER_CLASS</code> and only escalate after
+observing per-method contamination.</p>
+<p><strong>Cost note:</strong> <code>@DirtiesContext(AFTER_CLASS)</code> adds roughly 3–5 seconds
+per annotated class on a warm JVM (context teardown plus next-class
+reload). Use it for true <code>@SpringBootTest</code> integration classes only;
+slice tests (<code>@WebMvcTest</code>, <code>@DataJpaTest</code>) are scoped narrowly enough
+that the pollution does not surface and the annotation is unnecessary
+overhead there.</p>
     </div>
 
     <div class="no-results" id="no-results">

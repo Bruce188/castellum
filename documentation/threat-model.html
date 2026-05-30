@@ -679,11 +679,11 @@ footer {
 <p>Full mitigations are listed in the <a href="#top-5-mitigations">Top-5 mitigations</a> section. See also:</p>
 <ul>
 <li><a href="auth.html">documentation/auth.html</a> — RBAC matrix, JWT contract, bootstrap admin</li>
-<li><a href="supply-chain.md">documentation/supply-chain.md</a> — distroless, Trivy gate, SBOM</li>
+<li><a href="supply-chain.html">documentation/supply-chain.html</a> — distroless, Trivy gate, SBOM</li>
 <li><a href="ot-probes.html">documentation/ot-probes.html</a> — read-only OT contract</li>
 <li><a href="runtime-flags.html">documentation/runtime-flags.html</a> — CAP_NET_RAW, pcap4j JVM flags</li>
 <li><a href="threat-intel-integrations.html">documentation/threat-intel-integrations.html</a> — export audit trail</li>
-<li><a href="frontend-topology-ui.md">documentation/frontend-topology-ui.md</a> — UI architecture</li>
+<li><a href="frontend-topology-ui.html">documentation/frontend-topology-ui.html</a> — UI architecture</li>
 </ul>
 <hr>
 <h2 id="asset-inventory">Asset Inventory</h2>
@@ -853,7 +853,7 @@ Every <code>POST /api/scan</code> triggers an <code>AuditService.recordEvent</co
 <p><strong>I — Information Disclosure</strong><br>
 Scan results (discovered hosts, open ports, service banners) are stored in the device and network-service tables and returned to any <code>VIEWER</code>+ authenticated user. An over-privileged viewer can enumerate the full network topology. At MVP scale, all authenticated users share the same inventory view — fine-grained per-CIDR ACLs are out of scope for v1.</p>
 <p><strong>D — Denial of Service</strong><br>
-An ADMIN could submit a scan against a large CIDR (e.g. /16) repeatedly, consuming NIC bandwidth and CPU. No per-user rate limiting exists in v1 (see AC-7 compliance non-claim in <a href="compliance.md">documentation/compliance.md</a>). Mitigation at v1: ADMIN role gate reduces the blast radius; operator-level rate limiting at the reverse proxy is recommended.</p>
+An ADMIN could submit a scan against a large CIDR (e.g. /16) repeatedly, consuming NIC bandwidth and CPU. No per-user rate limiting exists in v1 (see AC-7 compliance non-claim in <a href="compliance.html">documentation/compliance.html</a>). Mitigation at v1: ADMIN role gate reduces the blast radius; operator-level rate limiting at the reverse proxy is recommended.</p>
 <p><strong>E — Elevation of Privilege</strong><br>
 The scan controller enforces <code>ADMIN</code> only for scan submission. A VIEWER cannot submit scans. If a future refactor degrades the <code>hasRole('ADMIN')</code> expression to <code>hasAnyRole</code>, VIEWERs would gain scan submission rights — code review must verify the <code>@PreAuthorize</code> annotation is not weakened.</p>
 <hr>
@@ -1007,7 +1007,7 @@ The <code>@PreAuthorize</code> annotations on controller methods define the role
 <p>Package: <code>frontend/src/</code> — React 19 + Cytoscape.js + Vite<br>
 Trust boundary: browser → API; runs in the user's browser security context</p>
 <p><strong>S — Spoofing</strong><br>
-The frontend stores the JWT in <code>localStorage</code> (or <code>sessionStorage</code>). XSS on any page would allow an attacker to steal the JWT and impersonate the user. Mitigation: Content Security Policy header on the API server restricts which scripts can execute; strict input sanitisation prevents injection into the topology graph (node labels from device hostnames or IPs must be escaped before rendering). See <a href="frontend-topology-ui.md">documentation/frontend-topology-ui.md</a>.</p>
+The frontend stores the JWT in <code>localStorage</code> (or <code>sessionStorage</code>). XSS on any page would allow an attacker to steal the JWT and impersonate the user. Mitigation: Content Security Policy header on the API server restricts which scripts can execute; strict input sanitisation prevents injection into the topology graph (node labels from device hostnames or IPs must be escaped before rendering). See <a href="frontend-topology-ui.html">documentation/frontend-topology-ui.html</a>.</p>
 <p><strong>T — Tampering</strong><br>
 The React frontend sends JSON to the REST API. Tampered requests (e.g. CSRF) require a logged-in browser session. CSRF mitigation: the API uses stateless JWT bearer tokens, not session cookies — CSRF attacks require the attacker to steal the Bearer token, which requires XSS. The double-submit CSRF pattern is not needed for pure JWT bearer APIs.</p>
 <p><strong>R — Repudiation</strong><br>
@@ -1056,12 +1056,12 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 <p>The <code>AuditLogRepository</code> interface exposes only <code>save</code> and read methods — no <code>delete*</code> or <code>update*</code> methods. This design ensures that once an audit record is written, the application cannot modify or delete it through normal code paths. Database-level protection (restricting the application DB user's privileges on the <code>audit_log</code> table to <code>INSERT</code> and <code>SELECT</code> only) completes the control. See Module 9 Tampering note.</p>
 <h3 id="m5-distroless-cap-net-raw-only">5. Distroless + CAP_NET_RAW only (<code>supply-chain/Dockerfile</code>)</h3>
 <p>The final container image uses <code>gcr.io/distroless/java21-debian12:nonroot</code> — no shell, no package manager, no debugging tools. The container is started with <code>--cap-drop=ALL --cap-add=NET_RAW</code> (or equivalently, <code>cap_add: [NET_RAW]</code> in Compose), granting only the capability required for passive packet capture. A shell-based container breakout is not possible when there is no shell. CAP_NET_RAW is the only elevated capability in the container.</p>
-<p>See <a href="supply-chain.md">documentation/supply-chain.md</a> for the full supply-chain posture.</p>
+<p>See <a href="supply-chain.html">documentation/supply-chain.html</a> for the full supply-chain posture.</p>
 <hr>
 <h2 id="out-of-scope-adversaries">Out-of-Scope Adversaries</h2>
 <p>The following adversary classes are explicitly out of scope for Castellum v1. Claiming protection against them would be dishonest given the current implementation.</p>
 <h3 id="nation-state-supply-chain-compromise">Nation-state supply-chain compromise</h3>
-<p>Castellum does not implement SLSA level 3 provenance. The Maven build is not hermetically reproducible — builds depend on Maven Central at compile time. The cosign signing step is operator-driven (not automated in CI). An attacker who can inject a malicious dependency into Maven Central, the Eclipse Temurin JDK base image, or the distroless base image would compromise Castellum silently. The SBOM and Trivy gate provide visibility into known CVEs in dependencies but do not prevent novel supply-chain attacks. See <a href="supply-chain.md">documentation/supply-chain.md</a> §Known limitations.</p>
+<p>Castellum does not implement SLSA level 3 provenance. The Maven build is not hermetically reproducible — builds depend on Maven Central at compile time. The cosign signing step is operator-driven (not automated in CI). An attacker who can inject a malicious dependency into Maven Central, the Eclipse Temurin JDK base image, or the distroless base image would compromise Castellum silently. The SBOM and Trivy gate provide visibility into known CVEs in dependencies but do not prevent novel supply-chain attacks. See <a href="supply-chain.html">documentation/supply-chain.html</a> §Known limitations.</p>
 <h3 id="insider-with-root-access">Insider with root access</h3>
 <p>An operator who has <code>root</code> on the Castellum host or a DBA connection to the Postgres instance can bypass every application-level control. The audit log can be deleted, the JWT secret read from the environment, and all data exfiltrated. Castellum provides no protection against a malicious insider with OS-level access. This is a deployment context responsibility, not an application responsibility.</p>
 <h3 id="physical-access">Physical access</h3>
@@ -1083,7 +1083,7 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 <td>JWT contract, RBAC matrix, bootstrap admin procedure, secret rotation</td>
 </tr>
 <tr>
-<td><a href="supply-chain.md">documentation/supply-chain.md</a></td>
+<td><a href="supply-chain.html">documentation/supply-chain.html</a></td>
 <td>Distroless image, Trivy gate, SBOM, cosign signing, known limitations</td>
 </tr>
 <tr>
@@ -1099,15 +1099,15 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 <td>Threat-intel export audit trail, TAXII/MISP push configuration</td>
 </tr>
 <tr>
-<td><a href="frontend-topology-ui.md">documentation/frontend-topology-ui.md</a></td>
+<td><a href="frontend-topology-ui.html">documentation/frontend-topology-ui.html</a></td>
 <td>Frontend architecture, XSS surface, topology graph rendering</td>
 </tr>
 <tr>
-<td><a href="compliance.md">documentation/compliance.md</a></td>
+<td><a href="compliance.html">documentation/compliance.html</a></td>
 <td>NIST 800-53 control mapping informed by this threat model</td>
 </tr>
 <tr>
-<td><a href="stanag-notes.md">documentation/stanag-notes.md</a></td>
+<td><a href="stanag-notes.html">documentation/stanag-notes.html</a></td>
 <td>NATO vocabulary alignment, NCIRC context</td>
 </tr>
 </tbody>

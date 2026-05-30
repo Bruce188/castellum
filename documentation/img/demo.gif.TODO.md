@@ -61,4 +61,4 @@ cp demo.gif /home/bruce/projects/castellum/documentation/img/demo.gif
 rm /home/bruce/projects/castellum/documentation/img/demo.gif.TODO.md
 ```
 
-See `documentation/demo-script.md` §Recording procedure for the full voice-over script.
+See `documentation/demo-script.html` §Recording procedure for the full voice-over script.

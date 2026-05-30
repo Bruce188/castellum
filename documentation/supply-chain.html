@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Runtime Flags &amp; Native Dependencies — Castellum — pipelinekit</title>
-<meta name="description" content="Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.">
+<title>Supply Chain — Castellum — pipelinekit</title>
+<meta name="description" content="Castellum supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction via cyclonedx-maven-plugin and syft, operator-driven cosign signing, the distroless Dockerfile rationale, recommended docker run and Kubernetes runtime, the Trivy gating policy, and the explicit non-claims and known limitations.">
 <meta name="generator" content="pipelinekit docs-writer/2 — rich-template">
 <style>
 /* === Reset + variables === */
@@ -588,7 +588,7 @@ footer {
   pre { page-break-inside: avoid; }
 }
 </style>
-<!-- richness-exempt: operational runbook — env-var tables, CLI recipes, and reverse-proxy config; not a tutorial / lifecycle / catalog page. The interactive snippets are intended for higher-level conceptual pages. -->
+<!-- richness-exempt: operational runbook — build-pipeline steps, Dockerfile rationale, CLI recipes, and gating policy; not a tutorial / lifecycle / catalog page. The interactive snippets are intended for higher-level conceptual pages. -->
 </head>
 <body>
 
@@ -598,7 +598,7 @@ footer {
     <span>pipelinekit docs</span>
   </a>
   <div class="crumbs">
-    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Runtime Flags &amp; Native Dependencies — Castellum</span>
+    <a href="index.html">Home</a> &nbsp;/&nbsp; <span>Supply Chain — Castellum</span>
   </div>
   <div class="search-box">
     <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -619,92 +619,249 @@ footer {
   <aside class="toc" id="toc">
     <h2 class="toc-heading">On this page</h2>
     <ul>
-      <li class="lvl-2"><a href="#1-jvm-flags">1. JVM flags</a></li>
-      <li class="lvl-2"><a href="#2-linux-capability">2. Linux capability</a></li>
-      <li class="lvl-2"><a href="#3-native-library">3. Native library</a></li>
-      <li class="lvl-2"><a href="#4-distroless-base-resolved">4. Distroless base (resolved)</a></li>
-      <li class="lvl-2"><a href="#5-linux-only-contract-for-v1">5. Linux-only contract for v1</a></li>
-      <li class="lvl-2"><a href="#6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</a></li>
-      <li class="lvl-2"><a href="#7-environment-variables">7. Environment variables</a></li>
-      <li class="lvl-3"><a href="#castellum-integration-key">CASTELLUM_INTEGRATION_KEY</a></li>
-      <li class="lvl-3"><a href="#castellum-jwt-secret">CASTELLUM_JWT_SECRET</a></li>
-      <li class="lvl-3"><a href="#castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</a></li>
+      <li class="lvl-2"><a href="#overview">Overview</a></li>
+      <li class="lvl-2"><a href="#build-pipeline">Build pipeline</a></li>
+      <li class="lvl-3"><a href="#running-the-pipeline">Running the pipeline</a></li>
+      <li class="lvl-2"><a href="#dockerfile-rationale">Dockerfile rationale</a></li>
+      <li class="lvl-3"><a href="#multi-stage-layout">Multi-stage layout</a></li>
+      <li class="lvl-3"><a href="#distroless-choice">Distroless choice</a></li>
+      <li class="lvl-3"><a href="#nonroot-vs-debug-nonroot"><code>:nonroot</code> vs <code>:debug-nonroot</code></a></li>
+      <li class="lvl-2"><a href="#operator-runtime">Operator runtime</a></li>
+      <li class="lvl-3"><a href="#recommended-docker-run-invocation">Recommended <code>docker run</code> invocation</a></li>
+      <li class="lvl-3"><a href="#kubernetes-example">Kubernetes example</a></li>
+      <li class="lvl-2"><a href="#cosign-procedure">Cosign procedure</a></li>
+      <li class="lvl-3"><a href="#key-pair-signing">Key-pair signing</a></li>
+      <li class="lvl-3"><a href="#kms-backed-signing-recommended-for-production">KMS-backed signing (recommended for production)</a></li>
+      <li class="lvl-2"><a href="#trivy-gating-policy">Trivy gating policy</a></li>
+      <li class="lvl-3"><a href="#upgrade-path">Upgrade path</a></li>
+      <li class="lvl-2"><a href="#sbom">SBOM</a></li>
+      <li class="lvl-2"><a href="#explicit-non-claims">Explicit non-claims</a></li>
+      <li class="lvl-2"><a href="#known-limitations">Known limitations</a></li>
+      <li class="lvl-2"><a href="#ac1-evidence-procedure">AC#1 evidence procedure</a></li>
+      <li class="lvl-2"><a href="#ac2-evidence-procedure">AC#2 evidence procedure</a></li>
+      <li class="lvl-2"><a href="#ac3-evidence-procedure">AC#3 evidence procedure</a></li>
     </ul>
   </aside>
 
   <main>
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
-      <h1>Runtime Flags &amp; Native Dependencies</h1>
-      <p class="description">Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.</p>
+      <h1>Supply Chain</h1>
+      <p class="description">Castellum supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction via cyclonedx-maven-plugin and syft, operator-driven cosign signing, the distroless Dockerfile rationale, recommended docker run and Kubernetes runtime, the Trivy gating policy, and the explicit non-claims and known limitations.</p>
       <div class="page-meta"><span class="meta-item"><strong>Section:</strong> operations</span> · <span class="meta-item"><strong>Audience:</strong> operators &amp; sysadmins</span></div>
     </header>
 
     <div id="page-content">
-<blockquote>
-<p>[NOTE] <strong>TODO (feature 9):</strong> wire the JVM flags into the <code>ENTRYPOINT java</code> line. The distroless base is resolved — see §4.</p>
-</blockquote>
-<p>This document is the single source of truth for the pcap4j runtime requirements introduced in feature 4 (<code>feat/passive-discovery</code>). Feature 9 (<code>feat/security-hardening-and-supply-chain</code>) will read from this file when wiring the production Dockerfile.</p>
-<h2 id="1-jvm-flags">1. JVM flags</h2>
-<p>The pcap4j 1.8.x library uses JNA to call into the native <code>libpcap.so</code> library. JNA reflectively accesses internals of <code>sun.nio.ch</code> and triggers JDK 21's restricted-native-access guard. Two JVM flags are required:</p>
+<h2 id="overview">Overview</h2>
+<p>Castellum ships as a multi-stage Docker image. The supply-chain pipeline lives in <code>scripts/build-and-scan.sh</code> and emits a CycloneDX SBOM at the JVM-dependency level via <code>cyclonedx-maven-plugin</code> and at the container level via <code>syft</code>. Trivy gates the image on HIGH/CRITICAL CVEs. Cosign signing is an operator-driven step.</p>
+
+<h2 id="build-pipeline">Build pipeline</h2>
+<p>The script <code>scripts/build-and-scan.sh</code> performs four sequential steps:</p>
+<pre><code>[1/4] docker build -&gt; &lt;tag&gt;
+[2/4] trivy image scan (HIGH,CRITICAL --ignore-unfixed)
+[3/4] syft SBOM extraction
+[4/4] cosign signing/verification (operator-driven)
+</code></pre>
+<p><strong>Step 1 — Docker build.</strong> Builds the multi-stage image from <code>Dockerfile</code> at repo root. The builder stage uses <code>maven:3.9-eclipse-temurin-21</code> to compile and package the application. The final stage copies the JAR into <code>gcr.io/distroless/java21-debian12:nonroot</code>.</p>
+<p><strong>Step 2 — Trivy scan.</strong> Runs <code>trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed &lt;tag&gt;</code>. The <code>--exit-code 1</code> flag causes the script (and CI) to fail immediately if any HIGH or CRITICAL vulnerability has a known fix available. Unfixed CVEs are excluded from the gate to prevent false blocks on OS packages awaiting upstream patches.</p>
+<p><strong>Step 3 — SBOM extraction.</strong> Uses <code>syft</code> to produce an image-level CycloneDX SBOM at <code>sbom-image.cdx.json</code>. This complements the Maven-plugin SBOM (<code>target/bom.xml</code>, <code>target/bom.json</code>) which captures JVM dependencies resolved at build time.</p>
+<p><strong>Step 4 — Cosign operator guidance.</strong> The script emits the commands an operator needs to sign and verify the image. The script itself does not sign; signing requires the operator's private key. This deliberate separation keeps secret material out of automated build agents.</p>
+
+<h3 id="running-the-pipeline">Running the pipeline</h3>
+<pre><code class="language-bash"># Build, scan, and generate SBOM for the default tag:
+bash scripts/build-and-scan.sh
+
+# Or specify a custom tag:
+bash scripts/build-and-scan.sh castellum:v1.2.3
+</code></pre>
+
+<h2 id="dockerfile-rationale">Dockerfile rationale</h2>
+
+<h3 id="multi-stage-layout">Multi-stage layout</h3>
+<pre><code class="language-dockerfile"># syntax=docker/dockerfile:1.7
+ARG DISTROLESS_VARIANT=nonroot
+
+FROM maven:3.9-eclipse-temurin-21 AS build
+# ... compile + package
+FROM gcr.io/distroless/java21-debian12:${DISTROLESS_VARIANT}
+COPY --from=build /castellum.jar /app/castellum.jar
+USER nonroot
+EXPOSE 8080
+ENTRYPOINT ["java","-jar","/app/castellum.jar"]
+</code></pre>
+<p>The builder stage includes Maven, the JDK, and all build tooling. None of these tools appear in the final image. The final stage contains only the JRE runtime provided by the distroless image and the application JAR.</p>
+
+<h3 id="distroless-choice">Distroless choice</h3>
+<p><code>gcr.io/distroless/java21-debian12</code> is a Google-maintained minimal Java 21 image with no shell, no package manager, and no OS utilities. This significantly reduces the attack surface compared to <code>eclipse-temurin:21-jre</code> or <code>amazoncorretto:21</code>. Known tradeoffs:</p>
 <ul>
-<li><code>--enable-native-access=ALL-UNNAMED</code></li>
-<li><code>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</code></li>
+<li>No shell → <code>docker exec</code> interactive debugging requires the <code>:debug-nonroot</code> variant.</li>
+<li>Smaller CVE surface → Trivy scans produce fewer findings.</li>
+<li>Faster cold start is not guaranteed; JVM startup is dominant.</li>
 </ul>
-<p>These flags are wired in <strong>Maven Surefire</strong> (<code>backend/pom.xml</code> → <code>&lt;build&gt;&lt;plugins&gt;</code> → <code>maven-surefire-plugin</code> → <code>&lt;argLine&gt;</code>) so tests run with the same flag set as production.</p>
-<p>When feature 9 lands the production Dockerfile, the <code>ENTRYPOINT java</code> line MUST include both flags. Example:</p>
-<div class="codehilite"><pre><code class="language-dockerfile">ENTRYPOINT ["java", \
-  "--enable-native-access=ALL-UNNAMED", \
-  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED", \
-  "-jar", "/app/backend.jar"]
-</code></pre></div>
-<h2 id="2-linux-capability">2. Linux capability</h2>
-<p>The PCAP source (<code>PcapSniffer</code>) opens raw sockets via libpcap. Raw-socket open requires the <code>CAP_NET_RAW</code> Linux capability.</p>
-<p>The production container MUST run with <code>CAP_NET_RAW</code> and <strong>all other capabilities dropped</strong>. Example Docker run:</p>
-<div class="codehilite"><pre><code class="language-bash">docker run --cap-drop=ALL --cap-add=NET_RAW castellum:latest
-</code></pre></div>
-<p>Equivalent Kubernetes <code>securityContext</code>:</p>
-<div class="codehilite"><pre><code class="language-yaml">securityContext:
-  capabilities:
-    drop: ["ALL"]
-    add: ["NET_RAW"]
-</code></pre></div>
-<p>The ARP and MDNS sources do NOT require <code>CAP_NET_RAW</code>. ARP reads <code>/proc/net/arp</code> (filesystem only). MDNS uses the JVM's standard multicast socket.</p>
-<h2 id="3-native-library">3. Native library</h2>
-<p><code>libpcap.so</code> (Linux package: <code>libpcap0.8</code>, version &gt;= 1.0.0). NOT a Maven dependency — provided by the host OS or container layer.</p>
-<p>On Debian/Ubuntu: <code>apt-get install libpcap0.8</code>.</p>
-<h2 id="4-distroless-base-resolved">4. Distroless base (resolved)</h2>
-<blockquote>
-<p>[NOTE] <strong>Resolved.</strong> The production image is built on the Debian-12 distroless variant, which ships <code>libpcap</code>, so the PCAP source works in containerized deployments. The earlier "pure-distroless lacks <code>libpcap</code>" caveat no longer applies.</p>
-</blockquote>
-<p>The repository <code>Dockerfile</code> pins the final stage to:</p>
-<div class="codehilite"><pre><code class="language-dockerfile">FROM gcr.io/distroless/java21-debian12:${DISTROLESS_VARIANT}
-</code></pre></div>
-<p>with <code>ARG DISTROLESS_VARIANT=nonroot</code>. Unlike the pure <code>gcr.io/distroless/java21</code> image, the <code>java21-debian12</code> variant is built on Debian 12 (bookworm) and includes the <code>libpcap</code> shared library, so the pcap4j → JNA → <code>libpcap.so</code> path resolves at runtime without an additional package-install layer. No <code>apt-get install libpcap0.8</code> step is required, and the choice does not sacrifice the distroless minimal-attack-surface posture (no shell, no package manager) — the Debian-12 distroless variant retains those properties.</p>
-<p>This is the option originally tracked as "(a) drop pure distroless for the Debian-12 distroless base." It is now the committed decision; there is no separate discovery image and no host-deployment-only degradation. See <a href="supply-chain.html">documentation/supply-chain.html</a>, which cites the same <code>gcr.io/distroless/java21-debian12:nonroot</code> base.</p>
-<h2 id="5-linux-only-contract-for-v1">5. Linux-only contract for v1</h2>
-<p><code>/proc/net/arp</code> does not exist on Windows or macOS. The <code>ArpCacheReader</code> returns an empty list when the file is absent (no exception). Future ports could read:</p>
+
+<h3 id="nonroot-vs-debug-nonroot"><code>:nonroot</code> vs <code>:debug-nonroot</code></h3>
+<table>
+<thead>
+<tr><th>Variant</th><th>Shell</th><th>Use case</th></tr>
+</thead>
+<tbody>
+<tr><td><code>nonroot</code> (default)</td><td>No</td><td>Production</td></tr>
+<tr><td><code>debug-nonroot</code></td><td>BusyBox sh</td><td>Incident triage inside a running container</td></tr>
+</tbody>
+</table>
+<p>To build the debug variant for triage:</p>
+<pre><code class="language-bash">docker build --build-arg DISTROLESS_VARIANT=debug-nonroot -t castellum:debug .
+docker run --rm -it --entrypoint /busybox/sh castellum:debug
+</code></pre>
+
+<h2 id="operator-runtime">Operator runtime</h2>
+
+<h3 id="recommended-docker-run-invocation">Recommended <code>docker run</code> invocation</h3>
+<pre><code class="language-bash">docker run \
+  --cap-drop=ALL \
+  --cap-add=NET_RAW \
+  -p 8080:8080 \
+  -e CASTELLUM_SECURITY_JWT_SECRET="$(openssl rand -base64 48)" \
+  -e CASTELLUM_ADMIN_USERNAME=admin \
+  # REPLACE-THIS — generate with: htpasswd -bnBC 12 "" 'your-password' | tr -d ':\n'
+  -e CASTELLUM_ADMIN_PASSWORD_HASH='$2a$12$...' \
+  castellum:latest
+</code></pre>
+<p><code>CAP_NET_RAW</code> is required by <code>pcap4j</code>, which is used by the passive discovery (PCAP) source. If you do not need PCAP discovery, you can drop this capability too.</p>
+<p>Note: <code>HEALTHCHECK</code> is not baked into the image. Wire the <code>/actuator/health</code> endpoint externally via your orchestrator (Kubernetes liveness probe, Docker Compose <code>healthcheck</code>, ECS health check).</p>
+
+<h3 id="kubernetes-example">Kubernetes example</h3>
+<pre><code class="language-yaml">livenessProbe:
+  httpGet:
+    path: /actuator/health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /actuator/health
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 5
+</code></pre>
+
+<h2 id="cosign-procedure">Cosign procedure</h2>
+
+<h3 id="key-pair-signing">Key-pair signing</h3>
+<pre><code class="language-bash"># Generate key pair (creates cosign.key and cosign.pub in cwd):
+cosign generate-key-pair
+
+# Sign the image (requires cosign.key):
+cosign sign --key cosign.key castellum:latest
+
+# Verify the signature (use cosign.pub in deployment verification):
+cosign verify --key cosign.pub castellum:latest
+</code></pre>
+<p>Expected output from <code>cosign verify</code>:</p>
+<pre><code>Verification for index.docker.io/your-org/castellum:latest --
+The following checks were performed on each of these signatures:
+  - The cosign claims were validated
+  - The signatures were verified against the specified public key
+
+[{"critical":{"identity":{"docker-reference":"..."},...}}]
+
+Verified OK
+</code></pre>
+
+<h3 id="kms-backed-signing-recommended-for-production">KMS-backed signing (recommended for production)</h3>
+<p>Replace the local key pair with a KMS-backed key to avoid storing <code>cosign.key</code> on disk:</p>
+<pre><code class="language-bash"># AWS KMS:
+cosign sign --key awskms:///&lt;key-arn&gt; castellum:latest
+cosign verify --key awskms:///&lt;key-arn&gt; castellum:latest
+
+# GCP KMS:
+cosign sign --key gcpkms://projects/&lt;project&gt;/locations/&lt;location&gt;/keyRings/&lt;ring&gt;/cryptoKeys/&lt;key&gt; castellum:latest
+cosign verify --key gcpkms://projects/&lt;project&gt;/locations/&lt;location&gt;/keyRings/&lt;ring&gt;/cryptoKeys/&lt;key&gt; castellum:latest
+</code></pre>
+
+<h2 id="trivy-gating-policy">Trivy gating policy</h2>
+<p>The current policy:</p>
+<pre><code>--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+</code></pre>
 <ul>
-<li>Windows: <code>GetIpNetTable</code> via JNA.</li>
-<li>macOS: <code>/Library/Preferences/SystemConfiguration/...</code> plus <code>arp -an</code> parsing (sysctl-based).</li>
+<li><strong><code>--severity HIGH,CRITICAL</code></strong> — gates only on serious CVEs. MEDIUM and LOW are reported but do not block.</li>
+<li><strong><code>--ignore-unfixed</code></strong> — skips CVEs where no fixed version is available in the upstream package repository. This prevents blocking on OS-level CVEs that are known but not yet patched by Debian.</li>
+<li><strong><code>--exit-code 1</code></strong> — non-zero exit causes CI to fail.</li>
 </ul>
-<p>Both ports are out of scope for v1. README documents the Linux-only contract operationally.</p>
-<h2 id="6-setcap-alternative-for-non-docker-deployments">6. setcap alternative for non-Docker deployments</h2>
-<p>For systemd or bare-metal deployments where Docker capability dropping is not available, <code>setcap</code> on a Java wrapper script grants <code>CAP_NET_RAW</code> without root:</p>
-<div class="codehilite"><pre><code class="language-bash">sudo setcap cap_net_raw+eip /usr/local/bin/castellum-launcher
-</code></pre></div>
-<p>Caveat: <code>setcap</code> on the JDK binary itself is brittle — <code>java</code> binary updates wipe the capability. Prefer <code>setcap</code> on a wrapper script that exec's the real <code>java</code>.</p>
-<h2 id="7-environment-variables">7. Environment variables</h2>
-<p>Environment-driven configuration. The backend resolves these via Spring's standard <code>Environment</code> bean.</p>
-<h3 id="castellum-integration-key">CASTELLUM_INTEGRATION_KEY</h3>
-<p>AES-256 key (32 bytes, hex- or base64-encoded depending on operator preference; the cipher reads the raw byte length) used to encrypt TAXII / MISP credentials at rest in the <code>integration_config</code> table. Required when the threat-intel-push integrations (TAXII, MISP) are configured. Read by <code>AesGcmCipher</code> at boot — startup fails fast with a clear error if the variable is missing while at least one <code>integration_config</code> row exists. Generation:</p>
-<div class="codehilite"><pre><code class="language-bash">openssl rand -hex 32
-</code></pre></div>
-<p>Rotation is non-trivial: changing the key requires re-encrypting every row in <code>integration_config</code> with the new key. The current implementation does not include a rotation helper; rotation today is "truncate the table, re-enter credentials in the UI under the new key." A future feature will add a <code>ROTATION_KEY</code> env that runs a one-shot re-encrypt on boot.</p>
-<h3 id="castellum-jwt-secret">CASTELLUM_JWT_SECRET</h3>
-<p>HMAC-SHA256 signing key (32+ bytes) for issued JWTs. Read by <code>JwtService</code> at boot. Missing → boot fails with an explicit error. Generate with <code>openssl rand -hex 32</code>. Rotation invalidates every outstanding token instantly; combine with <code>tokenVersion</code> bump in <code>AuthController</code> for per-user invalidation.</p>
-<h3 id="castellum-bootstrap-admin-password">CASTELLUM_BOOTSTRAP_ADMIN_PASSWORD</h3>
-<p>Optional. When set on first boot (before the <code>users</code> table has any admin), creates an <code>admin</code> user with this password and marks <code>must_change_password = true</code> so the operator is forced to rotate on first login. Subsequent boots ignore the variable. If unset on first boot, a random 32-character password is generated, logged once at INFO, and the operator must capture it from the log.</p>
+
+<h3 id="upgrade-path">Upgrade path</h3>
+<ol>
+<li>Once the distroless base image is updated faster than findings accumulate, remove <code>--ignore-unfixed</code> to enforce a stricter posture.</li>
+<li>After achieving a clean HIGH/CRITICAL gate, add <code>MEDIUM</code> to the severity list.</li>
+<li>Consider adding <code>--db-repository ghcr.io/aquasecurity/trivy-db</code> for reproducible CI scans.</li>
+</ol>
+
+<h2 id="sbom">SBOM</h2>
+<p>Two SBOM artifacts are produced per release:</p>
+<table>
+<thead>
+<tr><th>Artifact</th><th>Tool</th><th>Scope</th><th>Format</th></tr>
+</thead>
+<tbody>
+<tr><td><code>target/bom.xml</code></td><td><code>cyclonedx-maven-plugin</code> 2.8.0</td><td>JVM dependencies (compile + runtime)</td><td>CycloneDX 1.5 XML</td></tr>
+<tr><td><code>target/bom.json</code></td><td><code>cyclonedx-maven-plugin</code> 2.8.0</td><td>JVM dependencies (compile + runtime)</td><td>CycloneDX 1.5 JSON</td></tr>
+<tr><td><code>sbom-image.cdx.json</code></td><td><code>syft</code></td><td>Image-level (OS packages + JVM deps)</td><td>CycloneDX JSON</td></tr>
+</tbody>
+</table>
+<p>The Maven plugin is bound to the <code>package</code> phase via <code>makeAggregateBom</code>. SBOM files are generated as part of every <code>mvn package</code> invocation, including CI.</p>
+
+<h2 id="explicit-non-claims">Explicit non-claims</h2>
+<p>Castellum does NOT claim SLSA-3, hermetic builds, or in-image cosign verify. The build pipeline is operator-run and relies on trust in the Maven Central dependency resolution. Hermetic builds and in-toto provenance attestations are deferred to a future iteration.</p>
+
+<h2 id="known-limitations">Known limitations</h2>
+<ul>
+<li><strong>Token revocation gap</strong>: JWT TTL is 1 hour. Changing <code>CASTELLUM_SECURITY_JWT_SECRET</code> invalidates all in-flight tokens. There is no per-token blocklist (deferred item — requires a Redis or DB-backed blocklist and adds per-request overhead).</li>
+<li><strong>No hardware MFA</strong>: Only password authentication is supported. FIDO2/WebAuthn is out of scope.</li>
+<li><strong>Rate limiting</strong>: Login endpoint is not rate-limited. Brute-force protection is deferred.</li>
+<li><strong>Single-role tokens</strong>: A user has exactly one role. Fine-grained scopes are not supported.</li>
+</ul>
+
+<h2 id="ac1-evidence-procedure">AC#1 evidence procedure</h2>
+<pre><code class="language-bash"># Build, scan, and confirm zero HIGH/CRITICAL fixable CVEs:
+bash scripts/build-and-scan.sh
+</code></pre>
+<p>Expected output (abridged):</p>
+<pre><code>[1/4] docker build -&gt; castellum:latest
+...
+[2/4] trivy image scan (HIGH,CRITICAL --ignore-unfixed)
+2025-xx-xx INFO  Vulnerability scanning is enabled
+2025-xx-xx INFO  Secret scanning is enabled
+castellum:latest (debian 12.x)
+====================================================
+Total: 0 (HIGH: 0, CRITICAL: 0)
+
+[3/4] syft SBOM extraction
+...
+[4/4] cosign signing/verification (operator-driven)
+Operator commands (run separately with appropriate keys):
+  cosign sign --key cosign.key castellum:latest
+  cosign verify --key cosign.pub castellum:latest
+</code></pre>
+
+<h2 id="ac2-evidence-procedure">AC#2 evidence procedure</h2>
+<pre><code class="language-bash"># After building the image:
+cosign generate-key-pair
+cosign sign --key cosign.key castellum:latest
+cosign verify --key cosign.pub castellum:latest
+</code></pre>
+<p>Sample output excerpt:</p>
+<pre><code>Verified OK
+</code></pre>
+
+<h2 id="ac3-evidence-procedure">AC#3 evidence procedure</h2>
+<pre><code class="language-bash">cd backend &amp;&amp; ./mvnw -DskipTests=true package
+ls target/bom.xml target/bom.json
+</code></pre>
+<p>Expected:</p>
+<pre><code>target/bom.xml
+target/bom.json
+</code></pre>
+<p>Both files are CycloneDX 1.5 format. The XML file can be validated against the CycloneDX schema at <code>https://cyclonedx.org/schema/bom-1.5.xsd</code>.</p>
     </div>
 
     <div class="no-results" id="no-results">
