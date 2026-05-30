@@ -334,4 +334,111 @@ class DockerInspectParserTest {
         assertThat(parser.parseNetworkInspect("[]").isDefaultBridge()).isFalse();
         assertThat(parser.parseNetworkInspect("[]").members()).isEmpty();
     }
+
+    // -----------------------------------------------------------------------
+    // R1 hardening — characterization tests for parser edge cases
+    // -----------------------------------------------------------------------
+
+    /**
+     * Invariant 2 hardening: when the default_bridge option is "true" but the
+     * {@code enable_icc} key is entirely absent from Options, the parser must treat
+     * ICC as disabled (iccEnabled==false). "Absent ⇒ false" is the safe default.
+     */
+    @Test
+    void parseNetworkInspect_enableIccKeyAbsent_iccEnabledFalse() {
+        String json = """
+            [
+              {
+                "Name": "bridge",
+                "Options": {
+                  "com.docker.network.bridge.default_bridge": "true"
+                },
+                "IPAM": { "Config": [] },
+                "Containers": {}
+              }
+            ]
+            """;
+        DockerInspectParser.BridgeNetworkInfo info = parser.parseNetworkInspect(json);
+        assertThat(info.isDefaultBridge())
+            .as("default_bridge=true with no enable_icc key → still a default bridge")
+            .isTrue();
+        assertThat(info.iccEnabled())
+            .as("absent enable_icc key must be treated as false (invariant 2: never assume on)")
+            .isFalse();
+    }
+
+    /**
+     * When a container member has an IPv4Address with NO CIDR suffix (e.g. "172.17.0.9"
+     * rather than "172.17.0.9/16"), the parser must return the address unchanged — no
+     * "/" should be appended or introduced.
+     */
+    @Test
+    void parseNetworkInspect_bareIpv4NoCidrSuffix_returnedUnchanged() {
+        String json = """
+            [
+              {
+                "Name": "bridge",
+                "Options": {
+                  "com.docker.network.bridge.default_bridge": "true",
+                  "com.docker.network.bridge.enable_icc": "true"
+                },
+                "IPAM": { "Config": [] },
+                "Containers": {
+                  "abc123": {
+                    "Name": "bare-ip-container",
+                    "IPv4Address": "172.17.0.9"
+                  }
+                }
+              }
+            ]
+            """;
+        DockerInspectParser.BridgeNetworkInfo info = parser.parseNetworkInspect(json);
+        assertThat(info.members()).hasSize(1);
+        DockerInspectParser.Member member = info.members().get(0);
+        assertThat(member.ipv4())
+            .as("bare IPv4 with no CIDR suffix must be returned as-is")
+            .isEqualTo("172.17.0.9");
+        assertThat(member.ipv4())
+            .as("bare IPv4 must contain no '/' after parsing")
+            .doesNotContain("/");
+    }
+
+    /**
+     * When a container entry in the Containers map has its Name field absent or null,
+     * the parser must fall back to a non-null string that is NOT the literal "null".
+     * The contract is: fall back to the container-id key (or a prefix of it).
+     *
+     * NOTE: if the current parser emits null for name(), this test is RED — that is
+     * intentional; the implementer must add the null-guard fallback.
+     */
+    @Test
+    void parseNetworkInspect_nullMemberName_fallbackNotLiteralNull() {
+        String containerId = "deadbeef1234567890abcdef";
+        String json = """
+            [
+              {
+                "Name": "bridge",
+                "Options": {
+                  "com.docker.network.bridge.default_bridge": "true",
+                  "com.docker.network.bridge.enable_icc": "true"
+                },
+                "IPAM": { "Config": [] },
+                "Containers": {
+                  "%s": {
+                    "IPv4Address": "172.17.0.5/16"
+                  }
+                }
+              }
+            ]
+            """.formatted(containerId);
+        DockerInspectParser.BridgeNetworkInfo info = parser.parseNetworkInspect(json);
+        assertThat(info.members()).hasSize(1);
+        DockerInspectParser.Member member = info.members().get(0);
+        assertThat(member.name())
+            .as("member name must be non-null when Name key is absent (fallback to container id prefix)")
+            .isNotNull();
+        assertThat(member.name())
+            .as("member name must not be the literal string 'null'")
+            .isNotEqualTo("null");
+    }
 }

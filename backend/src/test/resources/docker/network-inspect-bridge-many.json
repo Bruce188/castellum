@@ -1,0 +1,29 @@
+[
+  {
+    "Name": "bridge",
+    "Id": "aabbcc112233",
+    "Driver": "bridge",
+    "Options": {
+      "com.docker.network.bridge.default_bridge": "true",
+      "com.docker.network.bridge.enable_icc": "true",
+      "com.docker.network.bridge.name": "docker0"
+    },
+    "IPAM": {
+      "Config": [
+        {
+          "Subnet": "172.17.0.0/16",
+          "Gateway": "172.17.0.1"
+        }
+      ]
+    },
+    "Containers": {
+      "c01": { "Name": "very-long-container-name-alpha-01", "IPv4Address": "172.17.0.2/16" },
+      "c02": { "Name": "very-long-container-name-bravo-02", "IPv4Address": "172.17.0.3/16" },
+      "c03": { "Name": "very-long-container-name-charlie-03", "IPv4Address": "172.17.0.4/16" },
+      "c04": { "Name": "very-long-container-name-delta-04", "IPv4Address": "172.17.0.5/16" },
+      "c05": { "Name": "very-long-container-name-echo-05", "IPv4Address": "172.17.0.6/16" },
+      "c06": { "Name": "very-long-container-name-foxtrot-06", "IPv4Address": "172.17.0.7/16" },
+      "c07": { "Name": "very-long-container-name-golf-07", "IPv4Address": "172.17.0.8/16" }
+    }
+  }
+]
