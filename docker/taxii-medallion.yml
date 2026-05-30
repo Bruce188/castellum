@@ -35,6 +35,11 @@ services:
     # Digest captured 2026-05-30. Refresh: docker manifest inspect sbirtane/medallion-taxii-server:latest | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['config']['digest'])"
     image: sbirtane/medallion-taxii-server:latest@sha256:f328313c562fb02713374f237b31f613bff3215c73a2bf2ef6b0e7320700e57d
     container_name: castellum-medallion
+    # Operator-approved resource ceiling (NB7): cap the medallion TAXII service.
+    # Compose-Spec non-swarm top-level keys. (No separate Mongo service here —
+    # medallion uses an in-memory backend.)
+    mem_limit: 512m
+    cpus: "1.0"
     ports:
       - "127.0.0.1:5000:80"
     volumes:

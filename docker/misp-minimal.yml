@@ -79,6 +79,10 @@ services:
     image: coolacid/misp-docker:core-latest@sha256:162a984b1b5f8ba89ea6c9f703ac356a3931bd8bd63b26a25bd5d13a5e9fc364
     container_name: castellum-misp-core
     restart: unless-stopped
+    # Operator-approved resource ceiling (NB7): cap the MISP core service so a
+    # runaway push cannot exhaust the host. Compose-Spec non-swarm top-level keys.
+    mem_limit: 2g
+    cpus: "2.0"
     depends_on:
       misp-db:
         condition: service_healthy
