@@ -166,6 +166,118 @@ public class DockerInspectParser {
         return out;
     }
 
+    // -----------------------------------------------------------------------
+    // docker network inspect parsing
+    // -----------------------------------------------------------------------
+
+    /**
+     * A container member of the default bridge network, as reported by
+     * {@code docker network inspect bridge}.
+     *
+     * @param name  the container name (may be null for very old daemons — caller falls back to id)
+     * @param ipv4  the container IPv4 address with the CIDR suffix stripped (e.g. {@code "172.17.0.2"})
+     */
+    public record Member(String name, String ipv4) {}
+
+    /**
+     * Parsed result of {@code docker network inspect bridge}.
+     *
+     * @param isDefaultBridge true iff the response contained a network element with
+     *                        {@code Options."com.docker.network.bridge.default_bridge" == "true"}
+     *                        AND {@code Name == "bridge"} (invariant 4)
+     * @param iccEnabled      true iff {@code Options."com.docker.network.bridge.enable_icc" == "true"};
+     *                        absent or any other value ⇒ false (invariant 2 — never assume on)
+     * @param subnet          first {@code IPAM.Config[].Subnet}, or null if absent
+     * @param members         containers from the {@code Containers} map (may be empty)
+     */
+    public record BridgeNetworkInfo(boolean isDefaultBridge, boolean iccEnabled,
+                                    String subnet, List<Member> members) {
+        /** Sentinel returned when the JSON carries no default-bridge element. */
+        public static BridgeNetworkInfo notFound() {
+            return new BridgeNetworkInfo(false, false, null, List.of());
+        }
+    }
+
+    /**
+     * Parse the JSON array emitted by {@code docker network inspect <name>}, locate the real
+     * default bridge (identified by BOTH {@code Name=="bridge"} AND
+     * {@code Options."com.docker.network.bridge.default_bridge"=="true"} — invariant 4), and
+     * return a {@link BridgeNetworkInfo} describing its ICC flag, subnet, and container members.
+     *
+     * <p>Returns {@link BridgeNetworkInfo#notFound()} without throwing for:
+     * <ul>
+     *   <li>null / blank / empty input</li>
+     *   <li>empty JSON array {@code []}</li>
+     *   <li>no element matching the authoritative default-bridge criteria</li>
+     * </ul>
+     *
+     * @param json raw stdout from {@code docker network inspect bridge}
+     * @return parsed info; never null
+     */
+    public BridgeNetworkInfo parseNetworkInspect(String json) {
+        if (json == null || json.isBlank()) {
+            return BridgeNetworkInfo.notFound();
+        }
+        JsonNode root;
+        try {
+            root = mapper.readTree(json);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return BridgeNetworkInfo.notFound();
+        }
+        if (root == null || !root.isArray() || root.isEmpty()) {
+            return BridgeNetworkInfo.notFound();
+        }
+
+        for (JsonNode elem : root) {
+            if (elem == null || !elem.isObject()) continue;
+
+            // Invariant 4: authoritative match — Name=="bridge" AND default_bridge option=="true"
+            String name = text(elem, "Name");
+            if (!"bridge".equals(name)) continue;
+
+            JsonNode options = elem.path("Options");
+            String defaultBridgeFlag = text(options, "com.docker.network.bridge.default_bridge");
+            if (!"true".equals(defaultBridgeFlag)) continue;
+
+            // Invariant 2: read the actual enable_icc — absent or non-"true" ⇒ false
+            String iccFlag = text(options, "com.docker.network.bridge.enable_icc");
+            boolean iccEnabled = "true".equals(iccFlag);
+
+            // Subnet: first IPAM.Config[].Subnet
+            String subnet = null;
+            JsonNode ipamConfigs = elem.path("IPAM").path("Config");
+            if (ipamConfigs.isArray() && !ipamConfigs.isEmpty()) {
+                subnet = text(ipamConfigs.get(0), "Subnet");
+            }
+
+            // Members: Containers map { "<id>": { "Name": "...", "IPv4Address": "172.17.0.2/16" } }
+            List<Member> members = new ArrayList<>();
+            JsonNode containers = elem.path("Containers");
+            if (containers.isObject()) {
+                Iterator<Map.Entry<String, JsonNode>> it = containers.fields();
+                while (it.hasNext()) {
+                    Map.Entry<String, JsonNode> entry = it.next();
+                    String id = entry.getKey();
+                    JsonNode c = entry.getValue();
+                    String memberName = text(c, "Name");
+                    if (memberName == null || memberName.isBlank()) {
+                        // Older daemons may omit Name; fall back to id prefix
+                        memberName = id.length() > 12 ? id.substring(0, 12) : id;
+                    }
+                    // Strip CIDR suffix: "172.17.0.2/16" → "172.17.0.2"
+                    String ipv4Raw = text(c, "IPv4Address");
+                    String ipv4 = ipv4Raw == null ? null : ipv4Raw.contains("/")
+                        ? ipv4Raw.substring(0, ipv4Raw.indexOf('/'))
+                        : ipv4Raw;
+                    members.add(new Member(memberName, ipv4));
+                }
+            }
+
+            return new BridgeNetworkInfo(true, iccEnabled, subnet, members);
+        }
+        return BridgeNetworkInfo.notFound();
+    }
+
     /** Container names arrive with a leading slash (e.g. {@code /pingpay-db}); strip it. */
     private static String cleanName(String raw) {
         if (raw == null) {

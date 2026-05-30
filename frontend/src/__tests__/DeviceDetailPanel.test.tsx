@@ -435,4 +435,26 @@ describe('<DeviceDetailPanel />', () => {
     expect(badge.className).toMatch(/amber/);
     expect(badge).toHaveAttribute('title', 'TRAEFIK_EXPOSURE');
   });
+
+  it('renders default-bridge ICC posture badge', () => {
+    // Task 3.1: confirms the existing badge renders DEFAULT_BRIDGE_ICC protocolFamily
+    // without any production change — the badge already renders any non-null postureSeverity
+    // with title={s.protocolFamily} at DeviceDetailPanel.tsx L211-219.
+    const bridgeService: NetworkService = {
+      id: 104, deviceId: 1, port: 65535, protocol: 'tcp',
+      name: 'default-bridge-segmentation', version: null,
+      observedAt: null, vendor: null, product: null,
+      protocolFamily: 'DEFAULT_BRIDGE_ICC', postureSeverity: 'LOW',
+    };
+    render(
+      <DeviceDetailPanel device={device} risk={risk} services={[bridgeService]} onClose={() => {}} />
+    );
+    const badge = screen.getByTestId('posture-severity-badge');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent('LOW');
+    // LOW maps to gray colour (same as SNMP_EXPOSURE/LOW)
+    expect(badge.className).toMatch(/gray/);
+    // protocolFamily surfaces as title attribute
+    expect(badge).toHaveAttribute('title', 'DEFAULT_BRIDGE_ICC');
+  });
 });

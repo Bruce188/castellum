@@ -99,4 +99,59 @@ class DockerCliClientTest {
             .isInstanceOf(DiscoveryUnavailableException.class)
             .hasMessageContaining("docker CLI unavailable");
     }
+
+    // -----------------------------------------------------------------------
+    // Task 1.1 — networkInspect: argv assembly + error mapping
+    // -----------------------------------------------------------------------
+
+    @Test
+    void networkInspect_assemblesDockerNetworkInspectArgv() throws Exception {
+        // LOCKS invariant 1 — read-only, exact argv, no state-changing verb
+        StubRunner runner = new StubRunner(new CommandResult(0, "[]", ""));
+        DockerCliClient client = new DockerCliClient(runner);
+
+        String result = client.networkInspect("bridge");
+
+        assertThat(result).isEqualTo("[]");
+        assertThat(runner.invocations).hasSize(1);
+        // Must be exactly: docker network inspect -- bridge (end-of-options guard)
+        assertThat(runner.invocations.get(0))
+            .containsExactly("docker", "network", "inspect", "--", "bridge");
+    }
+
+    @Test
+    void networkInspect_nonZeroExit_throwsDiscoveryUnavailableWithStderr() {
+        // LOCKS invariant 7 — CLI boundary surfaces error for best-effort handling
+        DockerCliClient client = new DockerCliClient(
+            new StubRunner(new CommandResult(1, "", "Error: No such network: bridge")));
+
+        assertThatThrownBy(() -> client.networkInspect("bridge"))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("Error: No such network: bridge");
+    }
+
+    @Test
+    void networkInspect_ioException_mappedToDiscoveryUnavailable() {
+        DockerCliClient.CommandRunner throwing = argv -> { throw new IOException("docker: command not found"); };
+        DockerCliClient client = new DockerCliClient(throwing);
+
+        assertThatThrownBy(() -> client.networkInspect("bridge"))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("docker CLI unavailable");
+    }
+
+    @Test
+    void networkInspect_blankName_rejected() {
+        // Defensive: blank/null name must reject before any process is spawned
+        StubRunner runner = new StubRunner(new CommandResult(0, "SHOULD_NOT_BE_CALLED", ""));
+        DockerCliClient client = new DockerCliClient(runner);
+
+        assertThatThrownBy(() -> client.networkInspect(null))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> client.networkInspect("  "))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        // No process must have been invoked
+        assertThat(runner.invocations).isEmpty();
+    }
 }

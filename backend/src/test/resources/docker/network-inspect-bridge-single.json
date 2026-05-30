@@ -1,0 +1,26 @@
+[
+  {
+    "Name": "bridge",
+    "Id": "aabbcc112233",
+    "Driver": "bridge",
+    "Options": {
+      "com.docker.network.bridge.default_bridge": "true",
+      "com.docker.network.bridge.enable_icc": "true",
+      "com.docker.network.bridge.name": "docker0"
+    },
+    "IPAM": {
+      "Config": [
+        {
+          "Subnet": "172.17.0.0/16",
+          "Gateway": "172.17.0.1"
+        }
+      ]
+    },
+    "Containers": {
+      "c1abc": {
+        "Name": "app-container-1",
+        "IPv4Address": "172.17.0.2/16"
+      }
+    }
+  }
+]
