@@ -112,11 +112,25 @@ class SecurityConfigIntegrationTest {
 
     @Test
     void apiResponseHasSecurityHeaders() throws Exception {
-        mvc.perform(get("/api/devices"))
+        // CSP and X-Frame-Options are emitted on every response; HSTS is emitted only on
+        // HTTPS-origin requests — here simulated via the proxy-forwarded X-Forwarded-Proto.
+        mvc.perform(get("/api/devices").header("X-Forwarded-Proto", "https"))
             .andExpect(status().isUnauthorized())
             .andExpect(header().exists("Content-Security-Policy"))
             .andExpect(header().exists("Strict-Transport-Security"))
             .andExpect(header().exists("X-Frame-Options"));
+    }
+
+    @Test
+    void plainHttpResponseOmitsHsts() throws Exception {
+        // Regression guard: HSTS must NOT be sent on plain-HTTP requests (RFC 6797 §7.2) —
+        // forcing it pins a stale https upgrade on local-dev hosts. CSP and X-Frame-Options
+        // remain present unconditionally.
+        mvc.perform(get("/api/devices"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(header().exists("Content-Security-Policy"))
+            .andExpect(header().exists("X-Frame-Options"))
+            .andExpect(header().doesNotExist("Strict-Transport-Security"));
     }
 
     @Test

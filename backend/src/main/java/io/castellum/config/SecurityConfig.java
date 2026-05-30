@@ -20,7 +20,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 
 @Configuration
 @EnableMethodSecurity
@@ -54,8 +53,14 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())
             .headers(h -> h
                 .contentSecurityPolicy(c -> c.policyDirectives("default-src 'self'"))
+                // HSTS only on HTTPS-origin requests — never on plain HTTP. Sending HSTS over
+                // cleartext is a no-op per RFC 6797 §7.2 and pins a stale https upgrade on
+                // local-dev hosts (e.g. http://localhost). A TLS-terminating reverse proxy must
+                // forward "X-Forwarded-Proto: https" for production HSTS to be emitted.
                 .httpStrictTransportSecurity(s -> s
-                    .requestMatcher(AnyRequestMatcher.INSTANCE)
+                    .requestMatcher(request ->
+                        request.isSecure()
+                            || "https".equalsIgnoreCase(request.getHeader("X-Forwarded-Proto")))
                     .includeSubDomains(true)
                     .maxAgeInSeconds(31536000))
                 .frameOptions(f -> f.deny()))
