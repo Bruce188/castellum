@@ -704,7 +704,7 @@ footer {
 <li><a href="#8-unified-network-scan-scan-this-network">Unified network scan</a> — one-click multi-stage nmap + OT sweep with per-stage isolation and stop control.</li>
 <li><a href="#9-feed-sync-scheduler-durable-auto-pull">Feed-sync scheduler</a> — durable DB-backed EPSS/KEV/NVD auto-pull with retry/backoff and ADMIN enable/disable controls (V23).</li>
 </ol>
-<p>For the security posture underpinning these decisions see <a href="threat-model.md">documentation/threat-model.md</a>. For the NIST 800-53 compliance mapping see <a href="compliance.md">documentation/compliance.md</a>.</p>
+<p>For the security posture underpinning these decisions see <a href="threat-model.html">documentation/threat-model.html</a>. For the NIST 800-53 compliance mapping see <a href="compliance.md">documentation/compliance.md</a>.</p>
 <hr>
 <h2 id="1-nvd-api-key-registration">1. NVD API-Key Registration</h2>
 <h3 id="why-this-matters">Why this matters</h3>
@@ -894,7 +894,7 @@ login endpoint at 10 requests per minute per IP:</p>
 <span class="p">}</span>
 </code></pre></div>
 
-<p>See <a href="auth.md">documentation/auth.md</a> for the full set of in-application limiter tunables.</p>
+<p>See <a href="auth.html">documentation/auth.html</a> for the full set of in-application limiter tunables.</p>
 <hr>
 <h2 id="4-bootstrap-admin-checklist">4. Bootstrap Admin Checklist</h2>
 <p>Before starting Castellum for the first time, set the following environment variables. The application's <code>BootstrapAdminInitializer</code> performs an idempotent upsert of the admin account at startup; if the variables are absent or blank, it warns and skips — the database will have no users and all authenticated endpoints will be unreachable.</p>
@@ -982,7 +982,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <span class="c1"># Expected: {&quot;content&quot;:[],&quot;totalElements&quot;:0,...} (empty inventory on first run)</span>
 </code></pre></div>
 
-<p>See <a href="auth.md">documentation/auth.md</a> for the full RBAC matrix and JWT contract details.</p>
+<p>See <a href="auth.html">documentation/auth.html</a> for the full RBAC matrix and JWT contract details.</p>
 <hr>
 <h2 id="5-runtime-flags-and-jvm-configuration">5. Runtime Flags and JVM Configuration</h2>
 <h3 id="cap-net-raw-for-passive-discovery">CAP_NET_RAW for passive discovery</h3>
@@ -1018,7 +1018,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">JAVA_TOOL_OPTIONS</span><span class="o">=</span><span class="s2">&quot;-Djna.library.path=/usr/lib/x86_64-linux-gnu -Dorg.pcap4j.core.pcapDev=eth0&quot;</span>
 </code></pre></div>
 
-<p>For the full list of pcap4j properties and known deployment issues (RHEL-based distros, Alpine musl libc, WSL2 packet capture limitations), see <a href="runtime-flags.md">documentation/runtime-flags.md</a>.</p>
+<p>For the full list of pcap4j properties and known deployment issues (RHEL-based distros, Alpine musl libc, WSL2 packet capture limitations), see <a href="runtime-flags.html">documentation/runtime-flags.html</a>.</p>
 <h3 id="database-connection-configuration">Database connection configuration</h3>
 <div class="codehilite"><pre><span></span><code><span class="c1"># PostgreSQL connection (Spring Boot default property binding):</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">SPRING_DATASOURCE_URL</span><span class="o">=</span>jdbc:postgresql://localhost:5432/castellum
@@ -1478,7 +1478,7 @@ ambiguous; it is not itself a finding.</p>
 </thead>
 <tbody>
 <tr>
-<td><a href="auth.md">documentation/auth.md</a></td>
+<td><a href="auth.html">documentation/auth.html</a></td>
 <td>Full RBAC matrix, JWT contract, BCrypt procedure, secret rotation</td>
 </tr>
 <tr>
@@ -1486,7 +1486,7 @@ ambiguous; it is not itself a finding.</p>
 <td>Dockerfile structure, distroless image, Trivy gate, cosign signing, SBOM artifacts</td>
 </tr>
 <tr>
-<td><a href="runtime-flags.md">documentation/runtime-flags.md</a></td>
+<td><a href="runtime-flags.html">documentation/runtime-flags.html</a></td>
 <td>pcap4j JVM system properties, CAP_NET_RAW Docker flags, known platform issues</td>
 </tr>
 <tr>
@@ -1502,7 +1502,7 @@ ambiguous; it is not itself a finding.</p>
 <td>TAXII / MISP / STIX endpoints powered by the <code>integration_config</code> rotation procedure documented in §7</td>
 </tr>
 <tr>
-<td><a href="threat-model.md">documentation/threat-model.md</a></td>
+<td><a href="threat-model.html">documentation/threat-model.html</a></td>
 <td>Security rationale for the operational choices documented here</td>
 </tr>
 </tbody>

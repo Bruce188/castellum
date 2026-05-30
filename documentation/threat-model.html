@@ -678,11 +678,11 @@ footer {
 </ol>
 <p>Full mitigations are listed in the <a href="#top-5-mitigations">Top-5 mitigations</a> section. See also:</p>
 <ul>
-<li><a href="auth.md">documentation/auth.md</a> — RBAC matrix, JWT contract, bootstrap admin</li>
+<li><a href="auth.html">documentation/auth.html</a> — RBAC matrix, JWT contract, bootstrap admin</li>
 <li><a href="supply-chain.md">documentation/supply-chain.md</a> — distroless, Trivy gate, SBOM</li>
-<li><a href="ot-probes.md">documentation/ot-probes.md</a> — read-only OT contract</li>
-<li><a href="runtime-flags.md">documentation/runtime-flags.md</a> — CAP_NET_RAW, pcap4j JVM flags</li>
-<li><a href="stix-taxii-misp.md">documentation/stix-taxii-misp.md</a> — export audit trail</li>
+<li><a href="ot-probes.html">documentation/ot-probes.html</a> — read-only OT contract</li>
+<li><a href="runtime-flags.html">documentation/runtime-flags.html</a> — CAP_NET_RAW, pcap4j JVM flags</li>
+<li><a href="threat-intel-integrations.html">documentation/threat-intel-integrations.html</a> — export audit trail</li>
 <li><a href="frontend-topology-ui.md">documentation/frontend-topology-ui.md</a> — UI architecture</li>
 </ul>
 <hr>
@@ -871,7 +871,7 @@ The CAP_NET_RAW capability grants the JVM ability to read all frames on the inte
 <p><strong>D — Denial of Service</strong><br>
 A flood of ARP or mDNS traffic on the monitored segment could cause <code>PcapSniffer</code> to buffer large frame queues. The libpcap BPF filter should be as specific as possible (e.g. <code>arp or mdns</code>) to discard irrelevant traffic before it reaches user space. Without a tight BPF filter, a broadcast storm could exhaust JVM heap.</p>
 <p><strong>E — Elevation of Privilege</strong><br>
-CAP_NET_RAW itself is a capability elevation relative to a normal process. The Docker security policy (<code>--cap-drop=ALL --cap-add=NET_RAW</code>) scopes this capability to packet capture only. If the container were started with <code>--privileged</code> instead, all capabilities would be granted — the <code>docker run</code> and Compose configuration must specify <code>cap_add: [NET_RAW]</code> explicitly, not <code>privileged: true</code>. See <a href="runtime-flags.md">documentation/runtime-flags.md</a>.</p>
+CAP_NET_RAW itself is a capability elevation relative to a normal process. The Docker security policy (<code>--cap-drop=ALL --cap-add=NET_RAW</code>) scopes this capability to packet capture only. If the container were started with <code>--privileged</code> instead, all capabilities would be granted — the <code>docker run</code> and Compose configuration must specify <code>cap_add: [NET_RAW]</code> explicitly, not <code>privileged: true</code>. See <a href="runtime-flags.html">documentation/runtime-flags.html</a>.</p>
 <hr>
 <h3 id="module-3-threat-intel-ingest">Module 3 — Threat-Intel Ingest</h3>
 <p>Package: <code>cve/</code> — <code>NvdClient</code>, <code>NvdSyncService</code>, <code>CveMatcher</code>; <code>risk/EpssClient</code>, <code>risk/KevClient</code><br>
@@ -885,7 +885,7 @@ N/A — this module is an ingest-only consumer. The NVD feed does not have a rep
 <p><strong>I — Information Disclosure</strong><br>
 The <code>CASTELLUM_NVD_API_KEY</code> is stored as an environment variable and referenced via <code>@Value("${castellum.nvd.api-key:}")</code> in <code>NvdClient</code>. If the JVM process dumps its environment (e.g. via a JMX exploit or <code>/proc/self/environ</code> read), the API key would be disclosed. The key is not a high-value secret (NVD keys are free and rate-limit-only), but it should still be treated as a credential. Mitigation: restrict access to the Castellum host's process environment.</p>
 <p><strong>D — Denial of Service</strong><br>
-NVD rate-limits anonymous clients to 5 requests / 30 seconds. With an API key, the limit is 50 / 30 seconds. If <code>CASTELLUM_NVD_API_KEY</code> is absent during a bulk sync, the full initial pull takes 3–4 hours and ties up the sync executor thread. No user-visible functionality is blocked during this time, but it delays CVE enrichment. See <a href="operations.md">documentation/operations.md</a> for key registration.</p>
+NVD rate-limits anonymous clients to 5 requests / 30 seconds. With an API key, the limit is 50 / 30 seconds. If <code>CASTELLUM_NVD_API_KEY</code> is absent during a bulk sync, the full initial pull takes 3–4 hours and ties up the sync executor thread. No user-visible functionality is blocked during this time, but it delays CVE enrichment. See <a href="operations.html">documentation/operations.html</a> for key registration.</p>
 <p><strong>E — Elevation of Privilege</strong><br>
 N/A — ingest-only module with no user-facing privilege path.</p>
 <hr>
@@ -927,7 +927,7 @@ Trust boundary: Castellum → OT network segment (TCP; read-only function-code w
 <p><strong>S — Spoofing</strong><br>
 The probe target is validated by <code>HostValidator</code> to be a dotted-quad IPv4 address; hostnames are rejected to prevent DNS-based SSRF. A rogue DNS response cannot redirect a probe because DNS is bypassed entirely. An attacker who controls an OT device's IP address (ARP spoofing) could serve crafted Modbus responses to misidentify the device vendor/product. Mitigation: validate fingerprint results against multiple protocol responses where possible.</p>
 <p><strong>T — Tampering</strong><br>
-Each OT probe protocol implementation is restricted to read-only function codes. For Modbus: only Function Code 43 (Device Identification) and FC 04 (Read Input Registers for version data). Any attempt to include write function codes (FC 05/06/15/16) must be rejected at the level of the protocol builder. The read-only contract is documented in <a href="ot-probes.md">documentation/ot-probes.md</a> and is a safety-critical property — violating it could cause unintended OT state changes. Code review of the <code>ot/</code> package must verify that no write function codes are ever constructed.</p>
+Each OT probe protocol implementation is restricted to read-only function codes. For Modbus: only Function Code 43 (Device Identification) and FC 04 (Read Input Registers for version data). Any attempt to include write function codes (FC 05/06/15/16) must be rejected at the level of the protocol builder. The read-only contract is documented in <a href="ot-probes.html">documentation/ot-probes.html</a> and is a safety-critical property — violating it could cause unintended OT state changes. Code review of the <code>ot/</code> package must verify that no write function codes are ever constructed.</p>
 <p><strong>R — Repudiation</strong><br>
 OT probe requests are submitted via <code>POST /api/ot-probe</code> which requires <code>ADMIN</code> role and triggers an audit log entry. An operator cannot deny having probed a specific OT host.</p>
 <p><strong>I — Information Disclosure</strong><br>
@@ -946,7 +946,7 @@ TAXII pushes use HTTP Basic authentication; MISP pushes use an API key header. I
 The STIX 2.1 bundle is assembled from the local inventory by <code>BundleAssembler</code>. An attacker who can modify device records before export could inject false indicators into the STIX bundle. The bundle is pushed to TAXII/MISP without a digital signature — the receiving platform cannot distinguish a Castellum-generated bundle from a bundle that was tampered with in transit (although HTTPS provides transport integrity). A future enhancement could sign STIX bundles with a private key.</p>
 <p>For the integration_config row itself, tampering with the ciphertext at the database layer would fail GCM tag verification on the next <code>push</code> (the controller decrypts <code>encrypted_credentials</code> before invoking the upstream client; a verify failure throws <code>IllegalStateException("AES-GCM decryption / tag-verify failed")</code> rather than silently proceeding with garbage). This also catches drift between the on-disk ciphertext and the current value of <code>CASTELLUM_INTEGRATION_KEY</code> after a key rotation.</p>
 <p><strong>R — Repudiation</strong><br>
-Every export action (<code>export</code>, <code>push/taxii</code>, <code>push/misp</code>, <code>push/stix</code>) requires <code>ADMIN</code> role. Successful and failed pushes both write <code>TAXII_PUSH</code> / <code>MISP_PUSH</code> / <code>STIX_PUSH</code> audit rows via <code>AuditService.recordEvent</code> with the resulting status and (on failure) a truncated error message. <code>IntegrationConfigController</code> also writes <code>INTEGRATION_CONFIG_SAVE</code> on every PUT. The <code>last_push_at</code> and <code>last_push_status</code> columns on <code>integration_config</code> carry the most recent outcome so an operator can see push history inline without scanning the audit table. See <a href="stix-taxii-misp.md">documentation/stix-taxii-misp.md</a>.</p>
+Every export action (<code>export</code>, <code>push/taxii</code>, <code>push/misp</code>, <code>push/stix</code>) requires <code>ADMIN</code> role. Successful and failed pushes both write <code>TAXII_PUSH</code> / <code>MISP_PUSH</code> / <code>STIX_PUSH</code> audit rows via <code>AuditService.recordEvent</code> with the resulting status and (on failure) a truncated error message. <code>IntegrationConfigController</code> also writes <code>INTEGRATION_CONFIG_SAVE</code> on every PUT. The <code>last_push_at</code> and <code>last_push_status</code> columns on <code>integration_config</code> carry the most recent outcome so an operator can see push history inline without scanning the audit table. See <a href="threat-intel-integrations.html">documentation/threat-intel-integrations.html</a>.</p>
 <p><strong>I — Information Disclosure</strong><br>
 The STIX bundle contains the full device inventory with vulnerability data. Pushing to an external MISP or TAXII server transfers this data outside the Castellum deployment boundary. Operators must treat the TAXII/MISP destination as a trusted partner. Misconfigured <code>MISP_BASE_URL</code> (or <code>config_json</code> field that overrides the URL) pointing to an unintended server would exfiltrate the inventory. <code>IntegrationConfigDto.Response</code> returns the saved config without the encrypted-credentials bytes — the ciphertext never leaves the server through the API surface.</p>
 <p><strong>D — Denial of Service</strong><br>
@@ -959,7 +959,7 @@ Export endpoints require <code>ADMIN</code> role. A VIEWER cannot trigger an exp
 <p>Package: <code>security/</code> — <code>JwtService</code>, <code>JwtAuthenticationFilter</code>, <code>BootstrapAdminInitializer</code>, <code>Role</code>, <code>User</code>; <code>config/SecurityConfig</code><br>
 Trust boundary: external requests → API; highest-impact module for spoofing and elevation</p>
 <p><strong>S — Spoofing</strong><br>
-JWT tokens are signed with HMAC-SHA256 using <code>CASTELLUM_SECURITY_JWT_SECRET</code>. An attacker who obtains the secret can forge tokens for any user and role. The secret must be ≥ 32 bytes (enforced at startup — the application rejects the default placeholder unless the <code>test</code> Spring profile is active). The 1-hour TTL limits the window of a stolen token. JWT claims include a <code>token_version</code> integer that is checked against <code>user.token_version</code> in <code>JwtAuthenticationFilter</code> on every request — incrementing <code>user.token_version</code> (which <code>UserService</code> does on disable and on password change) invalidates every outstanding token for that user without waiting for the natural TTL. Bootstrap admin credentials must not be committed to source control; see <a href="auth.md">documentation/auth.md</a> §Bootstrap-admin.</p>
+JWT tokens are signed with HMAC-SHA256 using <code>CASTELLUM_SECURITY_JWT_SECRET</code>. An attacker who obtains the secret can forge tokens for any user and role. The secret must be ≥ 32 bytes (enforced at startup — the application rejects the default placeholder unless the <code>test</code> Spring profile is active). The 1-hour TTL limits the window of a stolen token. JWT claims include a <code>token_version</code> integer that is checked against <code>user.token_version</code> in <code>JwtAuthenticationFilter</code> on every request — incrementing <code>user.token_version</code> (which <code>UserService</code> does on disable and on password change) invalidates every outstanding token for that user without waiting for the natural TTL. Bootstrap admin credentials must not be committed to source control; see <a href="auth.html">documentation/auth.html</a> §Bootstrap-admin.</p>
 <p><strong>T — Tampering</strong><br>
 The <code>JwtService</code> verifies the HMAC signature on every request. A tampered token (e.g. role claims changed from <code>VIEWER</code> to <code>ADMIN</code>) will fail signature verification and be rejected with 401. The algorithm header (<code>alg</code>) is fixed to HS256 in the service; <code>alg: none</code> JWT attacks are not possible because the verifier enforces algorithm identity. <code>JwtAuthenticationFilter#shouldNotFilter</code> returns true for <code>ERROR</code>-dispatched requests and <code>/error</code>, so a forwarded error response cannot accidentally drop a parallel 401 over the real 4xx / 5xx status — that gap previously masked NoHandlerFound and similar dispatches.</p>
 <p><strong>R — Repudiation</strong><br>
@@ -1051,7 +1051,7 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 <p>Without these guards, an attacker with ADMIN access could direct Castellum to probe internal infrastructure (database port, JMX endpoint, metadata service) using Castellum as a proxy.</p>
 <h3 id="m3-jwt-hs256-bcrypt-12">3. JWT HS256 + BCrypt-12 (<code>security/JwtService</code>)</h3>
 <p>All API authentication uses HMAC-SHA256 signed JWT tokens. The signing secret is validated to be ≥ 32 bytes at startup; the application refuses to start with a weak or default secret outside the <code>test</code> profile. Admin passwords are stored as BCrypt strength-12 hashes (approximately 8 seconds per hash on modern hardware), making offline brute-force attacks impractical.</p>
-<p>See <a href="auth.md">documentation/auth.md</a> for the full JWT contract.</p>
+<p>See <a href="auth.html">documentation/auth.html</a> for the full JWT contract.</p>
 <h3 id="m4-append-only-audit-log">4. Append-only audit log (<code>audit/AuditLogRepository</code>)</h3>
 <p>The <code>AuditLogRepository</code> interface exposes only <code>save</code> and read methods — no <code>delete*</code> or <code>update*</code> methods. This design ensures that once an audit record is written, the application cannot modify or delete it through normal code paths. Database-level protection (restricting the application DB user's privileges on the <code>audit_log</code> table to <code>INSERT</code> and <code>SELECT</code> only) completes the control. See Module 9 Tampering note.</p>
 <h3 id="m5-distroless-cap-net-raw-only">5. Distroless + CAP_NET_RAW only (<code>supply-chain/Dockerfile</code>)</h3>
@@ -1079,7 +1079,7 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 </thead>
 <tbody>
 <tr>
-<td><a href="auth.md">documentation/auth.md</a></td>
+<td><a href="auth.html">documentation/auth.html</a></td>
 <td>JWT contract, RBAC matrix, bootstrap admin procedure, secret rotation</td>
 </tr>
 <tr>
@@ -1087,15 +1087,15 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 <td>Distroless image, Trivy gate, SBOM, cosign signing, known limitations</td>
 </tr>
 <tr>
-<td><a href="ot-probes.md">documentation/ot-probes.md</a></td>
+<td><a href="ot-probes.html">documentation/ot-probes.html</a></td>
 <td>Read-only OT probe contract, supported protocols, SSRF guard behaviour</td>
 </tr>
 <tr>
-<td><a href="runtime-flags.md">documentation/runtime-flags.md</a></td>
+<td><a href="runtime-flags.html">documentation/runtime-flags.html</a></td>
 <td>CAP_NET_RAW docker flags, pcap4j JVM system properties</td>
 </tr>
 <tr>
-<td><a href="stix-taxii-misp.md">documentation/stix-taxii-misp.md</a></td>
+<td><a href="threat-intel-integrations.html">documentation/threat-intel-integrations.html</a></td>
 <td>Threat-intel export audit trail, TAXII/MISP push configuration</td>
 </tr>
 <tr>

@@ -87,7 +87,7 @@ For this integration to function:
 2. The Castellum-generated STIX bundle content (device IP ranges, vulnerability IDs, risk scores) must be reviewed for classification before pushing to a shared MISP instance — raw internal network topology data has sensitivity implications.
 3. The `MISP_API_KEY` and `MISP_BASE_URL` environment variables in Castellum must point to the organisation's own MISP instance, not directly to any NCIRC infrastructure.
 
-See [documentation/stix-taxii-misp.md](stix-taxii-misp.md) for the full STIX export and MISP push configuration reference.
+See [documentation/threat-intel-integrations.html](threat-intel-integrations.html) for the full STIX export and MISP push configuration reference.
 
 ### TAXII as an Alternative Sharing Path
 
@@ -111,6 +111,6 @@ The TAXII 2.1 push capability (`POST /api/threat-intel/push/taxii`) provides an 
 
 | Document | Relevance |
 |----------|-----------|
-| [documentation/stix-taxii-misp.md](stix-taxii-misp.md) | STIX 2.1 export format, TAXII/MISP push configuration, audit trail |
-| [documentation/threat-model.md](threat-model.md) | Full threat model including export module threat analysis |
+| [documentation/threat-intel-integrations.html](threat-intel-integrations.html) | STIX 2.1 export format, TAXII/MISP push configuration, audit trail |
+| [documentation/threat-model.html](threat-model.html) | Full threat model including export module threat analysis |
 | [documentation/compliance.md](compliance.md) | NIST 800-53 mapping — the compliance framework complementing this NATO alignment note |

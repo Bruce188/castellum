@@ -6,7 +6,7 @@ Castellum is a NATO-track network topology and vulnerability mapper. It is an op
 
 ## Threat Model Summary
 
-Full threat model: [documentation/threat-model.md](documentation/threat-model.md)
+Full threat model: [documentation/threat-model.html](documentation/threat-model.html)
 
 **Assets:** device inventory, CVE corpus (~250k records), risk scores, STIX export bundles, JWT signing key, admin password hash.
 
@@ -131,10 +131,10 @@ See [documentation/supply-chain.md](documentation/supply-chain.md) for the full 
 
 ## API Reference
 
-Full documentation for auth and RBAC: [documentation/auth.md](documentation/auth.md)
+Full documentation for auth and RBAC: [documentation/auth.html](documentation/auth.html)
 OT probe reference: [documentation/ot-probes.html](documentation/ot-probes.html)
 STIX/TAXII/MISP reference: [documentation/threat-intel-integrations.html](documentation/threat-intel-integrations.html)
-Runtime flags (pcap4j, CAP_NET_RAW): [documentation/runtime-flags.md](documentation/runtime-flags.md)
+Runtime flags (pcap4j, CAP_NET_RAW): [documentation/runtime-flags.html](documentation/runtime-flags.html)
 Supply-chain pipeline: [documentation/supply-chain.md](documentation/supply-chain.md)
 
 All endpoints except `POST /api/auth/login` and `GET /actuator/health` require `Authorization: Bearer <token>`.
