@@ -857,14 +857,22 @@ class DockerHostProbeServiceTest {
     void k8sApi6443_401_findingOnly_noData_noRetry() {
         // REQUIRED R3 test: :6443 reachable but getter returns empty (401) →
         //   1. HIGH finding-only (no data extraction)
-        //   2. getter invoked EXACTLY ONCE (no retry storm)
+        //   2. pod-list getter invoked EXACTLY ONCE (no retry storm)
+        //
+        // NOTE: the no-retry guarantee is scoped to the pod-list endpoint (/api/v1/pods).
+        // A secondary getSecrets call (/api/v1/namespaces/default/secrets) is a DISTINCT
+        // permitted call — it does NOT constitute a retry. The stub returns empty for every
+        // endpoint so no CRITICAL escalation fires here; pod-list is still called exactly once.
         String probedIp = "10.0.0.62";
         Device hostDevice = seedLocalDevice(probedIp);
 
-        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        // Count only pod-list calls — the secondary secret-read is a distinct permitted endpoint.
+        java.util.concurrent.atomic.AtomicInteger podListCallCount = new java.util.concurrent.atomic.AtomicInteger(0);
         K8sApiClient k8sClient = new K8sApiClient(uri -> {
-            callCount.incrementAndGet();
-            return Optional.empty(); // simulates 401
+            if ("/api/v1/pods".equals(uri.getPath())) {
+                podListCallCount.incrementAndGet();
+            }
+            return Optional.empty(); // simulates 401/empty for all endpoints
         });
         KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
 
@@ -892,10 +900,58 @@ class DockerHostProbeServiceTest {
         assertThat(svc).isPresent();
         assertThat(svc.get().getPostureSeverity()).isEqualTo(DockerHostProbeService.SEVERITY_HIGH);
 
-        // REQUIRED: getter invoked EXACTLY ONCE — no retry
-        assertThat(callCount.get())
-            .as("K8sApiClient getter must be invoked EXACTLY ONCE (no retry on 401, R3)")
+        // REQUIRED: pod-list getter invoked EXACTLY ONCE — no retry on the pod-list endpoint (R3)
+        assertThat(podListCallCount.get())
+            .as("K8sApiClient /api/v1/pods must be invoked EXACTLY ONCE (no retry on 401, R3)")
             .isEqualTo(1);
+    }
+
+    @Test
+    void k8sApi6443_podsBlocked_secretsLeaked_criticalFinding() {
+        // R4 test: :6443 reachable, pod-list returns empty (blocked/401), but secret-list
+        // returns a non-empty SecretList body (anonymous secret read succeeds) →
+        // secondary escalation: CRITICAL finding (not HIGH).
+        String probedIp = "10.0.0.68";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // Minimal SecretList body — one secret present (anonymous read succeeded)
+        String secretListJson = "{\"kind\":\"SecretList\",\"items\":[{\"metadata\":{\"name\":\"my-secret\"}}]}";
+
+        K8sApiClient k8sClient = new K8sApiClient(uri -> {
+            String path = uri.getPath();
+            if ("/api/v1/pods".equals(path)) {
+                return Optional.empty(); // pod-list blocked (401/403)
+            }
+            if (path.startsWith("/api/v1/namespaces/") && path.endsWith("/secrets")) {
+                return Optional.of(secretListJson); // secrets readable anonymously
+            }
+            return Optional.empty();
+        });
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
+
+        // :6443 reachable only
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_6443 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // :6443 must carry a CRITICAL finding (anonymous secret read escalation)
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_6443, "tcp");
+        assertThat(svc)
+            .as(":6443 NetworkService must exist after secret-leak probe")
+            .isPresent();
+        assertThat(svc.get().getPostureSeverity())
+            .as("pods blocked but secrets readable anonymously → severity must be CRITICAL (R4 secret escalation)")
+            .isEqualTo(DockerHostProbeService.SEVERITY_CRITICAL);
+        assertThat(svc.get().getProtocolFamily())
+            .as("protocol family must be K8S_API_EXPOSURE")
+            .isEqualTo(DockerHostProbeService.PROTOCOL_FAMILY_K8S_API_EXPOSURE);
     }
 
     @Test
