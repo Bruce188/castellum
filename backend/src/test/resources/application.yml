@@ -3,6 +3,14 @@
 spring:
   profiles:
     active: test
+  # Disable the Spring Boot auto-MockMvc result-printer. Printing async StreamingResponseBody
+  # results races with the streaming dispatch thread reading/mutating response headers
+  # (HeaderValueHolder stream-toList "End size N is less than fixed size M"), producing
+  # intermittent errors that have nothing to do with the assertions. Tests that need the
+  # dump can still opt in with .andDo(print()).
+  test:
+    mockmvc:
+      print: none
   datasource:
     url: jdbc:h2:mem:test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
     username: sa

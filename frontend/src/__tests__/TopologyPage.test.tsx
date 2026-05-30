@@ -256,4 +256,69 @@ describe('<TopologyPage /> ?focus search param — device pre-selection', () => 
     // No focus param → panel should not render (device is null → returns null).
     expect(screen.queryByTestId('device-detail-panel')).not.toBeInTheDocument();
   });
+
+  // ---------------------------------------------------------------------------
+  // R7 trip3 nit — focus param change while mounted re-applies to new device
+  // (characterization, expected GREEN)
+  //
+  // FocusParamApplier uses a per-id `appliedRef`: once focus=1 fires it records
+  // id=1.  When the URL changes to ?focus=2 (different id), appliedRef.current
+  // is 1 ≠ 2 so the effect fires again and selects device 2.  This test locks
+  // that re-application behaviour.
+  // ---------------------------------------------------------------------------
+
+  it('re-selects device when ?focus param changes to a different id while mounted', async () => {
+    // We need a wrapper that can imperatively navigate while keeping the same
+    // TopologyPage mounted.  MemoryRouter exposes no navigate ref, so we use a
+    // sibling component with useNavigate rendered inside the same MemoryRouter.
+
+    let navigateFn: ((to: string) => void) | null = null;
+
+    function NavigateCapture() {
+      const { useNavigate } = require('react-router-dom');
+      const navigate = useNavigate();
+      // Expose the navigate function to the test scope once on mount
+      if (!navigateFn) navigateFn = (to: string) => navigate(to);
+      return null;
+    }
+
+    // Include both device 42 and a second focus target: device 1 (from DEVICES_WITH_42)
+    const DEVICE_1 = DEVICES[0]; // id=1
+
+    // deviceRisksBatch returns risks for all devices
+    mockApi.deviceRisksBatch.mockResolvedValue(
+      new Map([...DEVICES, DEVICE_42].map(d => [d.id, RISK_42])),
+    );
+
+    render(
+      <MemoryRouter initialEntries={['/?focus=42']}>
+        <NavigateCapture />
+        <TopologyPage />
+      </MemoryRouter>,
+    );
+
+    // Flush fetches — device 42 should be selected first
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      const panel = screen.getByTestId('device-detail-panel');
+      expect(panel.querySelector('h2')?.textContent).toBe('focus-host');
+    });
+
+    // Now navigate to ?focus=1 (device id 1, hostname 'a')
+    await act(async () => {
+      navigateFn?.('/?focus=1');
+      await Promise.resolve();
+    });
+
+    // FocusParamApplier must re-apply: appliedRef was 42, now param is 1 (different id)
+    await waitFor(() => {
+      const panel = screen.getByTestId('device-detail-panel');
+      // Device 1 has hostname 'a' (from DEVICES fixture)
+      expect(panel.querySelector('h2')?.textContent).toBe('a');
+    });
+  });
 });
