@@ -728,6 +728,12 @@ Content-Type: application/json
 
 <p><code>rawFields</code> keys are the string representations of Modbus object IDs / DNP3 attribute numbers /
 S7 SZL fields / BACnet property IDs, depending on the protocol.</p>
+<p>The probe response carries exactly the ten fields above. Device-level origin attribution
+(<code>originHostIp</code> / <code>originHostName</code>) and service posture severity
+(<code>postureSeverity</code>) are <strong>not</strong> part of the <code>/api/ot-probe</code> payload — they are
+persisted on the <code>device</code> / <code>service</code> rows the probe upserts and are read back through the
+device and network-service endpoints. See <a href="#side-effects">Side Effects</a> for what the probe
+writes.</p>
 <h3 id="error-responses">Error responses</h3>
 <table>
 <thead>
@@ -941,12 +947,24 @@ permit within <code>total-timeout-ms</code> return HTTP 503.</p>
 <h2 id="side-effects">Side Effects</h2>
 <p>A successful probe:</p>
 <ol>
-<li>Upserts a <code>device</code> row (via <code>DeviceUpsertService</code>) keyed on <code>ip_address</code>.</li>
+<li>Upserts a <code>device</code> row (via <code>DeviceUpsertService.upsert(...)</code>) keyed on <code>ip_address</code>.</li>
 <li>Upserts a <code>service</code> row with <code>vendor</code>, <code>product</code>, and <code>protocol_family = 'OT_ICS'</code>.</li>
-<li>Appends an <code>audit_log</code> row with action <code>OT_PROBE_SUCCESS</code>.</li>
+<li>Appends an <code>audit_log</code> row recording the probe outcome.</li>
 </ol>
-<p>A failed probe appends an <code>audit_log</code> row with action <code>OT_PROBE_FAILURE</code> (in a separate
-<code>REQUIRES_NEW</code> transaction so it survives any enclosing rollback).</p>
+<p>A failed probe appends an <code>audit_log</code> row (in a separate <code>REQUIRES_NEW</code> transaction so it
+survives any enclosing rollback).</p>
+<h3 id="origin-attribution-on-ot-discovered-devices">Origin attribution on OT-discovered devices</h3>
+<p>Every <code>device</code> row now carries device-level origin attribution — <code>origin_host_ip</code> (NOT NULL,
+entity default <code>"local"</code>) and <code>origin_host_name</code> (nullable). OT probes upsert through the
+single-argument <code>DeviceUpsertService.upsert(...)</code> overload, which passes <code>OriginContext.local()</code>,
+so an OT-discovered device is always written with <code>origin_host_ip = "local"</code> and
+<code>origin_host_name = null</code>. A non-<code>"local"</code> origin IP is written only by the remote Docker Host
+Probe, which records the probed host's IP so the same internal container IP seen from two hosts becomes
+two distinct device rows under the composite <code>UNIQUE(ip_address, origin_host_ip)</code> constraint.</p>
+<p>These attribution fields live on the persisted <code>device</code> entity, not on the <code>/api/ot-probe</code>
+response body. They are surfaced through the device endpoints (<code>GET /api/devices</code>,
+<code>GET /api/devices/{id}</code>). Likewise, <code>postureSeverity</code> is a column on the <code>service</code> entity (set by
+the service-posture path, not by the OT probe) and is not part of the OT probe payload.</p>
 <h2 id="database-schema-extension-v7">Database Schema Extension (V7)</h2>
 <p>Migration <code>V7__service_ot_metadata.sql</code> extends the <code>service</code> table:</p>
 <div class="codehilite"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">service</span><span class="w"> </span><span class="k">ADD</span><span class="w"> </span><span class="k">COLUMN</span><span class="w"> </span><span class="n">vendor</span><span class="w">          </span><span class="nb">TEXT</span><span class="p">;</span>

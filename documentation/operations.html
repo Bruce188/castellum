@@ -660,6 +660,20 @@ footer {
       <li class="lvl-3"><a href="#why-no-online-rotation">Why no online rotation</a></li>
       <li class="lvl-2"><a href="#8-unified-network-scan-scan-this-network">8. Unified Network Scan (&quot;Scan this network&quot;)</a></li>
       <li class="lvl-2"><a href="#9-feed-sync-scheduler-durable-auto-pull">9. Feed-Sync Scheduler (durable auto-pull)</a></li>
+      <li class="lvl-2"><a href="#10-async-threat-intel-export-ops-view">10. Async Threat-Intel Export (Ops View)</a></li>
+      <li class="lvl-3"><a href="#submit-export-async">Submit — POST /export/async</a></li>
+      <li class="lvl-3"><a href="#poll-export-async">Poll — GET /export/async/{jobId}</a></li>
+      <li class="lvl-3"><a href="#reading-a-503-backpressure">Reading a 503 (backpressure)</a></li>
+      <li class="lvl-3"><a href="#export-tuning-surface">Tuning surface</a></li>
+      <li class="lvl-2"><a href="#11-docker-host-probe-multi-origin-device-attribution">11. Docker Host Probe + Multi-Origin Device Attribution</a></li>
+      <li class="lvl-3"><a href="#probe-transport-endpoints">Transport and the read-only endpoint set</a></li>
+      <li class="lvl-3"><a href="#origin-attribution-on-devices">Origin attribution on devices</a></li>
+      <li class="lvl-3"><a href="#composite-ip-uniqueness-keyed-by-origin">Composite IP uniqueness keyed by origin</a></li>
+      <li class="lvl-3"><a href="#what-a-critical-daemon-exposure-finding-means">What a CRITICAL daemon-exposure finding means</a></li>
+      <li class="lvl-2"><a href="#12-device-role-classification">12. Device Role Classification</a></li>
+      <li class="lvl-3"><a href="#role-values">Role values</a></li>
+      <li class="lvl-3"><a href="#confidence-signal">Confidence signal</a></li>
+      <li class="lvl-3"><a href="#where-the-role-surfaces">Where the role surfaces</a></li>
       <li class="lvl-2"><a href="#cross-references">Cross-References</a></li>
     </ul>
   </aside>
@@ -1257,6 +1271,202 @@ VIEWERs see it read-only. The seed row uses cron <code>0 0 6 * * *</code> (06:00
 same default the legacy <code>RISK_REFRESH_CRON</code> annotation used — so behaviour is
 unchanged out of the box; operators now adjust it at runtime instead of by env var +
 restart.</p>
+<hr>
+<h2 id="10-async-threat-intel-export-ops-view">10. Async Threat-Intel Export (Ops View)</h2>
+<p>Large STIX bundle exports run as a background job so the request thread is never held
+open while the bundle is serialised. The operator submits once, then polls a job ID. The
+bundle JSON is written to a temp file on completion — it is never buffered as a heap
+String — and streamed back with a <code>Content-Length</code> on the terminal poll.</p>
+<p><code>io.castellum.web.ThreatIntelController</code> exposes the two endpoints;
+<code>io.castellum.threatintel.ExportJobService</code> runs the work on a dedicated, bounded
+executor.</p>
+<h3 id="submit-export-async">Submit — <code>POST /api/threat-intel/export/async</code></h3>
+<p>ADMIN-only. Submits a job and returns immediately:</p>
+<pre><code>POST /api/threat-intel/export/async
+→ 202 Accepted
+  {"jobId":"&lt;uuid&gt;","status":"PENDING"}</code></pre>
+<p>If the export executor's queue is saturated the submit is rejected synchronously:</p>
+<pre><code>→ 503 Service Unavailable
+  {"error":"export_queue_full","message":"Export queue is full — try again later"}</code></pre>
+<p>The <code>202</code> body field is <code>jobId</code>. Note the poll body keys the same value as
+<code>id</code> — the field name differs between submit and poll.</p>
+<h3 id="poll-export-async">Poll — <code>GET /api/threat-intel/export/async/{jobId}</code></h3>
+<p>ADMIN or VIEWER. The response shape depends on job state:</p>
+<table>
+<thead>
+<tr><th>Job state</th><th>HTTP</th><th>Body</th></tr>
+</thead>
+<tbody>
+<tr><td>Unknown job ID</td><td><code>404 Not Found</code></td><td>(empty)</td></tr>
+<tr><td><code>PENDING</code> / <code>RUNNING</code></td><td><code>200 OK</code></td><td><code>{"id":"&lt;uuid&gt;","status":"PENDING"}</code> (synchronous status JSON)</td></tr>
+<tr><td><code>FAILED</code></td><td><code>200 OK</code></td><td><code>{"id":"&lt;uuid&gt;","status":"FAILED","error":"&lt;message&gt;"}</code></td></tr>
+<tr><td><code>DONE</code></td><td><code>200 OK</code></td><td>streamed bundle body with <code>Content-Length</code> set</td></tr>
+</tbody>
+</table>
+<p>The poll key in every status body is <code>id</code>, <strong>not</strong> <code>jobId</code>. A
+<code>FAILED</code> status still returns <code>200</code> (the poll itself succeeded) — operators
+must read the <code>status</code> field, not just the HTTP code, to detect failure. The
+<code>error</code> field is present only on <code>FAILED</code>.</p>
+<p>Spring dispatches the <code>DONE</code> branch asynchronously (a non-null
+<code>StreamingResponseBody</code> is returned, streaming the temp file directly to the socket);
+the status branch writes its bytes synchronously and returns <code>null</code>, so a status poll
+is a single GET with the body readable immediately.</p>
+<h3 id="reading-a-503-backpressure">Reading a 503 (backpressure)</h3>
+<p>A <code>503 export_queue_full</code> means the bounded export queue is full, not that the
+request was malformed. The export executor (<code>exportTaskExecutor</code> in
+<code>io.castellum.config.AsyncConfig</code>) is intentionally single-threaded (core = max = 1)
+with a small bounded queue and an <code>AbortPolicy</code> rejection handler — when both the
+worker and the queue are occupied, <code>executor.execute(...)</code> throws
+<code>RejectedExecutionException</code>, which <code>ExportJobService.submit()</code> translates into
+<code>ExportQueueFullException</code>, mapped to <code>503</code> by <code>GlobalExceptionHandler</code>.</p>
+<p><strong>Operator action on 503:</strong> treat it as transient backpressure. Wait for the
+in-flight export to finish (poll any outstanding job to <code>DONE</code>/<code>FAILED</code>), then
+resubmit. Do not retry in a tight loop — a single export holds the one worker for the
+duration of bundle serialisation.</p>
+<h3 id="export-tuning-surface">Tuning surface</h3>
+<p>The queue depth and pool sizing are real Spring properties bound in <code>AsyncConfig</code>:</p>
+<table>
+<thead>
+<tr><th>Property</th><th>Default</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>castellum.export.executor.queue-capacity</code></td><td><code>5</code></td><td>Bounded queue depth before submits are rejected with <code>503</code></td></tr>
+<tr><td><code>castellum.export.executor.core-pool-size</code></td><td><code>1</code></td><td>Core export worker threads</td></tr>
+<tr><td><code>castellum.export.executor.max-pool-size</code></td><td><code>1</code></td><td>Max export worker threads</td></tr>
+</tbody>
+</table>
+<p>Raising <code>queue-capacity</code> lets more exports queue before a <code>503</code>; raising the
+pool sizes lets exports run concurrently at the cost of heap and CPU during serialisation.
+Jobs are held in an in-memory <code>ConcurrentHashMap</code> and are <strong>not</strong> persisted
+— a restart drops outstanding job state, so poll IDs do not survive a bounce.</p>
+<hr>
+<h2 id="11-docker-host-probe-multi-origin-device-attribution">11. Docker Host Probe + Multi-Origin Device Attribution</h2>
+<p>The Docker Host Probe (<code>io.castellum.discovery.probe.DockerHostProbeService</code>)
+actively probes scan-discovered hosts for an exposed Docker daemon and related
+container-management surfaces. It is <strong>strictly read-only</strong>: every Docker Engine API
+call is delegated to <code>DockerEngineApiClient</code>, which exposes only HTTP <code>GET</code> methods
+against hardcoded paths (<code>/networks</code>, <code>/networks/{id}</code>, <code>/containers/json</code>,
+<code>/containers/{id}/json</code>). The probe never issues a state-changing call — no container
+start/stop, no image pull, no exec.</p>
+<h3 id="probe-transport-endpoints">Transport and the read-only endpoint set</h3>
+<p>The probe speaks <strong>plaintext HTTP over TCP</strong> to the daemon —
+<code>http://&lt;host&gt;:&lt;port&gt;</code> — not the Unix domain socket. Port dispatch per host:</p>
+<table>
+<thead>
+<tr><th>Port</th><th>Meaning</th><th>Probe behaviour</th><th>Severity</th></tr>
+</thead>
+<tbody>
+<tr><td><code>:2375</code></td><td>Docker daemon, plaintext</td><td>Pull container list + per-container inspect via GET, ingest containers attributed to the host, raise finding</td><td><code>CRITICAL</code></td></tr>
+<tr><td><code>:2376</code></td><td>Docker daemon, TLS</td><td>Finding only — <strong>no extraction</strong> (no client-cert handling)</td><td><code>HIGH</code></td></tr>
+<tr><td><code>:2377</code></td><td>Swarm management</td><td>Finding only — no extraction</td><td><code>HIGH</code></td></tr>
+<tr><td>closed</td><td>—</td><td>Fast no-op: no finding, no devices</td><td>—</td></tr>
+</tbody>
+</table>
+<p>Per-host failures are isolated: a malformed response or exception on one host is logged
+and the scan continues with the remaining hosts. Container counts from a single host are
+capped at 5000 to bound untrusted input.</p>
+<p>A self-check (<code>runSelfCheck()</code>) enumerates the agent's own non-loopback IPv4
+interfaces and probes each on <code>:2375</code>; a reachable non-loopback bind raises a
+<code>CRITICAL</code> self-finding (your own daemon is exposed off-host).</p>
+<blockquote>
+<p>[NOTE] The same orchestration also probes adjacent container-management surfaces read-only
+(SNMP <code>:161</code>, Traefik/cAdvisor <code>:8080</code>, Portainer <code>:9000</code>/<code>:9443</code>,
+Kubernetes API <code>:6443</code>, kubelet read-only <code>:10255</code>, Docker Registry <code>:5000</code>),
+each gated by a <code>castellum.docker.probe.&lt;name&gt;.enabled</code> flag (all default
+<code>true</code>). These raise findings at their own severities and never mutate the target.</p>
+</blockquote>
+<h3 id="origin-attribution-on-devices">Origin attribution on devices</h3>
+<p>Every device row carries the origin host it was observed from. On the <code>Device</code> entity:</p>
+<ul>
+<li><code>originHostIp</code> (column <code>origin_host_ip</code>, <strong>NOT NULL</strong>, entity default
+  <code>"local"</code>) — the IP of the host the device was discovered from. <code>"local"</code> means
+  the local Castellum agent observed it (the default for all ARP / NMAP / Docker-CLI /
+  passive paths). A remote Docker probe writes the <em>probed host's</em> IP here.</li>
+<li><code>originHostName</code> (column <code>origin_host_name</code>, nullable) — human-readable origin
+  hostname; null for local discovery and when unknown at probe time.</li>
+</ul>
+<h3 id="composite-ip-uniqueness-keyed-by-origin">Composite IP uniqueness keyed by origin</h3>
+<p>The device table enforces a composite unique constraint <code>device_ip_origin_unique</code> on
+<code>(ip_address, origin_host_ip)</code>. This is what lets the same container IP — for example
+<code>172.17.0.2</code> — observed from two different Docker hosts become <strong>two distinct
+device rows</strong> rather than colliding into one. Without the origin in the key, overlapping
+private container ranges across hosts would silently overwrite each other.</p>
+<h3 id="what-a-critical-daemon-exposure-finding-means">What a CRITICAL daemon-exposure finding means</h3>
+<p>When <code>:2375</code> is reachable, the probe raises a posture finding on the host device's
+<code>(port, protocol)</code> <code>NetworkService</code> row: service name
+<code>docker-engine-api-exposed</code>, <code>protocolFamily = DOCKER_EXPOSURE</code>,
+<code>postureSeverity = CRITICAL</code>. <code>postureSeverity</code> uses the levels <code>CRITICAL</code>,
+<code>HIGH</code>, <code>MEDIUM</code>, <code>LOW</code>.</p>
+<p>A <code>CRITICAL</code> Docker-exposure finding means an <strong>unauthenticated, plaintext Docker
+daemon API is reachable over the network</strong>. Anyone who can reach that port has effective
+root on the host: the Engine API can create privileged containers, bind-mount the host
+filesystem, and read every secret the daemon can see. This is among the highest-severity
+exposures Castellum surfaces.</p>
+<p><strong>Remediation:</strong></p>
+<ol>
+<li><strong>Stop binding the daemon to a TCP port.</strong> Remove <code>-H tcp://0.0.0.0:2375</code> (or
+  any non-loopback <code>-H tcp://…</code>) from the daemon flags / <code>daemon.json</code> <code>hosts</code>.
+  The daemon should listen only on the Unix socket.</li>
+<li><strong>If remote access is genuinely required,</strong> enable TLS mutual auth (<code>:2376</code>
+  with verified client certs). Castellum downgrades <code>:2376</code> to a <code>HIGH</code> finding
+  because it cannot extract without a cert — but TLS without client-cert verification is
+  still an exposure.</li>
+<li><strong>Firewall the port</strong> at the host / network boundary so <code>:2375</code>–<code>:2377</code>
+  are unreachable from untrusted networks.</li>
+<li><strong>Re-scan</strong> to confirm the finding clears (closed port → no finding).</li>
+</ol>
+<p>The exposed-daemon posture is also surfaced in the UI device-detail panel as a posture
+badge on the affected service (CRITICAL rendered in the danger style).</p>
+<hr>
+<h2 id="12-device-role-classification">12. Device Role Classification</h2>
+<p>Each device is classified with a functional role at upsert time by
+<code>io.castellum.discovery.DeviceRoleClassifier</code>, stored on the <code>Device</code> entity as
+<code>deviceRole</code> (column <code>device_role</code>, <strong>NOT NULL</strong>, default <code>UNKNOWN</code>).</p>
+<h3 id="role-values">Role values</h3>
+<p>The <code>io.castellum.discovery.DeviceRole</code> enum has exactly these constants:</p>
+<table>
+<thead>
+<tr><th>Role</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>LAPTOP</code></td><td>Reserved — see note below</td></tr>
+<tr><td><code>DESKTOP</code></td><td>Desktop-class OS fingerprint</td></tr>
+<tr><td><code>SERVER</code></td><td>Server-class host</td></tr>
+<tr><td><code>ROUTER</code></td><td>Gateway / routing device</td></tr>
+<tr><td><code>CONTAINER</code></td><td>Docker / Kubernetes container</td></tr>
+<tr><td><code>UNKNOWN</code></td><td>Ambiguous signals, or rows created before the role migration</td></tr>
+</tbody>
+</table>
+<p><code>LAPTOP</code> is reserved: OS fingerprinting alone cannot distinguish a laptop from a
+desktop (the kernel advertises no chassis type), so ambiguous desktop-class OSes
+deterministically map to <code>DESKTOP</code>. A future signal (mDNS model hint, SNMP chassis OID)
+may promote rows to <code>LAPTOP</code> without a schema change.</p>
+<h3 id="confidence-signal">Confidence signal</h3>
+<p>Alongside the role, <code>roleConfidence</code> (column <code>role_confidence</code>,
+<strong>NOT NULL</strong>, default <code>HIGH</code>) records how the role was determined. The
+<code>io.castellum.discovery.RoleConfidence</code> enum has two levels:</p>
+<ul>
+<li><code>HIGH</code> — a deterministic, API-confirmed rule (e.g. a container confirmed via the
+  Docker/K8s API).</li>
+<li><code>LOW</code> — inferred from a heuristic with known false-positive risk (e.g. a MAC-OUI /
+  macvlan sweep where real hardware with a locally-administered OUI could be
+  misclassified).</li>
+</ul>
+<h3 id="where-the-role-surfaces">Where the role surfaces</h3>
+<p>The role badge renders in two places in the frontend:</p>
+<ul>
+<li><strong>Topology view</strong> (<code>TopologyView.tsx</code>) — each node carries a per-role badge
+  derived from <code>deviceRole</code>; <code>UNKNOWN</code> devices get no badge (the role channel is
+  distinct from the discovery-scope border).</li>
+<li><strong>Device detail panel</strong> (<code>DeviceDetailPanel.tsx</code>) — the device's role is
+  shown directly (<code>data-testid="device-role"</code>).</li>
+</ul>
+<p><strong>Operator note:</strong> treat the role as a triage hint, not ground truth. A
+<code>HIGH</code>-confidence <code>CONTAINER</code> or <code>ROUTER</code> is API- or rule-confirmed and safe
+to act on. A <code>LOW</code>-confidence role came from a heuristic and may be a false positive —
+confirm against other signals (open services, OS fingerprint, origin host) before treating
+the role as authoritative. An <code>UNKNOWN</code> role simply means the available signals were
+ambiguous; it is not itself a finding.</p>
 <hr>
 <h2 id="cross-references">Cross-References</h2>
 <table>

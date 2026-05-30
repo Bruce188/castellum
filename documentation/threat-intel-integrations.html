@@ -626,6 +626,8 @@ footer {
       <li class="lvl-3"><a href="#misp-push-response">MISP push response</a></li>
       <li class="lvl-3"><a href="#error-responses">Error responses</a></li>
       <li class="lvl-3"><a href="#curl-recipes">curl recipes</a></li>
+      <li class="lvl-2"><a href="#2-5-async-export-job-api">2.5 Async export job API</a></li>
+      <li class="lvl-3"><a href="#async-export-curl-recipe">Async export — end-to-end curl recipe</a></li>
       <li class="lvl-2"><a href="#3-encryption-castellum-integration-key">3. Encryption — CASTELLUM_INTEGRATION_KEY</a></li>
       <li class="lvl-2"><a href="#4-put-api-integrations-type-json-shape">4. PUT /api/integrations/{type} — JSON shape</a></li>
       <li class="lvl-3"><a href="#4-1-taxii">4.1 TAXII</a></li>
@@ -771,8 +773,16 @@ footer {
 <td>Upstream TAXII or MISP server unreachable or returned an unexpected response</td>
 </tr>
 <tr>
+<td>503 Service Unavailable</td>
+<td>Async export queue saturated (<code>{"error":"export_queue_full"}</code>) — back off and resubmit. See §2.5.</td>
+</tr>
+<tr>
+<td>404 Not Found</td>
+<td>Async export poll (<code>GET /export/async/{jobId}</code>) for an unknown or expired <code>jobId</code>. See §2.5.</td>
+</tr>
+<tr>
 <td>403 Forbidden</td>
-<td>Caller does not have <code>ADMIN</code> role</td>
+<td>Caller lacks the required role. The async export poll allows <code>ROLE_VIEWER</code>; every other endpoint here is <code>ROLE_ADMIN</code>-only.</td>
 </tr>
 </tbody>
 </table>
@@ -807,6 +817,94 @@ curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>
 <li><strong>Preview bundle</strong> — fetches the bundle text via <code>exportStixBundleText()</code> and renders it as pretty-printed JSON (<code>JSON.stringify(…, null, 2)</code>) in a scrollable on-screen block. Indentation is applied client-side only; the wire format remains compact JSON.</li>
 </ul>
 <p>Both controls share a busy lock so only one operation runs at a time. Errors appear inline below the buttons.</p>
+<hr>
+<h2 id="2-5-async-export-job-api">2.5 Async export job API</h2>
+<p>The stateless <code>POST /api/threat-intel/export</code> assembles the entire bundle on the request thread and returns it inline. For a large corpus that is slow and heap-hungry, so <code>ThreatIntelController</code> also exposes a job-based async pair backed by <code>ExportJobService</code> and a dedicated <code>exportTaskExecutor</code>. The job runs off the request thread, streams its JSON to a temp file, and is <strong>memory-bound</strong>: the corpus query uses the <code>CveStixView</code> projection, which selects only <code>cveId</code> and <code>description</code> and <strong>excludes the per-object <code>rawJson</code> column</strong>, so the async bundle never loads raw NVD JSON into heap. Golden parity with the sync export is preserved.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>RBAC</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/threat-intel/export/async</code></td>
+<td><strong>ADMIN</strong></td>
+<td>Submit a job. <code>202 Accepted</code> + <code>{ "jobId", "status" }</code>; <code>503</code> when the queue is saturated.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/threat-intel/export/async/{jobId}</code></td>
+<td><strong>ADMIN or VIEWER</strong></td>
+<td>Poll the job. Status JSON while pending/running/failed; streams the bundle once <code>DONE</code>; <code>404</code> for an unknown id.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>[WARN] Field-name asymmetry — read carefully. The <strong>submit</strong> response names the job <code>jobId</code>; the <strong>poll</strong> response names the same value <code>id</code>. They are the same UUID — only the JSON key differs. Scripts that capture <code>jobId</code> on submit must read <code>id</code> (or just <code>status</code>) back from the poll.</p>
+</blockquote>
+<p><strong>Submit</strong> returns immediately and the export proceeds in the background:</p>
+<div class="codehilite"><pre><span></span><code>HTTP 202 Accepted
+{ &quot;jobId&quot;: &quot;3f1c…-…-…&quot;, &quot;status&quot;: &quot;PENDING&quot; }
+</code></pre></div>
+
+<p>When the executor queue is full no job is created and the request is rejected with backpressure (<code>ExportQueueFullException</code> → <code>GlobalExceptionHandler</code>):</p>
+<div class="codehilite"><pre><span></span><code>HTTP 503 Service Unavailable
+{ &quot;error&quot;: &quot;export_queue_full&quot;, &quot;message&quot;: &quot;Export queue is full — try again later&quot; }
+</code></pre></div>
+
+<p><strong>Poll</strong> is read-only — a single <code>GET</code> that never mutates the job. While the job is <code>PENDING</code> / <code>RUNNING</code> / <code>FAILED</code> it returns a small status JSON. Note the key is <code>id</code> here, <em>not</em> <code>jobId</code>:</p>
+<div class="codehilite"><pre><span></span><code>HTTP 200 application/json
+{ &quot;id&quot;: &quot;3f1c…-…-…&quot;, &quot;status&quot;: &quot;RUNNING&quot; }
+</code></pre></div>
+
+<p>The <code>error</code> field appears <strong>only</strong> on <code>FAILED</code>:</p>
+<div class="codehilite"><pre><span></span><code>HTTP 200 application/json
+{ &quot;id&quot;: &quot;3f1c…-…-…&quot;, &quot;status&quot;: &quot;FAILED&quot;, &quot;error&quot;: &quot;&lt;failure message&gt;&quot; }
+</code></pre></div>
+
+<p>Status values are the <code>ExportJob.Status</code> enum: <code>PENDING</code>, <code>RUNNING</code>, <code>DONE</code>, <code>FAILED</code>. Once the job reaches <code>DONE</code>, the same poll URL streams the finished bundle with a <code>Content-Length</code> header equal to the file size (the body is streamed off a temp file, never fully buffered in heap):</p>
+<div class="codehilite"><pre><span></span><code>HTTP 200 application/json
+Content-Length: &lt;fileSize&gt;
+
+{ ...stix bundle JSON... }
+</code></pre></div>
+
+<h3 id="async-export-curl-recipe">Async export — end-to-end curl recipe</h3>
+<p>Assumes <code>:8081</code> and the <code>$TOKEN</code> obtained in the §2 login recipe. The flow is: submit once → poll the same <code>jobId</code> on an interval until <code>DONE</code> → the <code>DONE</code> poll <em>is</em> the download.</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1. Submit the async export, capturing the jobId from the 202 body</span>
+<span class="nv">JOB_ID</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://localhost:8081/api/threat-intel/export/async<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;import json,sys;print(json.load(sys.stdin)[&quot;jobId&quot;])&#39;</span><span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;submitted </span><span class="nv">$JOB_ID</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 2. Poll until DONE. NOTE: the poll body uses key &quot;id&quot;, not &quot;jobId&quot;.</span>
+<span class="k">while</span><span class="w"> </span>:<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="nv">STATUS</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="s2">&quot;http://localhost:8081/api/threat-intel/export/async/</span><span class="nv">$JOB_ID</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;import json,sys;print(json.load(sys.stdin).get(&quot;status&quot;,&quot;?&quot;))&#39;</span><span class="k">)</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;status=</span><span class="nv">$STATUS</span><span class="s2">&quot;</span>
+<span class="w">  </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$STATUS</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;DONE&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">break</span>
+<span class="w">  </span><span class="o">[</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$STATUS</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;FAILED&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;export failed&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">exit</span><span class="w"> </span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span>sleep<span class="w"> </span><span class="m">2</span>
+<span class="k">done</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 3. On DONE the same URL streams the bundle. -o writes it to disk;</span>
+<span class="c1"># -D - dumps the headers so you can see the Content-Length on the stream.</span>
+curl<span class="w"> </span>-s<span class="w"> </span>-D<span class="w"> </span>-<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;http://localhost:8081/api/threat-intel/export/async/</span><span class="nv">$JOB_ID</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-o<span class="w"> </span>stix-bundle-async.json
+</code></pre></div>
+
+<blockquote>
+<p>[INFO] The poll is a plain read — issuing it repeatedly (or from a VIEWER token) has no side effects and does not re-trigger the export. Only <code>POST /export/async</code> enqueues work, and only an ADMIN token may submit. A <code>503</code> on submit means the executor queue is full; back off and resubmit rather than tight-looping.</p>
+</blockquote>
 <hr>
 <h2 id="3-encryption-castellum-integration-key">3. Encryption — <code>CASTELLUM_INTEGRATION_KEY</code></h2>
 <p>Persisted credentials are encrypted at rest with AES-256-GCM (<code>AesGcmCipher</code>).</p>
