@@ -1,0 +1,72 @@
+[
+  {
+    "Id": "c01",
+    "Name": "/very-long-container-name-alpha-01",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "nginx:1.25" },
+    "NetworkSettings": {
+      "Ports": { "80/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.2", "Gateway": "172.17.0.1" } }
+    }
+  },
+  {
+    "Id": "c02",
+    "Name": "/very-long-container-name-bravo-02",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6379/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.3", "Gateway": "172.17.0.1" } }
+    }
+  },
+  {
+    "Id": "c03",
+    "Name": "/very-long-container-name-charlie-03",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6380/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.4", "Gateway": "172.17.0.1" } }
+    }
+  },
+  {
+    "Id": "c04",
+    "Name": "/very-long-container-name-delta-04",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6381/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.5", "Gateway": "172.17.0.1" } }
+    }
+  },
+  {
+    "Id": "c05",
+    "Name": "/very-long-container-name-echo-05",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6382/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.6", "Gateway": "172.17.0.1" } }
+    }
+  },
+  {
+    "Id": "c06",
+    "Name": "/very-long-container-name-foxtrot-06",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6383/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.7", "Gateway": "172.17.0.1" } }
+    }
+  },
+  {
+    "Id": "c07",
+    "Name": "/very-long-container-name-golf-07",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6384/tcp": null },
+      "Networks": { "bridge": { "IPAddress": "172.17.0.8", "Gateway": "172.17.0.1" } }
+    }
+  }
+]

@@ -887,6 +887,9 @@ class DockerDiscoveryServiceTest {
     /**
      * ≥2 containers on bridge + ICC enabled → LOW finding with "reachable" in detail.
      * LOCKS invariants 1 (read-only), 3 ("reachable", no "communicating"), 8 (sentinel port).
+     *
+     * R1 hardening: additionally asserts the finding detail names at least one actual container
+     * from the fixture (app-container-1 or app-container-2 from network-inspect-bridge-icc-on.json).
      */
     @Test
     void discover_defaultBridge_twoMembersIccOn_raisesLowFinding() throws Exception {
@@ -919,6 +922,12 @@ class DockerDiscoveryServiceTest {
 
         // Remediation text must mention docker network
         assertThat(detail).contains("docker network");
+
+        // R1 hardening: detail must contain at least one actual container name from the fixture
+        // (network-inspect-bridge-icc-on.json has "app-container-1" and "app-container-2")
+        assertThat(detail)
+            .as("finding detail must name at least one actual bridge member")
+            .containsAnyOf("app-container-1", "app-container-2");
     }
 
     /**
@@ -945,6 +954,9 @@ class DockerDiscoveryServiceTest {
     /**
      * ≥2 containers on bridge BUT ICC=false → INFO (downgraded) — LOCKS invariant 2.
      * The ≥2 branch does NOT yield LOW when ICC is off.
+     *
+     * R1 hardening: additionally asserts the downgrade branch does NOT produce "reachable"
+     * in the detail (the LOW-branch "mutually reachable" prose must not bleed into the ICC-off path).
      */
     @Test
     void discover_defaultBridge_iccOff_downgradedInfo() throws Exception {
@@ -964,6 +976,10 @@ class DockerDiscoveryServiceTest {
         // Detail must contain "legacy default bridge" (downgrade wording from iccEnabled=false branch)
         assertThat(finding.getVersion()).as("ICC-off detail must mention legacy default bridge")
             .contains("legacy default bridge");
+        // R1 hardening: the downgrade branch must NOT use the LOW "mutually reachable" prose
+        assertThat(finding.getVersion())
+            .as("ICC-off detail must not claim containers are reachable (that is the LOW-branch claim)")
+            .doesNotContain("reachable");
     }
 
     /**
@@ -1035,4 +1051,93 @@ class DockerDiscoveryServiceTest {
             .as("reference stack must have no DEFAULT_BRIDGE_ICC finding (invariant 5)")
             .isFalse();
     }
+
+    // -----------------------------------------------------------------------
+    // R1 hardening — new detector tests (tests 6-9)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Single container with ICC=false → INFO finding mentioning "legacy default bridge".
+     * Uses a dedicated fixture: network-inspect-bridge-single-icc-off.json (1 member, ICC=false).
+     */
+    @Test
+    void discover_defaultBridge_singleMemberIccOff_downgradedInfo() throws Exception {
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-bridge-members.json"),
+            fixture("network-inspect-bridge-single-icc-off.json"),
+            List.of("c1abc", "c2def"));
+
+        svc.discover();
+
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        NetworkService finding = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(gw.getId(), 65535, "tcp").orElseThrow();
+
+        assertThat(finding.getPostureSeverity())
+            .as("single member + ICC=false → INFO (not LOW)")
+            .isEqualTo("INFO");
+        assertThat(finding.getVersion())
+            .as("ICC-off path must mention 'legacy default bridge'")
+            .contains("legacy default bridge");
+    }
+
+    /**
+     * A container member that publishes a host port must NOT suppress the DEFAULT_BRIDGE_ICC
+     * segmentation finding. Publishing a port is orthogonal to ICC-based lateral movement risk.
+     *
+     * Uses inspect-bridge-members-published.json (bridge-app-1 publishes port 8080) with
+     * network-inspect-bridge-icc-on.json (≥2 members, ICC=true) → LOW finding still raised.
+     */
+    @Test
+    void discover_defaultBridge_publishedHostPortMember_stillRaisesFinding() throws Exception {
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-bridge-members-published.json"),
+            fixture("network-inspect-bridge-icc-on.json"),
+            List.of("c1abc", "c2def"));
+
+        svc.discover();
+
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        NetworkService finding = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(gw.getId(), 65535, "tcp").orElseThrow();
+
+        assertThat(finding.getPostureSeverity())
+            .as("published host port must not suppress the ICC segmentation finding")
+            .isEqualTo("LOW");
+        assertThat(finding.getProtocolFamily())
+            .isEqualTo(DockerDiscoveryService.PROTOCOL_FAMILY_DEFAULT_BRIDGE_ICC);
+    }
+
+    /**
+     * When enough bridge members are present that the composed detail string exceeds 255 chars,
+     * the finding's version field must be truncated to at most 255 characters and end with "...".
+     *
+     * Uses network-inspect-bridge-many.json (7 members with long names) so the raw detail
+     * exceeds 255 chars before truncation.
+     */
+    @Test
+    void discover_defaultBridge_longDetail_versionTruncatedTo255() throws Exception {
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-bridge-members-many.json"),
+            fixture("network-inspect-bridge-many.json"),
+            List.of("c01", "c02", "c03", "c04", "c05", "c06", "c07"));
+
+        svc.discover();
+
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        NetworkService finding = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(gw.getId(), 65535, "tcp").orElseThrow();
+
+        String detail = finding.getVersion();
+        assertThat(detail)
+            .as("truncated detail must not exceed 255 characters")
+            .hasSizeLessThanOrEqualTo(255);
+        assertThat(detail)
+            .as("truncated detail must end with '...' to signal truncation")
+            .endsWith("...");
+    }
+
+    // Test 9 (deriveGatewayIp_networkAddressEndsIn255_returnsNull) lives in DeriveGatewayIpTest.java.
+    // It is isolated there because deriveGatewayIp is currently private and that class will not
+    // compile until the implementer relaxes its visibility to package-private.
 }

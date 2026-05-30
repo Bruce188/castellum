@@ -1,0 +1,36 @@
+[
+  {
+    "Id": "c1abc",
+    "Name": "/bridge-app-1",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "nginx:1.25" },
+    "NetworkSettings": {
+      "Ports": {
+        "80/tcp": [
+          { "HostIp": "0.0.0.0", "HostPort": "8080" }
+        ]
+      },
+      "Networks": {
+        "bridge": {
+          "IPAddress": "172.17.0.2",
+          "Gateway": "172.17.0.1"
+        }
+      }
+    }
+  },
+  {
+    "Id": "c2def",
+    "Name": "/bridge-app-2",
+    "State": { "Status": "running", "Running": true },
+    "Config": { "Image": "redis:7" },
+    "NetworkSettings": {
+      "Ports": { "6379/tcp": null },
+      "Networks": {
+        "bridge": {
+          "IPAddress": "172.17.0.3",
+          "Gateway": "172.17.0.1"
+        }
+      }
+    }
+  }
+]
