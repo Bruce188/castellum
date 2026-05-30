@@ -543,7 +543,9 @@ class AcceptanceSmokeTest {
     @Test
     @org.springframework.security.test.context.support.WithAnonymousUser
     void ac4_securityHeadersPresent() throws Exception {
-        mockMvc.perform(get("/api/devices"))
+        // X-Forwarded-Proto: https simulates the TLS-terminating reverse proxy that fronts the
+        // service in production — HSTS is emitted only for HTTPS-origin requests (RFC 6797 §7.2).
+        mockMvc.perform(get("/api/devices").header("X-Forwarded-Proto", "https"))
             .andExpect(status().isUnauthorized())
             .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
                 .exists("Content-Security-Policy"))
