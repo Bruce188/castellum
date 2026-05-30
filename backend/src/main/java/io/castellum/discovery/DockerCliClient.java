@@ -75,6 +75,25 @@ public class DockerCliClient {
     }
 
     /**
+     * Returns the raw {@code docker network inspect} JSON array for the given network name.
+     *
+     * <p>READ-ONLY: {@code network inspect} never mutates daemon state.
+     * The {@code --} end-of-options guard mirrors {@link #inspect(List)} defense-in-depth —
+     * a network name can never be parsed as a flag.
+     *
+     * @param name the network name (e.g. {@code "bridge"}); must not be null or blank
+     * @return raw JSON array stdout from {@code docker network inspect -- <name>}
+     * @throws IllegalArgumentException      if {@code name} is null or blank (defensive; no process spawned)
+     * @throws DiscoveryUnavailableException on command failure, non-zero exit, or timeout
+     */
+    public String networkInspect(String name) throws DiscoveryUnavailableException {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("docker network inspect: name must not be null or blank");
+        }
+        return invoke(List.of("docker", "network", "inspect", "--", name)).stdout();
+    }
+
+    /**
      * Returns the raw {@code docker inspect} JSON array for the given container IDs.
      * Returns the empty-array literal {@code "[]"} when {@code ids} is empty (no spawn).
      *

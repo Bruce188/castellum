@@ -23,6 +23,11 @@ import java.util.Map;
  * ({@code frontend/src/lib/gatewayEdges.ts}) draws the operator's intended graph with NO new
  * edge code:
  *
+ * <p>After the container ingest pass, the LOCAL {@link #discover()} path runs a best-effort
+ * default-bridge segmentation check: one {@code docker network inspect -- bridge} call (READ-ONLY)
+ * surfaces the actual {@code enable_icc} flag and container membership, then emits a posture
+ * finding on the synthetic {@code docker-net:bridge} gateway device when warranted.</p>
+ *
  * <ul>
  *   <li><b>Same-network star.</b> Each container is upserted with its real IP on its primary
  *       docker network. Containers sharing a network share a {@code /24}, so the gateway-edge
@@ -52,6 +57,26 @@ import java.util.Map;
 public class DockerDiscoveryService {
 
     private static final Logger log = LoggerFactory.getLogger(DockerDiscoveryService.class);
+
+    /**
+     * Protocol-family label for the default-bridge ICC posture finding.
+     * Mirrors the PROTOCOL_FAMILY_* convention from DockerHostProbeService.
+     */
+    public static final String PROTOCOL_FAMILY_DEFAULT_BRIDGE_ICC = "DEFAULT_BRIDGE_ICC";
+
+    /**
+     * Sentinel port for the default-bridge finding row.
+     *
+     * <p>{@link io.castellum.domain.NetworkService#port} is annotated {@code @Min(1) @Max(65535)};
+     * a {@code 0} sentinel fails Bean Validation. Port 65535 (top of the valid range) is chosen
+     * because it cannot collide with a real listening-service row (no daemon binds the top of the
+     * ephemeral range by convention), and it upserts idempotently on (deviceId, 65535, "tcp")
+     * across re-runs.
+     */
+    private static final int DEFAULT_BRIDGE_FINDING_PORT = 65535;
+
+    /** Transport protocol for the sentinel finding row — see {@link #DEFAULT_BRIDGE_FINDING_PORT}. */
+    private static final String DEFAULT_BRIDGE_FINDING_PROTOCOL = "tcp";
 
     private final DockerCliClient cli;
     private final DockerInspectParser parser;
@@ -91,7 +116,12 @@ public class DockerDiscoveryService {
         List<String> ids = cli.listRunningContainerIds();
         String json = cli.inspect(ids);
         List<DockerContainer> containers = parser.parse(json);
-        return ingest(containers, OriginContext.local(), clock.instant());
+        Instant now = clock.instant();
+        DockerDiscoveryResponse response = ingest(containers, OriginContext.local(), now);
+        // Best-effort default-bridge segmentation check (LOCAL path only — invariant 5).
+        // Runs AFTER ingest() so the docker-net:bridge gateway device exists for the finding anchor.
+        checkDefaultBridge(now);
+        return response;
     }
 
     /**
@@ -265,6 +295,145 @@ public class DockerDiscoveryService {
             gatewayCount++;
         }
         return gatewayCount;
+    }
+
+    // -----------------------------------------------------------------------
+    // Default-bridge segmentation detector (LOCAL discover() path only)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Best-effort default-bridge segmentation check. Runs {@code docker network inspect -- bridge}
+     * (READ-ONLY — invariant 1), parses ICC flag + member list, and emits a posture finding on the
+     * {@code docker-net:bridge} gateway device when warranted (invariant 8 port sentinel).
+     *
+     * <p>Any {@link DiscoveryUnavailableException} from {@link DockerCliClient#networkInspect} is
+     * caught and logged; discovery never fails because of a missing network inspect (invariant 7).
+     *
+     * <p>Called from {@link #discover()} AFTER {@link #ingest} — the anchor device
+     * ({@code docker-net:bridge} at the subnet's {@code .1}) must already exist (invariant 5).
+     */
+    private void checkDefaultBridge(Instant observedAt) {
+        String netJson;
+        try {
+            netJson = cli.networkInspect("bridge");
+        } catch (DiscoveryUnavailableException e) {
+            // Older docker daemon, or no default bridge — skip the finding (invariant 7).
+            log.info("Default-bridge segmentation check skipped (docker network inspect unavailable): {}", e.getMessage());
+            return;
+        }
+
+        DockerInspectParser.BridgeNetworkInfo info = parser.parseNetworkInspect(netJson);
+
+        if (!info.isDefaultBridge() || info.members().isEmpty()) {
+            // No authoritative default bridge found, or zero containers — no finding (invariant: zero ⇒ skip).
+            return;
+        }
+
+        // Derive the gateway IP from the subnet (e.g. "172.17.0.0/16" → "172.17.0.1").
+        String gwIp = deriveGatewayIp(info.subnet());
+        if (gwIp == null) {
+            log.debug("Default-bridge: cannot derive gateway IP from subnet '{}' — skipping finding", info.subnet());
+            return;
+        }
+
+        // Locate the anchor device upserted by ingest() as "docker-net:bridge".
+        java.util.Optional<Device> anchorOpt =
+            deviceRepository.findByIpAddressAndOriginHostIp(gwIp, "local");
+        if (anchorOpt.isEmpty()) {
+            log.debug("Default-bridge: no docker-net:bridge gateway at {} — skipping finding", gwIp);
+            return;
+        }
+        Long deviceId = anchorOpt.get().getId();
+
+        // Severity ladder (invariants 2 + 3 + 7):
+        int memberCount = info.members().size();
+        String severity;
+        String name;
+        String detail;
+
+        if (!info.iccEnabled()) {
+            // ICC disabled — lateral reach claim would be false; downgrade (invariant 2).
+            severity = "INFO";
+            name = "default-bridge-segmentation";
+            detail = "legacy default bridge in use (inter-container communication disabled). "
+                + "Prefer a user-defined network for explicit isolation and DNS.";
+        } else if (memberCount == 1) {
+            // Single container — no lateral-movement risk regardless of ICC.
+            severity = "INFO";
+            name = "default-bridge-segmentation";
+            detail = "Single container on the default bridge — prefer a user-defined network for isolation + DNS.";
+        } else {
+            // ≥2 containers AND ICC enabled → LOW (invariant 3: "reachable", NEVER "communicating").
+            severity = "LOW";
+            name = "default-bridge-segmentation";
+            StringBuilder sb = new StringBuilder();
+            sb.append(memberCount)
+              .append(" containers mutually reachable on the default bridge (no segmentation; ")
+              .append("lateral-movement path): ");
+            for (int i = 0; i < info.members().size(); i++) {
+                if (i > 0) sb.append(", ");
+                DockerInspectParser.Member m = info.members().get(i);
+                sb.append(m.name()).append('(').append(m.ipv4()).append(')');
+            }
+            sb.append(". Remediation: isolate containers with `docker network create` + ")
+              .append("`docker network connect`, or declare separate `networks:` in compose.");
+            detail = sb.toString();
+        }
+
+        raiseDefaultBridgeFinding(deviceId, severity, name, detail, observedAt);
+    }
+
+    /**
+     * Derive the gateway IP from a CIDR subnet string (e.g. {@code "172.17.0.0/16"} → {@code "172.17.0.1"}).
+     * Returns null if the subnet is null/blank or cannot be parsed.
+     */
+    private static String deriveGatewayIp(String subnet) {
+        if (subnet == null || subnet.isBlank()) {
+            return null;
+        }
+        // Take the network address part (before '/'), split on '.', increment the last octet to 1.
+        String addr = subnet.contains("/") ? subnet.substring(0, subnet.indexOf('/')) : subnet;
+        String[] octets = addr.split("\\.", -1);
+        if (octets.length != 4) {
+            return null;
+        }
+        // For any /prefix: gateway is conventionally network_address + 1 on the host part.
+        // For 172.17.0.0/16 → 172.17.0.1; for 10.0.0.0/8 → 10.0.0.1.
+        try {
+            int last = Integer.parseInt(octets[3]);
+            octets[3] = String.valueOf(last + 1);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return String.join(".", octets);
+    }
+
+    /**
+     * Upsert the default-bridge posture finding row, keyed on the sentinel
+     * {@code (deviceId, DEFAULT_BRIDGE_FINDING_PORT, DEFAULT_BRIDGE_FINDING_PROTOCOL)}.
+     *
+     * <p>Mirrors the {@code raiseExposureFinding} shape from
+     * {@link io.castellum.discovery.probe.DockerHostProbeService} — does NOT call that private
+     * method directly (invariant 5). Idempotent: re-runs update the existing row in place.
+     */
+    private void raiseDefaultBridgeFinding(Long deviceId, String severity, String name,
+                                           String detail, Instant observedAt) {
+        NetworkService svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(deviceId, DEFAULT_BRIDGE_FINDING_PORT, DEFAULT_BRIDGE_FINDING_PROTOCOL)
+            .orElseGet(NetworkService::new);
+        svc.setDeviceId(deviceId);
+        svc.setPort(DEFAULT_BRIDGE_FINDING_PORT);
+        svc.setProtocol(DEFAULT_BRIDGE_FINDING_PROTOCOL);
+        svc.setName(name);
+        // The detail text rides in the version field — a free-form-text carrier reused so no schema
+        // change is needed (the underlying service.version column is TEXT/unbounded, not length-capped).
+        // It surfaces in the DeviceDetailPanel services table, so truncate at 255 chars to keep that
+        // cell readable — this is a display bound, not a column constraint.
+        svc.setVersion(detail != null && detail.length() > 255 ? detail.substring(0, 252) + "..." : detail);
+        svc.setProtocolFamily(PROTOCOL_FAMILY_DEFAULT_BRIDGE_ICC);
+        svc.setPostureSeverity(severity);
+        svc.setObservedAt(observedAt);
+        networkServiceRepository.save(svc);
     }
 
     /**

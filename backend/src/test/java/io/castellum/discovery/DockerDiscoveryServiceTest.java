@@ -58,12 +58,57 @@ class DockerDiscoveryServiceTest {
     // context, so AuditService is a plain Mockito mock — not a @MockBean.
     private final AuditService auditService = Mockito.mock(AuditService.class);
 
+    /**
+     * Create a service with a TWO-way runner: ps → ids, else → inspectJson.
+     * The "else" branch is hit by BOTH docker inspect (containers) AND docker network inspect
+     * (both return the same inspectJson). Existing call sites that don't need a distinct
+     * network-inspect fixture work correctly because they use the reference stack which has no
+     * bridge containers — so the network-inspect arm produces a sentinel (isDefaultBridge=false).
+     *
+     * <p>Use {@link #newService(String, String, List)} when you need a distinct network-inspect fixture.
+     */
     private DockerDiscoveryService newService(String inspectJson, List<String> ids) {
+        return newService(inspectJson, "[]", ids);
+    }
+
+    /**
+     * Three-way runner:
+     * <ol>
+     *   <li>{@code ps} → ids (container-id list)</li>
+     *   <li>{@code network inspect} → networkInspectJson (docker network inspect branch)</li>
+     *   <li>else → containerInspectJson (docker inspect branch)</li>
+     * </ol>
+     * This keeps the existing single-arg call sites byte-identical (they pass networkInspectJson="[]"
+     * which produces BridgeNetworkInfo.notFound() → no finding raised).
+     */
+    private DockerDiscoveryService newService(String containerInspectJson, String networkInspectJson, List<String> ids) {
         DockerCliClient.CommandRunner runner = argv -> {
             if (argv.contains("ps")) {
                 return new DockerCliClient.CommandResult(0, String.join("\n", ids), "");
             }
-            return new DockerCliClient.CommandResult(0, inspectJson, "");
+            if (argv.contains("network") && argv.contains("inspect")) {
+                return new DockerCliClient.CommandResult(0, networkInspectJson, "");
+            }
+            return new DockerCliClient.CommandResult(0, containerInspectJson, "");
+        };
+        DockerCliClient cli = new DockerCliClient(runner);
+        return new DockerDiscoveryService(cli, parser, upsertService, repo, serviceRepo, auditService,
+            Clock.fixed(FIXED_NOW, ZoneOffset.UTC));
+    }
+
+    /**
+     * Three-way runner where the network-inspect arm throws DiscoveryUnavailableException,
+     * simulating an unavailable/older docker daemon.
+     */
+    private DockerDiscoveryService newServiceNetworkInspectThrows(String containerInspectJson, List<String> ids) {
+        DockerCliClient.CommandRunner runner = argv -> {
+            if (argv.contains("ps")) {
+                return new DockerCliClient.CommandResult(0, String.join("\n", ids), "");
+            }
+            if (argv.contains("network") && argv.contains("inspect")) {
+                throw new java.io.IOException("docker network inspect unavailable");
+            }
+            return new DockerCliClient.CommandResult(0, containerInspectJson, "");
         };
         DockerCliClient cli = new DockerCliClient(runner);
         return new DockerDiscoveryService(cli, parser, upsertService, repo, serviceRepo, auditService,
@@ -833,5 +878,161 @@ class DockerDiscoveryServiceTest {
         assertThat(gw.getOriginHostIp())
             .as("local Docker CLI gateway must also have originHostIp='local'")
             .isEqualTo("local");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 2.1 — default-bridge segmentation detector
+    // -----------------------------------------------------------------------
+
+    /**
+     * ≥2 containers on bridge + ICC enabled → LOW finding with "reachable" in detail.
+     * LOCKS invariants 1 (read-only), 3 ("reachable", no "communicating"), 8 (sentinel port).
+     */
+    @Test
+    void discover_defaultBridge_twoMembersIccOn_raisesLowFinding() throws Exception {
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-bridge-members.json"),
+            fixture("network-inspect-bridge-icc-on.json"),
+            List.of("c1abc", "c2def"));
+
+        svc.discover();
+
+        // The docker-net:bridge gateway should be at 172.17.0.1
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        NetworkService finding = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(gw.getId(), 65535, "tcp").orElseThrow();
+
+        // LOCKS invariant 8: sentinel port (65535, tcp)
+        assertThat(finding.getPort()).isEqualTo(65535);
+        assertThat(finding.getProtocol()).isEqualTo("tcp");
+        assertThat(finding.getPostureSeverity()).isEqualTo("LOW");
+        assertThat(finding.getProtocolFamily()).isEqualTo(DockerDiscoveryService.PROTOCOL_FAMILY_DEFAULT_BRIDGE_ICC);
+        assertThat(finding.getName()).isEqualTo("default-bridge-segmentation");
+
+        // LOCKS invariant 3: detail (stored in version field) contains "reachable" not "communicating"
+        String detail = finding.getVersion();
+        assertThat(detail).as("detail must mention reachability").contains("reachable");
+        assertThat(detail).as("detail must not claim certainty of communication").doesNotContain("communicating");
+
+        // Detail must mention member names and IPs (from the fixture)
+        assertThat(detail).contains("172.17.0.");
+
+        // Remediation text must mention docker network
+        assertThat(detail).contains("docker network");
+    }
+
+    /**
+     * Single container on bridge → INFO finding (single-rung ladder).
+     * LOCKS the single ladder rung.
+     */
+    @Test
+    void discover_defaultBridge_singleMember_raisesInfoFinding() throws Exception {
+        // Use inspect-bridge-members.json but network-inspect shows only 1 member
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-bridge-members.json"),
+            fixture("network-inspect-bridge-single.json"),
+            List.of("c1abc", "c2def"));
+
+        svc.discover();
+
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        NetworkService finding = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(gw.getId(), 65535, "tcp").orElseThrow();
+        assertThat(finding.getPostureSeverity()).isEqualTo("INFO");
+        assertThat(finding.getProtocolFamily()).isEqualTo("DEFAULT_BRIDGE_ICC");
+    }
+
+    /**
+     * ≥2 containers on bridge BUT ICC=false → INFO (downgraded) — LOCKS invariant 2.
+     * The ≥2 branch does NOT yield LOW when ICC is off.
+     */
+    @Test
+    void discover_defaultBridge_iccOff_downgradedInfo() throws Exception {
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-bridge-members.json"),
+            fixture("network-inspect-bridge-icc-off.json"),
+            List.of("c1abc", "c2def"));
+
+        svc.discover();
+
+        Device gw = repo.findByIpAddress("172.17.0.1").orElseThrow();
+        NetworkService finding = serviceRepo
+            .findByDeviceIdAndPortAndProtocol(gw.getId(), 65535, "tcp").orElseThrow();
+        // LOCKS invariant 2: ≥2 members does NOT yield LOW when ICC is off
+        assertThat(finding.getPostureSeverity()).isEqualTo("INFO");
+        assertThat(finding.getProtocolFamily()).isEqualTo("DEFAULT_BRIDGE_ICC");
+        // Detail must contain "legacy default bridge" (downgrade wording from iccEnabled=false branch)
+        assertThat(finding.getVersion()).as("ICC-off detail must mention legacy default bridge")
+            .contains("legacy default bridge");
+    }
+
+    /**
+     * Zero members on bridge → no finding row. LOCKS zero ⇒ no finding.
+     */
+    @Test
+    void discover_defaultBridge_zeroMembers_noFinding() throws Exception {
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-reference.json"),
+            fixture("network-inspect-bridge-empty.json"),
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"));
+
+        svc.discover();
+
+        // No DEFAULT_BRIDGE_ICC finding on any device
+        assertThat(serviceRepo.findAll().stream()
+            .anyMatch(s -> "DEFAULT_BRIDGE_ICC".equals(s.getProtocolFamily())))
+            .as("zero members on bridge → no DEFAULT_BRIDGE_ICC finding")
+            .isFalse();
+    }
+
+    /**
+     * docker network inspect throws → discover() returns normally, no DEFAULT_BRIDGE_ICC finding.
+     * LOCKS invariant 7 (best-effort — network inspect failure never breaks the discovery pass).
+     */
+    @Test
+    void discover_networkInspectUnavailable_skipsFindingNoThrow() throws Exception {
+        DockerDiscoveryService svc = newServiceNetworkInspectThrows(
+            fixture("inspect-reference.json"),
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"));
+
+        // Must NOT throw
+        DockerDiscoveryResponse res = svc.discover();
+
+        // Reference-stack result still holds (8 containers + 2 gateways)
+        assertThat(res.containers()).isEqualTo(8);
+        assertThat(res.gateways()).isEqualTo(2);
+
+        // No DEFAULT_BRIDGE_ICC finding exists (LOCKS invariant 7)
+        assertThat(serviceRepo.findAll().stream()
+            .anyMatch(s -> "DEFAULT_BRIDGE_ICC".equals(s.getProtocolFamily())))
+            .as("network inspect failure → no DEFAULT_BRIDGE_ICC finding")
+            .isFalse();
+    }
+
+    /**
+     * REGRESSION: the existing reference stack (no bridge members) still produces 8 containers +
+     * 2 gateways and ZERO DEFAULT_BRIDGE_ICC findings — proves invariant 5 (ingest untouched).
+     */
+    @Test
+    void discover_referenceStack_unchanged_noBridgeFinding() throws Exception {
+        // Reference stack has no bridge-network containers → network-inspect returns empty containers
+        // Use "[]" as network-inspect JSON (no default bridge element → isDefaultBridge=false → no finding)
+        DockerDiscoveryService svc = newService(
+            fixture("inspect-reference.json"),
+            "[]",
+            List.of("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"));
+
+        DockerDiscoveryResponse res = svc.discover();
+
+        // Existing test: 8 containers + 2 gateways (LOCKS invariant 5: ingest untouched)
+        assertThat(res.containers()).isEqualTo(8);
+        assertThat(res.gateways()).isEqualTo(2);
+        assertThat(res.updated()).isEqualTo(10);
+
+        // No DEFAULT_BRIDGE_ICC finding on any device
+        assertThat(serviceRepo.findAll().stream()
+            .anyMatch(s -> "DEFAULT_BRIDGE_ICC".equals(s.getProtocolFamily())))
+            .as("reference stack must have no DEFAULT_BRIDGE_ICC finding (invariant 5)")
+            .isFalse();
     }
 }

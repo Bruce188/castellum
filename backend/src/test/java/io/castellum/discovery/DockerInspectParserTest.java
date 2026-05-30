@@ -239,4 +239,99 @@ class DockerInspectParserTest {
             """;
         assertThat(parser.parse(json).get(0).image()).isNull();
     }
+
+    // -----------------------------------------------------------------------
+    // Task 1.2 — parseNetworkInspect: BridgeNetworkInfo parsing
+    // -----------------------------------------------------------------------
+
+    @Test
+    void parseNetworkInspect_iccOn_readsMembersAndSubnet() throws IOException {
+        // LOCKS invariant 2 — actual enable_icc=true read, not assumed
+        DockerInspectParser.BridgeNetworkInfo info =
+            parser.parseNetworkInspect(fixture("network-inspect-bridge-icc-on.json"));
+
+        assertThat(info.isDefaultBridge()).isTrue();
+        assertThat(info.iccEnabled()).isTrue();
+        assertThat(info.subnet()).isEqualTo("172.17.0.0/16");
+        assertThat(info.members()).hasSizeGreaterThanOrEqualTo(2);
+        // CIDR suffix must be stripped from every member IP
+        for (DockerInspectParser.Member m : info.members()) {
+            assertThat(m.ipv4()).as("CIDR suffix must be stripped").doesNotContain("/");
+            assertThat(m.ipv4()).startsWith("172.17.0.");
+        }
+    }
+
+    @Test
+    void parseNetworkInspect_iccOff_iccEnabledFalse() throws IOException {
+        // LOCKS invariant 2 — the false case is actually parsed (planner's guard)
+        DockerInspectParser.BridgeNetworkInfo info =
+            parser.parseNetworkInspect(fixture("network-inspect-bridge-icc-off.json"));
+
+        assertThat(info.isDefaultBridge()).isTrue();
+        assertThat(info.iccEnabled()).isFalse();
+    }
+
+    @Test
+    void parseNetworkInspect_singleMember_oneMember() throws IOException {
+        DockerInspectParser.BridgeNetworkInfo info =
+            parser.parseNetworkInspect(fixture("network-inspect-bridge-single.json"));
+
+        assertThat(info.isDefaultBridge()).isTrue();
+        assertThat(info.members()).hasSize(1);
+    }
+
+    @Test
+    void parseNetworkInspect_emptyContainers_zeroMembers() throws IOException {
+        DockerInspectParser.BridgeNetworkInfo info =
+            parser.parseNetworkInspect(fixture("network-inspect-bridge-empty.json"));
+
+        assertThat(info.isDefaultBridge()).isTrue();
+        assertThat(info.members()).isEmpty();
+    }
+
+    @Test
+    void parseNetworkInspect_notDefaultBridge_isDefaultBridgeFalse() {
+        // LOCKS invariant 4 — Name alone is NOT sufficient; default_bridge option must be "true"
+        String json = """
+            [
+              {
+                "Name": "bridge",
+                "Options": {
+                  "com.docker.network.bridge.default_bridge": "false"
+                },
+                "IPAM": { "Config": [] },
+                "Containers": {}
+              }
+            ]
+            """;
+        DockerInspectParser.BridgeNetworkInfo info = parser.parseNetworkInspect(json);
+        assertThat(info.isDefaultBridge()).isFalse();
+    }
+
+    @Test
+    void parseNetworkInspect_defaultBridgeOptionAbsent_isDefaultBridgeFalse() {
+        // LOCKS invariant 4 — absent default_bridge option ⇒ not authoritative default bridge
+        String json = """
+            [
+              {
+                "Name": "bridge",
+                "Options": {},
+                "IPAM": { "Config": [] },
+                "Containers": {}
+              }
+            ]
+            """;
+        DockerInspectParser.BridgeNetworkInfo info = parser.parseNetworkInspect(json);
+        assertThat(info.isDefaultBridge()).isFalse();
+    }
+
+    @Test
+    void parseNetworkInspect_blankOrEmptyArray_sentinel() {
+        // null, blank, and "[]" must all return isDefaultBridge=false without throwing
+        assertThat(parser.parseNetworkInspect(null).isDefaultBridge()).isFalse();
+        assertThat(parser.parseNetworkInspect(null).members()).isEmpty();
+        assertThat(parser.parseNetworkInspect("").isDefaultBridge()).isFalse();
+        assertThat(parser.parseNetworkInspect("[]").isDefaultBridge()).isFalse();
+        assertThat(parser.parseNetworkInspect("[]").members()).isEmpty();
+    }
 }
