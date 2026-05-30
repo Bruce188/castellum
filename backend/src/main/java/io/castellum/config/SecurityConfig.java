@@ -70,10 +70,13 @@ public class SecurityConfig {
                 // Remote-agent push ingest: authenticated by bearer token (RemoteAgentTokenAuthFilter).
                 .requestMatchers(HttpMethod.POST, "/api/discovery/remote-docker").hasRole("REMOTE_AGENT")
                 .anyRequest().authenticated())
-            // Register jwt before UsernamePasswordAuthenticationFilter first, so it gets
-            // that slot. Then register remoteAgent before jwt — since jwt is now placed in
-            // the chain, remoteAgent is inserted immediately before it, making the order:
-            // remoteAgentTokenAuthFilter → jwt → UsernamePasswordAuthenticationFilter.
+            // Register jwt before UsernamePasswordAuthenticationFilter. The remote-agent
+            // bearer filter below is also added before UsernamePasswordAuthenticationFilter
+            // (registered after jwt), so the effective chain order is:
+            // jwt → remoteAgentTokenAuthFilter → UsernamePasswordAuthenticationFilter.
+            // For a remote-agent POST carrying an opaque bearer token, the jwt filter finds
+            // no valid JWT and leaves the security context empty, then remoteAgentTokenAuthFilter
+            // sets the ROLE_REMOTE_AGENT principal — verified end-to-end by RemoteDockerControllerTest.
             .addFilterBefore(jwt, UsernamePasswordAuthenticationFilter.class);
 
         // RemoteAgentTokenAuthFilter is created inline only when the JPA repository is
