@@ -48,6 +48,15 @@ public class AsyncConfig {
     @Value("${castellum.initial-sync.executor.queue-capacity:0}")
     private int initialSyncQueueCapacity;
 
+    @Value("${castellum.export.executor.core-pool-size:1}")
+    private int exportCorePoolSize;
+
+    @Value("${castellum.export.executor.max-pool-size:1}")
+    private int exportMaxPoolSize;
+
+    @Value("${castellum.export.executor.queue-capacity:5}")
+    private int exportQueueCapacity;
+
     @Bean("scanTaskExecutor")
     public ThreadPoolTaskExecutor scanTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -55,6 +64,24 @@ public class AsyncConfig {
         executor.setMaxPoolSize(maxPoolSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix("scan-exec-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Dedicated executor for async bundle-export jobs.
+     *
+     * <p>Single-threaded by default (corePoolSize=1, maxPoolSize=1) with a small queue
+     * so bulk exports don't stall other pool users.
+     */
+    @Bean("exportTaskExecutor")
+    public ThreadPoolTaskExecutor exportTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(exportCorePoolSize);
+        executor.setMaxPoolSize(exportMaxPoolSize);
+        executor.setQueueCapacity(exportQueueCapacity);
+        executor.setThreadNamePrefix("export-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;

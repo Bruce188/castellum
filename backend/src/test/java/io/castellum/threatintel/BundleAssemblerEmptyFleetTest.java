@@ -2,6 +2,7 @@ package io.castellum.threatintel;
 
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.CveStixView;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -80,7 +81,7 @@ class BundleAssemblerEmptyFleetTest {
     @Test
     void assemble_emptyFleet_doesNotCallFindByDeviceIdIn() {
         when(deviceRepository.findAll()).thenReturn(List.of());
-        when(cveRepository.findAll()).thenReturn(List.of());
+        when(cveRepository.findAllStixViews()).thenReturn(List.of());
 
         StixBundle bundle = assembler.assemble();
 
@@ -106,7 +107,7 @@ class BundleAssemblerEmptyFleetTest {
         noIp.setLastSeen(Instant.now());
 
         when(deviceRepository.findAll()).thenReturn(List.of(noIp));
-        when(cveRepository.findAll()).thenReturn(List.of());
+        when(cveRepository.findAllStixViews()).thenReturn(List.of());
 
         StixBundle bundle = assembler.assemble();
 
@@ -132,7 +133,7 @@ class BundleAssemblerEmptyFleetTest {
         d.setLastSeen(Instant.now());
 
         when(deviceRepository.findAll()).thenReturn(List.of(d));
-        when(cveRepository.findAll()).thenReturn(List.of());
+        when(cveRepository.findAllStixViews()).thenReturn(List.of());
 
         // Service whose name is null → CpeMapper.toCpe23 returns null → no CPE match
         NetworkService svc = new NetworkService();
@@ -162,7 +163,7 @@ class BundleAssemblerEmptyFleetTest {
     @Test
     void assemble_emptyFleet_doesNotThrow() {
         when(deviceRepository.findAll()).thenReturn(List.of());
-        when(cveRepository.findAll()).thenReturn(List.of());
+        when(cveRepository.findAllStixViews()).thenReturn(List.of());
 
         assertThatCode(() -> assembler.assemble())
             .as("assemble() must not throw for an empty fleet")

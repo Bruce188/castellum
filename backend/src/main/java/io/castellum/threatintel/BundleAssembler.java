@@ -3,6 +3,7 @@ package io.castellum.threatintel;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.CveStixView;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -114,8 +115,8 @@ public class BundleAssembler {
         // fleet CPE match, e.g. CVE-2026-0004 in the golden fixture). Restricting to matched CVEs
         // would change bundle content and break the AC4 golden contract. Retained, unbounded — see
         // plan-v55 §AC5. Revisit only if corpus size threatens heap.
-        List<Cve> allCves = cveRepository.findAll();
-        for (Cve cve : allCves) {
+        List<CveStixView> allCves = cveRepository.findAllStixViews();
+        for (CveStixView cve : allCves) {
             StixVulnerability vuln = new StixVulnerability(
                 "vulnerability", "2.1",
                 StixIds.forCve(cve.getCveId()),
