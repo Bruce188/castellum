@@ -98,6 +98,13 @@ public class DockerHostProbeService {
      */
     private static final int MAX_TAGS_PER_REPO = 64;
 
+    /**
+     * Aggregate ceiling on {@code registry_images} entries across all repos.
+     * Bounds blob-DoS even when per-repo cap × repo-count is large;
+     * the 16MB catalog body cap is the upstream bound.
+     */
+    private static final int MAX_IMAGES_TOTAL = 2000;
+
     /** Probe ports and their posture severities. */
     static final int PORT_2375 = 2375;
     static final int PORT_2376 = 2376;
@@ -677,6 +684,9 @@ public class DockerHostProbeService {
                 // Enrich: for each repo, fetch tags and fold into name:tag entries
                 List<String> imageEntries = new ArrayList<>();
                 for (String repo : repos) {
+                    if (imageEntries.size() >= MAX_IMAGES_TOTAL) {
+                        break;
+                    }
                     Optional<String> tagsOpt = registryApiClient.getTags(ip, PORT_5000, repo);
                     if (tagsOpt.isPresent()) {
                         List<String> tagList = registryCatalogMapper.tags(tagsOpt.get());
@@ -685,6 +695,9 @@ public class DockerHostProbeService {
                                 ? tagList.subList(0, MAX_TAGS_PER_REPO)
                                 : tagList;
                         for (String tag : cappedTags) {
+                            if (imageEntries.size() >= MAX_IMAGES_TOTAL) {
+                                break;
+                            }
                             imageEntries.add(repo + ":" + tag);
                         }
                         if (tagList.isEmpty()) {

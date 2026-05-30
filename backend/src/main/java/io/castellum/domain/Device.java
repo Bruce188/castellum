@@ -76,7 +76,7 @@ public class Device {
      * when the host is confirmed to run a Docker registry with an unauthenticated catalog.
      * NOT a per-image topology row: stored as a delimited blob on the host device row.
      */
-    @Column(name = "registry_images")
+    @Column(name = "registry_images", columnDefinition = "TEXT")
     private String registryImages;
 
     @Column(name = "publishes_host_port", nullable = false)
