@@ -1153,4 +1153,230 @@ class DockerHostProbeServiceTest {
             deviceRepository.findByIpAddressAndOriginHostIp("172.17.0.1", probedIp).orElseThrow();
         assertThat(gw.getHostname()).startsWith("docker-net:");
     }
+
+    // -----------------------------------------------------------------------
+    // R2 / F3 review-v83 NB1 — audit symmetry in probe8080
+    //
+    // Bug: when traefikEnabled=false, the TRAEFIK switch case falls through
+    // the inner `if (traefikEnabled)` and emits NO audit event (silent scan).
+    // Fix: audit must be emitted even when the surface flag is disabled.
+    // -----------------------------------------------------------------------
+
+    /** Build probe with UI clients + explicit k8s/registry disabled, Portainer noop. */
+    private DockerHostProbeService buildProbeWithUiClientsAndFlags(
+            Predicate<HostPort> reachable,
+            TraefikApiClient traefikClient,
+            CAdvisorApiClient cadvisorClient,
+            boolean traefikEnabled,
+            boolean cadvisorEnabled) {
+        SnmpClient snmpClient = new SnmpClient((h, c, o) -> Optional.empty());
+        SnmpBridgeMapper snmpMapper = new SnmpBridgeMapper();
+        TraefikRouterMapper traefikMapper = new TraefikRouterMapper(TEST_OM);
+        PortainerApiClient portainerClient = noopPortainerClient();
+        CAdvisorContainerMapper cadvisorMapper = new CAdvisorContainerMapper(TEST_OM);
+        Port8080Fingerprinter fingerprinter =
+            new Port8080Fingerprinter(traefikClient, cadvisorClient, TEST_OM);
+        DockerEngineApiClient apiClient = new DockerEngineApiClient(uri -> Optional.empty());
+        return new DockerHostProbeService(
+            deviceUpsertService, deviceRepository, discoveryService(),
+            apiClient, networkMapper, containerListMapper, inspectParser,
+            networkServiceRepository, auditService,
+            snmpClient, snmpMapper, "public", false,
+            traefikClient, traefikMapper, portainerClient, cadvisorClient, cadvisorMapper,
+            fingerprinter, traefikEnabled, false, cadvisorEnabled,
+            noopK8sClient(), noopKubeletClient(), new K8sPodMapper(TEST_OM), false,
+            noopRegistryClient(), new RegistryCatalogMapper(TEST_OM), false,
+            /* maxConcurrent */ 4, reachable);
+    }
+
+    /**
+     * F3 review-v83 NB1 — audit symmetry in probe8080.
+     *
+     * <p>A host that fingerprints as Traefik on :8080 but has {@code traefik.enabled=false}
+     * (while {@code cadvisor.enabled=true} so the outer guard still opens :8080) must still
+     * record an audit event — the scan touched the surface even though the flag is off.
+     *
+     * <p>RED until the implementer hoists {@code emitAuditSuccess} out of the
+     * {@code if (traefikEnabled)} inner block (or equivalent refactor).
+     */
+    @Test
+    void probe8080_traefikDetected_traefikDisabled_auditEventStillEmitted() {
+        String ip = "10.0.2.1";
+        seedLocalDevice(ip);
+
+        // Fingerprinter identifies :8080 as Traefik (overview endpoint answers)
+        TraefikApiClient traefikClient = new TraefikApiClient(uri -> {
+            if (uri.getPath().equals("/api/overview")) return Optional.of(TRAEFIK_OVERVIEW);
+            return Optional.empty();
+        });
+        // cAdvisor must be enabled so the outer `(traefikEnabled || cadvisorEnabled)` guard
+        // still opens port 8080; but it does NOT fingerprint as cAdvisor (returns empty).
+        CAdvisorApiClient cadvisorClient = new CAdvisorApiClient(uri -> Optional.empty());
+
+        // :8080 reachable
+        Predicate<HostPort> reachable = hp -> hp.port() == 8080 && hp.host().equals(ip);
+
+        // traefikEnabled=false, cadvisorEnabled=true (outer guard opens :8080 via cadvisor flag)
+        DockerHostProbeService probe = buildProbeWithUiClientsAndFlags(
+            reachable, traefikClient, cadvisorClient,
+            /* traefikEnabled */ false, /* cadvisorEnabled */ true);
+
+        probe.probeHosts(List.of(ip));
+
+        // ASSERT: an audit event for port 8080 must have been recorded even though
+        // traefikEnabled=false (the scan touched this surface — silence is wrong).
+        verify(auditService, atLeastOnce()).recordEvent(
+            eq("system"), eq("DOCKER_PROBE"), eq("docker_probe"),
+            eq(ip + ":8080"), any());
+
+        // No TRAEFIK_EXPOSURE finding must be raised (the surface is disabled)
+        Optional<NetworkService> finding = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(
+                deviceRepository.findByIpAddressAndOriginHostIp(ip, "local").get().getId(),
+                8080, "tcp");
+        assertThat(finding)
+            .as("no TRAEFIK_EXPOSURE finding when traefikEnabled=false")
+            .isEmpty();
+    }
+
+    // -----------------------------------------------------------------------
+    // R2 / F4 review-v84 NB3 — optional getTags → registry_images enrichment
+    //
+    // Bug: RegistryApiClient.getTags(name) is coded + unit-tested but NOT wired
+    // into probeRegistry.  registry_images currently stores bare repo names only.
+    // Fix: after getCatalog, call getTags for each repo and fold name:tag into blob.
+    // -----------------------------------------------------------------------
+
+    /**
+     * F4 review-v84 NB3 — getTags wired into probeRegistry → name:tag enrichment.
+     *
+     * <p>A registry surface with a known repository must, after probe, have the device's
+     * {@code registry_images} contain at least one {@code name:tag} entry (e.g. {@code nginx:latest}).
+     *
+     * <p>RED until {@code getTags} is wired into {@code probeRegistry} and the blob is enriched.
+     */
+    @Test
+    void registry5000_getTags_enrichesRegistryImagesWithNameColonTag() {
+        String probedIp = "10.0.2.3";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        String catalogJson = "{\"repositories\":[\"nginx\"]}";
+        String tagsJson = "{\"name\":\"nginx\",\"tags\":[\"latest\",\"1.25\"]}";
+
+        // getCatalog returns catalog; getTags returns tags for "nginx"
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/v2/_catalog")) return Optional.of(catalogJson);
+            if (path.equals("/v2/nginx/tags/list")) return Optional.of(tagsJson);
+            return Optional.empty();
+        });
+
+        // :5000 reachable
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // registry_images must contain at least one name:tag entry
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        String images = reloadedHost.getRegistryImages();
+        assertThat(images)
+            .as("registry_images must contain a name:tag entry after getTags enrichment")
+            .isNotBlank()
+            .contains("nginx:");
+
+        // At least one of the known tags must appear
+        assertThat(images)
+            .as("registry_images must contain 'nginx:latest' or 'nginx:1.25' after getTags wiring")
+            .satisfiesAnyOf(
+                s -> assertThat(s).contains("nginx:latest"),
+                s -> assertThat(s).contains("nginx:1.25"));
+    }
+
+    // -----------------------------------------------------------------------
+    // R2 BLOCKING #2 — Blob DoS: per-repo tag cap must bound registry_images size
+    //
+    // probeRegistry accumulates repo:tag entries with NO cap on tags per repo.
+    // A crafted registry returning e.g. 200 tags for one repo can build a
+    // multi-megabyte blob. The fix: cap tags-per-repo at a documented bound.
+    //
+    // The exact cap value is the implementer's choice, but this test asserts it
+    // is at most 64 entries — a reasonable, documented upper bound.  Whatever cap
+    // the implementer chooses, the assertion `<= 64` must hold.
+    // -----------------------------------------------------------------------
+
+    /**
+     * A registry with a single repository that advertises many tags (200) must produce
+     * a {@code registry_images} blob whose entry count for that repo is bounded.
+     *
+     * <p>The existing happy-path enrichment test
+     * ({@code registry5000_getTags_enrichesRegistryImagesWithNameColonTag}) must still
+     * pass after this test is introduced — the cap only kicks in for excess tags.
+     *
+     * <p>RED until {@code probeRegistry} (or a downstream mapper) applies a per-repo
+     * tag cap that limits the number of {@code repo:tag} entries per repository.
+     *
+     * <p>Comment: The exact cap is the implementer's choice; we assert at most 64
+     * entries in {@code registry_images} for the single overloaded repo.  Use a
+     * count of comma-delimited tokens as a proxy for the entry count.
+     */
+    @Test
+    void registry5000_manyTags_perRepoTagCapEnforced() {
+        String probedIp = "10.0.2.10";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        // Build a tags/list response body with 200 tags for "overloaded"
+        StringBuilder tagsBuilder = new StringBuilder();
+        tagsBuilder.append("{\"name\":\"overloaded\",\"tags\":[");
+        for (int i = 0; i < 200; i++) {
+            if (i > 0) tagsBuilder.append(",");
+            tagsBuilder.append("\"tag").append(i).append("\"");
+        }
+        tagsBuilder.append("]}");
+        String manyTagsJson = tagsBuilder.toString();
+
+        String catalogJson = "{\"repositories\":[\"overloaded\"]}";
+
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            String path = uri.getPath();
+            if (path.equals("/v2/_catalog")) return Optional.of(catalogJson);
+            if (path.startsWith("/v2/overloaded/tags/list")) return Optional.of(manyTagsJson);
+            return Optional.empty();
+        });
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        String images = reloadedHost.getRegistryImages();
+        assertThat(images)
+            .as("registry_images must be set after a repo with many tags is probed")
+            .isNotBlank();
+
+        // Count entries: the blob is comma-separated; split on comma to count tokens.
+        // Each token corresponds to one repo:tag entry (or bare repo name for the
+        // fallback case).  With 200 raw tags and no cap the count would be 200;
+        // with a proper cap it must be <= 64.
+        long entryCount = java.util.Arrays.stream(images.split(","))
+            .filter(s -> !s.isBlank())
+            .count();
+
+        assertThat(entryCount)
+            .as("registry_images entry count must be <= 64 for a single overloaded repo "
+                + "(implementer's per-repo tag cap must bound blob growth; "
+                + "actual cap is implementer's choice but this assertion sets the ceiling)")
+            .isLessThanOrEqualTo(64);
+    }
 }

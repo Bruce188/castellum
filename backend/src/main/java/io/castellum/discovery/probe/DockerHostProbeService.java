@@ -92,6 +92,12 @@ public class DockerHostProbeService {
     /** Maximum containers accepted from a single host probe. Bounds R4 untrusted-input. */
     static final int MAX_CONTAINERS_PER_HOST = 5000;
 
+    /**
+     * Per-repository tag cap: at most this many tags are folded into the registry_images blob
+     * for a single repository. Bounds blob-DoS from a crafted registry returning unlimited tags.
+     */
+    private static final int MAX_TAGS_PER_REPO = 64;
+
     /** Probe ports and their posture severities. */
     static final int PORT_2375 = 2375;
     static final int PORT_2376 = 2376;
@@ -500,8 +506,9 @@ public class DockerHostProbeService {
             Port8080Fingerprinter.Identity identity = port8080Fingerprinter.identify(ip, 8080);
             switch (identity) {
                 case TRAEFIK -> {
+                    log.info("DockerHostProbeService: {}:8080 is TRAEFIK — fingerprinted (traefikEnabled={})", ip, traefikEnabled);
+                    emitAuditSuccess(ip, 8080, "traefik", startMs);
                     if (traefikEnabled) {
-                        log.info("DockerHostProbeService: {}:8080 is TRAEFIK — extracting routes", ip);
                         Optional<String> routersOpt = traefikClient.getRouters(ip, 8080);
                         Optional<String> servicesOpt = traefikClient.getServices(ip, 8080);
                         if (routersOpt.isPresent()) {
@@ -510,19 +517,18 @@ public class DockerHostProbeService {
                         }
                         raiseFindingForExistingDevice(ip, 8080, "tcp",
                             PROTOCOL_FAMILY_TRAEFIK_EXPOSURE, SEVERITY_MEDIUM);
-                        emitAuditSuccess(ip, 8080, "traefik", startMs);
                     }
                 }
                 case CADVISOR -> {
+                    log.info("DockerHostProbeService: {}:8080 is CADVISOR — fingerprinted (cadvisorEnabled={})", ip, cadvisorEnabled);
+                    emitAuditSuccess(ip, 8080, "cadvisor", startMs);
                     if (cadvisorEnabled) {
-                        log.info("DockerHostProbeService: {}:8080 is CADVISOR — extracting containers", ip);
                         Optional<String> subOpt = cadvisorClient.getSubcontainers(ip, 8080);
                         if (subOpt.isPresent()) {
                             cadvisorMapper.containerNames(subOpt.get());
                         }
                         raiseFindingForExistingDevice(ip, 8080, "tcp",
                             PROTOCOL_FAMILY_CADVISOR_EXPOSURE, SEVERITY_MEDIUM);
-                        emitAuditSuccess(ip, 8080, "cadvisor", startMs);
                     }
                 }
                 case UNKNOWN -> {
@@ -660,7 +666,29 @@ public class DockerHostProbeService {
             if (catalogOpt.isPresent()) {
                 log.info("DockerHostProbeService: {} :5000 registry catalog accessible — MEDIUM", ip);
                 List<String> repos = registryCatalogMapper.repositories(catalogOpt.get());
-                String blob = registryCatalogMapper.toInventoryBlob(repos);
+                // Enrich: for each repo, fetch tags and fold into name:tag entries
+                List<String> imageEntries = new ArrayList<>();
+                for (String repo : repos) {
+                    Optional<String> tagsOpt = registryApiClient.getTags(ip, PORT_5000, repo);
+                    if (tagsOpt.isPresent()) {
+                        List<String> tagList = registryCatalogMapper.tags(tagsOpt.get());
+                        // Cap tags per repo to MAX_TAGS_PER_REPO to prevent blob-DoS
+                        List<String> cappedTags = tagList.size() > MAX_TAGS_PER_REPO
+                                ? tagList.subList(0, MAX_TAGS_PER_REPO)
+                                : tagList;
+                        for (String tag : cappedTags) {
+                            imageEntries.add(repo + ":" + tag);
+                        }
+                        if (tagList.isEmpty()) {
+                            // No tags returned — fall back to bare repo name
+                            imageEntries.add(repo);
+                        }
+                    } else {
+                        // getTags not available — fall back to bare repo name
+                        imageEntries.add(repo);
+                    }
+                }
+                String blob = registryCatalogMapper.toInventoryBlob(imageEntries);
                 // Write registry_images metadata to the probed host Device row (HOST METADATA only)
                 persistRegistryImages(ip, blob);
                 raiseFindingForExistingDevice(ip, PORT_5000, "tcp",
