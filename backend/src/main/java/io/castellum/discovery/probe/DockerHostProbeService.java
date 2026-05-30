@@ -92,6 +92,12 @@ public class DockerHostProbeService {
     /** Maximum containers accepted from a single host probe. Bounds R4 untrusted-input. */
     static final int MAX_CONTAINERS_PER_HOST = 5000;
 
+    /**
+     * Per-repository tag cap: at most this many tags are folded into the registry_images blob
+     * for a single repository. Bounds blob-DoS from a crafted registry returning unlimited tags.
+     */
+    private static final int MAX_TAGS_PER_REPO = 64;
+
     /** Probe ports and their posture severities. */
     static final int PORT_2375 = 2375;
     static final int PORT_2376 = 2376;
@@ -666,7 +672,11 @@ public class DockerHostProbeService {
                     Optional<String> tagsOpt = registryApiClient.getTags(ip, PORT_5000, repo);
                     if (tagsOpt.isPresent()) {
                         List<String> tagList = registryCatalogMapper.tags(tagsOpt.get());
-                        for (String tag : tagList) {
+                        // Cap tags per repo to MAX_TAGS_PER_REPO to prevent blob-DoS
+                        List<String> cappedTags = tagList.size() > MAX_TAGS_PER_REPO
+                                ? tagList.subList(0, MAX_TAGS_PER_REPO)
+                                : tagList;
+                        for (String tag : cappedTags) {
                             imageEntries.add(repo + ":" + tag);
                         }
                         if (tagList.isEmpty()) {

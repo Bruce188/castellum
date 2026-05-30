@@ -15,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Structural READ-ONLY wrapper for the Docker Registry v2 API ({@code :5000}).
@@ -41,6 +42,21 @@ import java.util.Optional;
 public class RegistryApiClient {
 
     private static final Logger log = LoggerFactory.getLogger(RegistryApiClient.class);
+
+    /**
+     * Security: Docker repository-name grammar validation pattern.
+     *
+     * Accepts: lowercase path-components of [a-z0-9] runs joined by single '.', '_', '-', or '/'
+     * separators (e.g. "nginx", "library/nginx").
+     * Rejects: '@', '..', '?', '#', '%', whitespace, CRLF, uppercase, leading/trailing separator,
+     * or names exceeding 255 chars — forecloses host-redirect, path traversal, query/fragment
+     * smuggling, and CRLF injection via untrusted registry-supplied names.
+     */
+    private static final Pattern REPO_NAME_PATTERN =
+            Pattern.compile("^[a-z0-9]+([._\\-/][a-z0-9]+)*$");
+
+    /** Maximum repository name length per Docker spec. */
+    private static final int MAX_REPO_NAME_LENGTH = 255;
 
     /** Maximum response body size: 16 MB (mirrors DockerEngineApiClient). */
     static final long MAX_BODY_BYTES = 16L * 1024 * 1024;
@@ -84,12 +100,22 @@ public class RegistryApiClient {
     /**
      * GET /v2/{name}/tags/list — list tags for the given repository.
      *
+     * <p><b>Security:</b> {@code name} is validated against the Docker repository-name grammar
+     * BEFORE any network call is issued. Non-conforming names return {@link Optional#empty()}
+     * without touching the getter (SSRF / URI-injection defence, R2).
+     *
      * @param host the registry host
      * @param port the registry port
-     * @param name the repository name (e.g. {@code "nginx"})
-     * @return the tags JSON body, or empty on failure / 401
+     * @param name the repository name (e.g. {@code "nginx"} or {@code "library/nginx"})
+     * @return the tags JSON body, or empty on validation failure / network failure / 401
      */
     public Optional<String> getTags(String host, int port, String name) {
+        if (name == null || name.length() > MAX_REPO_NAME_LENGTH
+                || !REPO_NAME_PATTERN.matcher(name).matches()) {
+            log.warn("RegistryApiClient: rejecting repository name that does not conform to Docker "
+                    + "grammar (SSRF guard) — name={}", name);
+            return Optional.empty();
+        }
         return getter.get(buildUri(host, port, "/v2/" + name + "/tags/list"));
     }
 
