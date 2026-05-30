@@ -500,8 +500,9 @@ public class DockerHostProbeService {
             Port8080Fingerprinter.Identity identity = port8080Fingerprinter.identify(ip, 8080);
             switch (identity) {
                 case TRAEFIK -> {
+                    log.info("DockerHostProbeService: {}:8080 is TRAEFIK — fingerprinted (traefikEnabled={})", ip, traefikEnabled);
+                    emitAuditSuccess(ip, 8080, "traefik", startMs);
                     if (traefikEnabled) {
-                        log.info("DockerHostProbeService: {}:8080 is TRAEFIK — extracting routes", ip);
                         Optional<String> routersOpt = traefikClient.getRouters(ip, 8080);
                         Optional<String> servicesOpt = traefikClient.getServices(ip, 8080);
                         if (routersOpt.isPresent()) {
@@ -510,19 +511,18 @@ public class DockerHostProbeService {
                         }
                         raiseFindingForExistingDevice(ip, 8080, "tcp",
                             PROTOCOL_FAMILY_TRAEFIK_EXPOSURE, SEVERITY_MEDIUM);
-                        emitAuditSuccess(ip, 8080, "traefik", startMs);
                     }
                 }
                 case CADVISOR -> {
+                    log.info("DockerHostProbeService: {}:8080 is CADVISOR — fingerprinted (cadvisorEnabled={})", ip, cadvisorEnabled);
+                    emitAuditSuccess(ip, 8080, "cadvisor", startMs);
                     if (cadvisorEnabled) {
-                        log.info("DockerHostProbeService: {}:8080 is CADVISOR — extracting containers", ip);
                         Optional<String> subOpt = cadvisorClient.getSubcontainers(ip, 8080);
                         if (subOpt.isPresent()) {
                             cadvisorMapper.containerNames(subOpt.get());
                         }
                         raiseFindingForExistingDevice(ip, 8080, "tcp",
                             PROTOCOL_FAMILY_CADVISOR_EXPOSURE, SEVERITY_MEDIUM);
-                        emitAuditSuccess(ip, 8080, "cadvisor", startMs);
                     }
                 }
                 case UNKNOWN -> {
@@ -660,7 +660,25 @@ public class DockerHostProbeService {
             if (catalogOpt.isPresent()) {
                 log.info("DockerHostProbeService: {} :5000 registry catalog accessible — MEDIUM", ip);
                 List<String> repos = registryCatalogMapper.repositories(catalogOpt.get());
-                String blob = registryCatalogMapper.toInventoryBlob(repos);
+                // Enrich: for each repo, fetch tags and fold into name:tag entries
+                List<String> imageEntries = new ArrayList<>();
+                for (String repo : repos) {
+                    Optional<String> tagsOpt = registryApiClient.getTags(ip, PORT_5000, repo);
+                    if (tagsOpt.isPresent()) {
+                        List<String> tagList = registryCatalogMapper.tags(tagsOpt.get());
+                        for (String tag : tagList) {
+                            imageEntries.add(repo + ":" + tag);
+                        }
+                        if (tagList.isEmpty()) {
+                            // No tags returned — fall back to bare repo name
+                            imageEntries.add(repo);
+                        }
+                    } else {
+                        // getTags not available — fall back to bare repo name
+                        imageEntries.add(repo);
+                    }
+                }
+                String blob = registryCatalogMapper.toInventoryBlob(imageEntries);
                 // Write registry_images metadata to the probed host Device row (HOST METADATA only)
                 persistRegistryImages(ip, blob);
                 raiseFindingForExistingDevice(ip, PORT_5000, "tcp",
