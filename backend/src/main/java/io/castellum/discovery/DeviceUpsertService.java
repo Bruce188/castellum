@@ -3,6 +3,7 @@ package io.castellum.discovery;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.risk.Criticality;
+import io.castellum.discovery.RoleClassification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -138,9 +139,10 @@ public class DeviceUpsertService {
             e.setOriginHostName(origin.originHostName());
             // Non-downgrade role write (UPDATE branch): classify after all other fields are set.
             // Never overwrite a known role with UNKNOWN — a signal-less re-sweep must not flap.
-            DeviceRole newRoleU = roleClassifier.classify(e);
-            if (newRoleU != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
-                e.setDeviceRole(newRoleU);
+            RoleClassification rcU = roleClassifier.classifyWithConfidence(e);
+            if (rcU.role() != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
+                e.setDeviceRole(rcU.role());
+                e.setRoleConfidence(rcU.confidence());
             }
             return repo.save(e);
         } else {
@@ -170,9 +172,10 @@ public class DeviceUpsertService {
             fresh.setOriginHostName(origin.originHostName());
             // Non-downgrade role write (INSERT branch): fresh device starts at entity default UNKNOWN,
             // so the guard always permits the first classification.
-            DeviceRole newRoleI = roleClassifier.classify(fresh);
-            if (newRoleI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
-                fresh.setDeviceRole(newRoleI);
+            RoleClassification rcI = roleClassifier.classifyWithConfidence(fresh);
+            if (rcI.role() != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
+                fresh.setDeviceRole(rcI.role());
+                fresh.setRoleConfidence(rcI.confidence());
             }
             return repo.save(fresh);
         }
@@ -253,9 +256,10 @@ public class DeviceUpsertService {
                 }
             }
             // Non-downgrade role write (UPDATE branch).
-            DeviceRole newRoleUpsertU = roleClassifier.classify(e);
-            if (newRoleUpsertU != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
-                e.setDeviceRole(newRoleUpsertU);
+            RoleClassification rcUpsertU = roleClassifier.classifyWithConfidence(e);
+            if (rcUpsertU.role() != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
+                e.setDeviceRole(rcUpsertU.role());
+                e.setRoleConfidence(rcUpsertU.confidence());
             }
             return repo.save(e);
         } else {
@@ -281,9 +285,10 @@ public class DeviceUpsertService {
                 fresh.setLastSeenByScanId(scanId);
             }
             // Non-downgrade role write (INSERT branch).
-            DeviceRole newRoleUpsertI = roleClassifier.classify(fresh);
-            if (newRoleUpsertI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
-                fresh.setDeviceRole(newRoleUpsertI);
+            RoleClassification rcUpsertI = roleClassifier.classifyWithConfidence(fresh);
+            if (rcUpsertI.role() != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
+                fresh.setDeviceRole(rcUpsertI.role());
+                fresh.setRoleConfidence(rcUpsertI.confidence());
             }
             return repo.save(fresh);
         }
@@ -407,9 +412,10 @@ public class DeviceUpsertService {
                 // Origin: local batch — confirm local origin on update.
                 existing.setOriginHostIp("local");
                 // Non-downgrade role write (UPDATE branch).
-                DeviceRole newRoleAllU = roleClassifier.classify(existing);
-                if (newRoleAllU != DeviceRole.UNKNOWN || existing.getDeviceRole() == DeviceRole.UNKNOWN) {
-                    existing.setDeviceRole(newRoleAllU);
+                RoleClassification rcAllU = roleClassifier.classifyWithConfidence(existing);
+                if (rcAllU.role() != DeviceRole.UNKNOWN || existing.getDeviceRole() == DeviceRole.UNKNOWN) {
+                    existing.setDeviceRole(rcAllU.role());
+                    existing.setRoleConfidence(rcAllU.confidence());
                 }
                 slots.add(new Slot(true, updates.size()));
                 updates.add(existing);
@@ -424,9 +430,10 @@ public class DeviceUpsertService {
                 // Origin: local batch — entity default "local" is already set, confirm explicitly.
                 fresh.setOriginHostIp("local");
                 // Non-downgrade role write (INSERT branch).
-                DeviceRole newRoleAllI = roleClassifier.classify(fresh);
-                if (newRoleAllI != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
-                    fresh.setDeviceRole(newRoleAllI);
+                RoleClassification rcAllI = roleClassifier.classifyWithConfidence(fresh);
+                if (rcAllI.role() != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {
+                    fresh.setDeviceRole(rcAllI.role());
+                    fresh.setRoleConfidence(rcAllI.confidence());
                 }
                 slots.add(new Slot(false, inserts.size()));
                 inserts.add(fresh);

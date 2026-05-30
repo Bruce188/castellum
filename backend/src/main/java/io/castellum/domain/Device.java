@@ -3,6 +3,7 @@ package io.castellum.domain;
 import io.castellum.discovery.DeviceRole;
 import io.castellum.discovery.DiscoveryScope;
 import io.castellum.discovery.DiscoverySource;
+import io.castellum.discovery.RoleConfidence;
 import io.castellum.risk.Criticality;
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -58,6 +59,25 @@ public class Device {
     @Enumerated(EnumType.STRING)
     @Column(name = "device_role", nullable = false)
     private DeviceRole deviceRole = DeviceRole.UNKNOWN;
+
+    /**
+     * Confidence level of the {@link #deviceRole} classification.
+     * {@link RoleConfidence#HIGH} = deterministic rule / API-confirmed container;
+     * {@link RoleConfidence#LOW} = macvlan sweep heuristic with known false-positive risk.
+     * NOT NULL — entity default {@code HIGH} keeps all existing rows correct on V28 migration.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role_confidence", nullable = false)
+    private RoleConfidence roleConfidence = RoleConfidence.HIGH;
+
+    /**
+     * Compact inventory of Docker registry images served by this device (host metadata only).
+     * Populated by the registry probe ({@code :5000 GET /v2/_catalog}). Nullable — only set
+     * when the host is confirmed to run a Docker registry with an unauthenticated catalog.
+     * NOT a per-image topology row: stored as a delimited blob on the host device row.
+     */
+    @Column(name = "registry_images")
+    private String registryImages;
 
     @Column(name = "publishes_host_port", nullable = false)
     private boolean publishesHostPort = false;
@@ -159,6 +179,12 @@ public class Device {
 
     public DeviceRole getDeviceRole() { return deviceRole; }
     public void setDeviceRole(DeviceRole deviceRole) { this.deviceRole = deviceRole; }
+
+    public RoleConfidence getRoleConfidence() { return roleConfidence; }
+    public void setRoleConfidence(RoleConfidence roleConfidence) { this.roleConfidence = roleConfidence; }
+
+    public String getRegistryImages() { return registryImages; }
+    public void setRegistryImages(String registryImages) { this.registryImages = registryImages; }
 
     public boolean isPublishesHostPort() { return publishesHostPort; }
     public void setPublishesHostPort(boolean publishesHostPort) { this.publishesHostPort = publishesHostPort; }

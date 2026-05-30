@@ -102,7 +102,17 @@ class DockerHostProbeServiceTest {
         return new CAdvisorApiClient(uri -> Optional.empty());
     }
 
-    /** Build a probe service with the given getter and reachability seam (SNMP + HTTP-UI disabled). */
+    private static K8sApiClient noopK8sClient() {
+        return new K8sApiClient(uri -> Optional.empty());
+    }
+    private static KubeletApiClient noopKubeletClient() {
+        return new KubeletApiClient(uri -> Optional.empty());
+    }
+    private static RegistryApiClient noopRegistryClient() {
+        return new RegistryApiClient(uri -> Optional.empty());
+    }
+
+    /** Build a probe service with the given getter and reachability seam (SNMP + HTTP-UI + k8s/registry disabled). */
     private DockerHostProbeService buildProbe(DockerEngineApiClient.HttpGetter getter,
                                                Predicate<HostPort> reachable) {
         SnmpClient snmpClient = new SnmpClient((h, c, o) -> Optional.empty());
@@ -121,7 +131,10 @@ class DockerHostProbeServiceTest {
             snmpClient, snmpMapper, "public", /* snmpEnabled */ false,
             traefikClient, traefikMapper, portainerClient, cadvisorClient, cadvisorMapper,
             fingerprinter, /* traefikEnabled */ false, /* portainerEnabled */ false,
-            /* cadvisorEnabled */ false, /* maxConcurrent */ 4, reachable);
+            /* cadvisorEnabled */ false,
+            noopK8sClient(), noopKubeletClient(), new K8sPodMapper(TEST_OM), /* k8sEnabled */ false,
+            noopRegistryClient(), new RegistryCatalogMapper(TEST_OM), /* registryEnabled */ false,
+            /* maxConcurrent */ 4, reachable);
     }
 
     /** Build a probe service with full SNMP seam enabled. */
@@ -144,7 +157,10 @@ class DockerHostProbeServiceTest {
             networkServiceRepository, auditService,
             snmpClient, snmpMapper, snmpCommunity, /* snmpEnabled */ true,
             traefikClient, traefikMapper, portainerClient, cadvisorClient, cadvisorMapper,
-            fingerprinter, false, false, false, /* maxConcurrent */ 4, reachable);
+            fingerprinter, false, false, false,
+            noopK8sClient(), noopKubeletClient(), new K8sPodMapper(TEST_OM), /* k8sEnabled */ false,
+            noopRegistryClient(), new RegistryCatalogMapper(TEST_OM), /* registryEnabled */ false,
+            /* maxConcurrent */ 4, reachable);
     }
 
     /** Build a probe with custom HTTP-UI clients + fingerprinter. */
@@ -169,6 +185,37 @@ class DockerHostProbeServiceTest {
             snmpClient, snmpMapper, "public", false,
             traefikClient, traefikMapper, portainerClient, cadvisorClient, cadvisorMapper,
             fingerprinter, traefikEnabled, portainerEnabled, cadvisorEnabled,
+            noopK8sClient(), noopKubeletClient(), new K8sPodMapper(TEST_OM), /* k8sEnabled */ false,
+            noopRegistryClient(), new RegistryCatalogMapper(TEST_OM), /* registryEnabled */ false,
+            /* maxConcurrent */ 4, reachable);
+    }
+
+    /** Build a probe with k8s/registry enabled and given client seams. */
+    private DockerHostProbeService buildProbeWithK8sRegistry(
+            DockerEngineApiClient.HttpGetter dockerGetter,
+            Predicate<HostPort> reachable,
+            K8sApiClient k8sClient,
+            KubeletApiClient kubeletClient,
+            RegistryApiClient registryClient,
+            boolean k8sEnabled, boolean registryEnabled) {
+        SnmpClient snmpClient = new SnmpClient((h, c, o) -> Optional.empty());
+        SnmpBridgeMapper snmpMapper = new SnmpBridgeMapper();
+        TraefikApiClient traefikClient = noopTraefikClient();
+        TraefikRouterMapper traefikMapper = new TraefikRouterMapper(TEST_OM);
+        PortainerApiClient portainerClient = noopPortainerClient();
+        CAdvisorApiClient cadvisorClient = noopCadvisorClient();
+        CAdvisorContainerMapper cadvisorMapper = new CAdvisorContainerMapper(TEST_OM);
+        Port8080Fingerprinter fingerprinter = new Port8080Fingerprinter(traefikClient, cadvisorClient, TEST_OM);
+        DockerEngineApiClient apiClient = new DockerEngineApiClient(dockerGetter);
+        return new DockerHostProbeService(
+            deviceUpsertService, deviceRepository, discoveryService(),
+            apiClient, networkMapper, containerListMapper, inspectParser,
+            networkServiceRepository, auditService,
+            snmpClient, snmpMapper, "public", false,
+            traefikClient, traefikMapper, portainerClient, cadvisorClient, cadvisorMapper,
+            fingerprinter, false, false, false,
+            k8sClient, kubeletClient, new K8sPodMapper(TEST_OM), k8sEnabled,
+            registryClient, new RegistryCatalogMapper(TEST_OM), registryEnabled,
             /* maxConcurrent */ 4, reachable);
     }
 
@@ -724,5 +771,264 @@ class DockerHostProbeServiceTest {
             .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), 9000, "tcp");
         assertThat(finding).isPresent();
         assertThat(finding.get().getPostureSeverity()).isEqualTo("MEDIUM");
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2 — Kubernetes probes (Tasks 2.3)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void kubelet10255_podsReturned_ingestsTopology_highFinding() throws Exception {
+        String probedIp = "10.0.0.60";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        String kubeletPodsJson = new String(
+            DockerHostProbeServiceTest.class.getResourceAsStream("/k8s/kubelet-pods.json").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8);
+
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.of(kubeletPodsJson));
+        K8sApiClient k8sClient = new K8sApiClient(uri -> Optional.empty()); // :6443 not reachable
+
+        // :10255 reachable, :6443 not reachable
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_10255 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // Pod device must be ingested with origin == probed host
+        Optional<Device> podDevice = deviceRepository.findByIpAddressAndOriginHostIp("10.244.0.2", probedIp);
+        assertThat(podDevice)
+            .as("kubelet pod with IP 10.244.0.2 must be ingested with origin = probed host")
+            .isPresent();
+
+        // :10255 HIGH finding must be raised on the probed host
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_10255, "tcp");
+        assertThat(svc).isPresent();
+        assertThat(svc.get().getPostureSeverity()).isEqualTo(DockerHostProbeService.SEVERITY_HIGH);
+        assertThat(svc.get().getProtocolFamily())
+            .isEqualTo(DockerHostProbeService.PROTOCOL_FAMILY_KUBELET_RO_EXPOSURE);
+    }
+
+    @Test
+    void k8sApi6443_anonymousReadSucceeds_ingestsTopology_criticalFinding() throws Exception {
+        String probedIp = "10.0.0.61";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        String k8sPodsJson = new String(
+            DockerHostProbeServiceTest.class.getResourceAsStream("/k8s/k8s-pods.json").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8);
+
+        K8sApiClient k8sClient = new K8sApiClient(uri -> Optional.of(k8sPodsJson));
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
+
+        // :6443 reachable, :10255 not reachable
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_6443 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // Pods must be ingested with origin == probed host
+        Optional<Device> podDevice = deviceRepository.findByIpAddressAndOriginHostIp("10.244.0.5", probedIp);
+        assertThat(podDevice)
+            .as("k8s pod with IP 10.244.0.5 must be ingested with origin = probed host")
+            .isPresent();
+
+        // :6443 CRITICAL finding must be raised
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_6443, "tcp");
+        assertThat(svc).isPresent();
+        assertThat(svc.get().getPostureSeverity()).isEqualTo(DockerHostProbeService.SEVERITY_CRITICAL);
+        assertThat(svc.get().getProtocolFamily())
+            .isEqualTo(DockerHostProbeService.PROTOCOL_FAMILY_K8S_API_EXPOSURE);
+    }
+
+    @Test
+    void k8sApi6443_401_findingOnly_noData_noRetry() {
+        // REQUIRED R3 test: :6443 reachable but getter returns empty (401) →
+        //   1. HIGH finding-only (no data extraction)
+        //   2. getter invoked EXACTLY ONCE (no retry storm)
+        String probedIp = "10.0.0.62";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        K8sApiClient k8sClient = new K8sApiClient(uri -> {
+            callCount.incrementAndGet();
+            return Optional.empty(); // simulates 401
+        });
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> Optional.empty());
+
+        // :6443 reachable, nothing else
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_6443 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ true, /* registryEnabled */ false);
+
+        long devicesBefore = deviceRepository.count();
+        probe.probeHosts(List.of(probedIp));
+        long devicesAfter = deviceRepository.count();
+
+        // ZERO new device/topology rows — only the probed host pre-seeded
+        assertThat(devicesAfter)
+            .as("ZERO new device rows must be created on 401 (finding-only, no data extraction)")
+            .isEqualTo(devicesBefore);
+
+        // :6443 HIGH finding must be raised (reachable but auth-required)
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_6443, "tcp");
+        assertThat(svc).isPresent();
+        assertThat(svc.get().getPostureSeverity()).isEqualTo(DockerHostProbeService.SEVERITY_HIGH);
+
+        // REQUIRED: getter invoked EXACTLY ONCE — no retry
+        assertThat(callCount.get())
+            .as("K8sApiClient getter must be invoked EXACTLY ONCE (no retry on 401, R3)")
+            .isEqualTo(1);
+    }
+
+    @Test
+    void k8sDisabled_skipped() {
+        String probedIp = "10.0.0.63";
+        seedLocalDevice(probedIp);
+
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        K8sApiClient k8sClient = new K8sApiClient(uri -> {
+            callCount.incrementAndGet();
+            return Optional.empty();
+        });
+        KubeletApiClient kubeletClient = new KubeletApiClient(uri -> {
+            callCount.incrementAndGet();
+            return Optional.empty();
+        });
+
+        Predicate<HostPort> reachable = hp -> true; // everything reachable
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            k8sClient, kubeletClient, noopRegistryClient(),
+            /* k8sEnabled */ false, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        assertThat(callCount.get())
+            .as("k8s clients must not be called when k8s is disabled")
+            .isEqualTo(0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3 — Registry probes (Task 3.2)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void registry5000_catalogAnswers_attachesImageMetadata_mediumFinding_noTopologyRows() throws Exception {
+        String probedIp = "10.0.0.70";
+        Device hostDevice = seedLocalDevice(probedIp);
+
+        String catalogJson = new String(
+            DockerHostProbeServiceTest.class.getResourceAsStream("/k8s/registry-catalog.json").readAllBytes(),
+            java.nio.charset.StandardCharsets.UTF_8);
+
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> Optional.of(catalogJson));
+
+        // :5000 reachable, nothing else (k8s disabled)
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        long devicesBefore = deviceRepository.count();
+        probe.probeHosts(List.of(probedIp));
+        long devicesAfter = deviceRepository.count();
+
+        // ZERO new device topology rows (R6 — registry catalog is HOST METADATA only)
+        assertThat(devicesAfter)
+            .as("ZERO new device topology rows must be created from registry catalog (R6)")
+            .isEqualTo(devicesBefore);
+
+        // registry_images must be set on the probed host Device row
+        Device reloadedHost = deviceRepository.findById(hostDevice.getId()).orElseThrow();
+        assertThat(reloadedHost.getRegistryImages())
+            .as("registry_images must be populated on the probed host device")
+            .isNotBlank()
+            .contains("nginx")
+            .contains("redis");
+
+        // MEDIUM finding must be raised on the probed host
+        Optional<NetworkService> svc = networkServiceRepository
+            .findByDeviceIdAndPortAndProtocol(hostDevice.getId(), DockerHostProbeService.PORT_5000, "tcp");
+        assertThat(svc).isPresent();
+        assertThat(svc.get().getPostureSeverity()).isEqualTo(DockerHostProbeService.SEVERITY_MEDIUM);
+        assertThat(svc.get().getProtocolFamily())
+            .isEqualTo(DockerHostProbeService.PROTOCOL_FAMILY_REGISTRY_EXPOSURE);
+    }
+
+    @Test
+    void registry5000_authRequired_noExtraction() {
+        String probedIp = "10.0.0.71";
+        seedLocalDevice(probedIp);
+
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> Optional.empty()); // 401
+
+        Predicate<HostPort> reachable = hp ->
+            hp.port() == DockerHostProbeService.PORT_5000 && hp.host().equals(probedIp);
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ true);
+
+        probe.probeHosts(List.of(probedIp));
+
+        // No finding must be raised (authenticated registry = not the MEDIUM exposure case)
+        Device reloaded = deviceRepository.findByIpAddressAndOriginHostIp(probedIp, "local").orElseThrow();
+        assertThat(reloaded.getRegistryImages())
+            .as("registry_images must not be set when catalog returns 401")
+            .isNull();
+        long findingCount = networkServiceRepository.findAll().stream()
+            .filter(s -> DockerHostProbeService.PROTOCOL_FAMILY_REGISTRY_EXPOSURE.equals(s.getProtocolFamily()))
+            .count();
+        assertThat(findingCount)
+            .as("no REGISTRY_EXPOSURE finding must be raised when catalog is auth-required")
+            .isEqualTo(0);
+    }
+
+    @Test
+    void registryDisabled_skipped() {
+        String probedIp = "10.0.0.72";
+        seedLocalDevice(probedIp);
+
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        RegistryApiClient registryClient = new RegistryApiClient(uri -> {
+            callCount.incrementAndGet();
+            return Optional.empty();
+        });
+
+        Predicate<HostPort> reachable = hp -> true; // everything reachable
+
+        DockerHostProbeService probe = buildProbeWithK8sRegistry(
+            uri -> Optional.empty(), reachable,
+            noopK8sClient(), noopKubeletClient(), registryClient,
+            /* k8sEnabled */ false, /* registryEnabled */ false);
+
+        probe.probeHosts(List.of(probedIp));
+
+        assertThat(callCount.get())
+            .as("registry client must not be called when registry is disabled")
+            .isEqualTo(0);
     }
 }

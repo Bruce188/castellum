@@ -77,6 +77,15 @@ public class DockerHostProbeService {
     /** Value stored in {@code service.protocol_family} for cAdvisor-exposure findings. */
     public static final String PROTOCOL_FAMILY_CADVISOR_EXPOSURE = "CADVISOR_EXPOSURE";
 
+    /** Value stored in {@code service.protocol_family} for Kubernetes API exposure findings. */
+    public static final String PROTOCOL_FAMILY_K8S_API_EXPOSURE = "K8S_API_EXPOSURE";
+
+    /** Value stored in {@code service.protocol_family} for kubelet read-only port exposure findings. */
+    public static final String PROTOCOL_FAMILY_KUBELET_RO_EXPOSURE = "KUBELET_RO_EXPOSURE";
+
+    /** Value stored in {@code service.protocol_family} for Docker Registry exposure findings. */
+    public static final String PROTOCOL_FAMILY_REGISTRY_EXPOSURE = "REGISTRY_EXPOSURE";
+
     /** Service name stored on a docker-engine-api-exposed finding row. */
     static final String FINDING_NAME = "docker-engine-api-exposed";
 
@@ -87,6 +96,9 @@ public class DockerHostProbeService {
     static final int PORT_2375 = 2375;
     static final int PORT_2376 = 2376;
     static final int PORT_2377 = 2377;
+    static final int PORT_6443 = 6443;
+    static final int PORT_10255 = 10255;
+    static final int PORT_5000 = 5000;
     static final String SEVERITY_CRITICAL = "CRITICAL";
     static final String SEVERITY_HIGH = "HIGH";
     static final String SEVERITY_MEDIUM = "MEDIUM";
@@ -116,6 +128,13 @@ public class DockerHostProbeService {
     private final boolean traefikEnabled;
     private final boolean portainerEnabled;
     private final boolean cadvisorEnabled;
+    private final K8sApiClient k8sApiClient;
+    private final KubeletApiClient kubeletApiClient;
+    private final K8sPodMapper k8sPodMapper;
+    private final boolean k8sEnabled;
+    private final RegistryApiClient registryApiClient;
+    private final RegistryCatalogMapper registryCatalogMapper;
+    private final boolean registryEnabled;
 
     @org.springframework.beans.factory.annotation.Autowired
     public DockerHostProbeService(
@@ -136,6 +155,11 @@ public class DockerHostProbeService {
             CAdvisorApiClient cadvisorClient,
             CAdvisorContainerMapper cadvisorMapper,
             Port8080Fingerprinter port8080Fingerprinter,
+            K8sApiClient k8sApiClient,
+            KubeletApiClient kubeletApiClient,
+            K8sPodMapper k8sPodMapper,
+            RegistryApiClient registryApiClient,
+            RegistryCatalogMapper registryCatalogMapper,
             @Value("${castellum.docker.probe.connect-timeout-ms:2000}") int connectTimeoutMs,
             @Value("${castellum.docker.probe.read-timeout-ms:5000}") int readTimeoutMs,
             @Value("${castellum.docker.probe.max-concurrent:8}") int maxConcurrent,
@@ -143,12 +167,16 @@ public class DockerHostProbeService {
             @Value("${castellum.docker.probe.snmp.enabled:true}") boolean snmpEnabled,
             @Value("${castellum.docker.probe.traefik.enabled:true}") boolean traefikEnabled,
             @Value("${castellum.docker.probe.portainer.enabled:true}") boolean portainerEnabled,
-            @Value("${castellum.docker.probe.cadvisor.enabled:true}") boolean cadvisorEnabled) {
+            @Value("${castellum.docker.probe.cadvisor.enabled:true}") boolean cadvisorEnabled,
+            @Value("${castellum.docker.probe.k8s.enabled:true}") boolean k8sEnabled,
+            @Value("${castellum.docker.probe.registry.enabled:true}") boolean registryEnabled) {
         this(deviceUpsertService, deviceRepository, dockerDiscoveryService, apiClient,
              networkMapper, containerListMapper, inspectParser, networkServiceRepository,
              auditService, snmpClient, snmpBridgeMapper, snmpCommunity, snmpEnabled,
              traefikClient, traefikRouterMapper, portainerClient, cadvisorClient, cadvisorMapper,
              port8080Fingerprinter, traefikEnabled, portainerEnabled, cadvisorEnabled,
+             k8sApiClient, kubeletApiClient, k8sPodMapper, k8sEnabled,
+             registryApiClient, registryCatalogMapper, registryEnabled,
              maxConcurrent,
              // Default reachability seam: real TCP connect
              hp -> {
@@ -185,6 +213,13 @@ public class DockerHostProbeService {
             boolean traefikEnabled,
             boolean portainerEnabled,
             boolean cadvisorEnabled,
+            K8sApiClient k8sApiClient,
+            KubeletApiClient kubeletApiClient,
+            K8sPodMapper k8sPodMapper,
+            boolean k8sEnabled,
+            RegistryApiClient registryApiClient,
+            RegistryCatalogMapper registryCatalogMapper,
+            boolean registryEnabled,
             int maxConcurrent,
             Predicate<HostPort> reachable) {
         this.deviceUpsertService = deviceUpsertService;
@@ -209,6 +244,13 @@ public class DockerHostProbeService {
         this.traefikEnabled = traefikEnabled;
         this.portainerEnabled = portainerEnabled;
         this.cadvisorEnabled = cadvisorEnabled;
+        this.k8sApiClient = k8sApiClient;
+        this.kubeletApiClient = kubeletApiClient;
+        this.k8sPodMapper = k8sPodMapper;
+        this.k8sEnabled = k8sEnabled;
+        this.registryApiClient = registryApiClient;
+        this.registryCatalogMapper = registryCatalogMapper;
+        this.registryEnabled = registryEnabled;
         this.concurrencyLimiter = new Semaphore(maxConcurrent);
         this.reachable = reachable;
     }
@@ -301,6 +343,18 @@ public class DockerHostProbeService {
                 probePortainer(ip, 9000, startMs);
             } else if (reachable.test(new HostPort(ip, 9443))) {
                 probePortainer(ip, 9443, startMs);
+            }
+        }
+
+        // Kubernetes API server :6443 + kubelet read-only :10255
+        if (k8sEnabled) {
+            probeK8s(ip, startMs);
+        }
+
+        // Docker Registry :5000
+        if (registryEnabled) {
+            if (reachable.test(new HostPort(ip, PORT_5000))) {
+                probeRegistry(ip, startMs);
             }
         }
     }
@@ -501,6 +555,132 @@ public class DockerHostProbeService {
             log.warn("DockerHostProbeService: {} :{} Portainer probe failed: {}", ip, port, e.getMessage());
             emitAuditFailure(ip, port, e, startMs);
         }
+    }
+
+    /**
+     * Probe Kubernetes API server on :6443 and kubelet read-only port on :10255.
+     *
+     * <p><b>:6443 logic:</b>
+     * <ul>
+     *   <li>If :6443 reachable AND anonymous {@code getPods} returns a body → CRITICAL finding
+     *       (anonymous pod read succeeded) + ingest pod topology.</li>
+     *   <li>If :6443 reachable BUT getter returns empty (401/403) → HIGH finding-only; NO data
+     *       extracted, NO retry (R3).</li>
+     * </ul>
+     *
+     * <p><b>:10255 logic (independent):</b>
+     * <ul>
+     *   <li>If :10255 reachable AND {@code getPods} returns a body → HIGH finding + ingest pods.</li>
+     * </ul>
+     *
+     * <p>READ-ONLY: GET-only via {@link K8sApiClient} and {@link KubeletApiClient}.
+     */
+    private void probeK8s(String ip, long startMs) {
+        // --- :6443 Kubernetes API server ---
+        if (reachable.test(new HostPort(ip, PORT_6443))) {
+            try {
+                Optional<String> podsOpt = k8sApiClient.getPods(ip, PORT_6443);
+                if (podsOpt.isPresent()) {
+                    // Anonymous read succeeded → CRITICAL
+                    log.info("DockerHostProbeService: {} :6443 anonymous pod read succeeded — CRITICAL", ip);
+                    List<io.castellum.discovery.DockerContainer> pods =
+                        k8sPodMapper.mapPods(podsOpt.get());
+                    if (!pods.isEmpty()) {
+                        io.castellum.discovery.OriginContext origin =
+                            io.castellum.discovery.OriginContext.of(ip, ip);
+                        dockerDiscoveryService.ingest(pods, origin, Instant.now());
+                    }
+                    raiseFindingForExistingDevice(ip, PORT_6443, "tcp",
+                        PROTOCOL_FAMILY_K8S_API_EXPOSURE, SEVERITY_CRITICAL);
+                } else {
+                    // Getter returned empty — 401/403 back-off (no retry, R3)
+                    log.info("DockerHostProbeService: {} :6443 reachable but 401/403 (auth required) — HIGH finding only", ip);
+                    raiseFindingForExistingDevice(ip, PORT_6443, "tcp",
+                        PROTOCOL_FAMILY_K8S_API_EXPOSURE, SEVERITY_HIGH);
+                }
+                emitAuditSuccess(ip, PORT_6443, "k8s-api", startMs);
+            } catch (Exception e) {
+                log.warn("DockerHostProbeService: {} :6443 probe failed: {}", ip, e.getMessage());
+                emitAuditFailure(ip, PORT_6443, e, startMs);
+            }
+        }
+
+        // --- :10255 Kubelet read-only port (independent of :6443 result) ---
+        if (reachable.test(new HostPort(ip, PORT_10255))) {
+            try {
+                Optional<String> kubeletPodsOpt = kubeletApiClient.getPods(ip, PORT_10255);
+                if (kubeletPodsOpt.isPresent()) {
+                    log.info("DockerHostProbeService: {} :10255 kubelet pods accessible — HIGH", ip);
+                    List<io.castellum.discovery.DockerContainer> kubeletPods =
+                        k8sPodMapper.mapPods(kubeletPodsOpt.get());
+                    if (!kubeletPods.isEmpty()) {
+                        io.castellum.discovery.OriginContext origin =
+                            io.castellum.discovery.OriginContext.of(ip, ip);
+                        dockerDiscoveryService.ingest(kubeletPods, origin, Instant.now());
+                    }
+                    raiseFindingForExistingDevice(ip, PORT_10255, "tcp",
+                        PROTOCOL_FAMILY_KUBELET_RO_EXPOSURE, SEVERITY_HIGH);
+                } else {
+                    log.info("DockerHostProbeService: {} :10255 reachable but no pods returned — finding only", ip);
+                    raiseFindingForExistingDevice(ip, PORT_10255, "tcp",
+                        PROTOCOL_FAMILY_KUBELET_RO_EXPOSURE, SEVERITY_HIGH);
+                }
+                emitAuditSuccess(ip, PORT_10255, "kubelet-ro", startMs);
+            } catch (Exception e) {
+                log.warn("DockerHostProbeService: {} :10255 probe failed: {}", ip, e.getMessage());
+                emitAuditFailure(ip, PORT_10255, e, startMs);
+            }
+        }
+    }
+
+    /**
+     * Probe Docker Registry on :5000.
+     *
+     * <p>On a successful {@code _catalog} response (unauthenticated) → write the image inventory
+     * blob to the probed host's {@code registry_images} column (HOST METADATA — NOT per-image
+     * topology rows, R6) AND raise a MEDIUM finding. A 401/empty → no extraction, no finding
+     * (an authenticated registry is not the MEDIUM-exposure case).
+     *
+     * <p>READ-ONLY: GET-only via {@link RegistryApiClient}.
+     */
+    private void probeRegistry(String ip, long startMs) {
+        try {
+            Optional<String> catalogOpt = registryApiClient.getCatalog(ip, PORT_5000);
+            if (catalogOpt.isPresent()) {
+                log.info("DockerHostProbeService: {} :5000 registry catalog accessible — MEDIUM", ip);
+                List<String> repos = registryCatalogMapper.repositories(catalogOpt.get());
+                String blob = registryCatalogMapper.toInventoryBlob(repos);
+                // Write registry_images metadata to the probed host Device row (HOST METADATA only)
+                persistRegistryImages(ip, blob);
+                raiseFindingForExistingDevice(ip, PORT_5000, "tcp",
+                    PROTOCOL_FAMILY_REGISTRY_EXPOSURE, SEVERITY_MEDIUM);
+            } else {
+                log.debug("DockerHostProbeService: {} :5000 registry auth required (401) — no extraction", ip);
+                // 401 → no finding (authenticated registry is not the MEDIUM exposure case)
+            }
+            emitAuditSuccess(ip, PORT_5000, "registry", startMs);
+        } catch (Exception e) {
+            log.warn("DockerHostProbeService: {} :5000 registry probe failed: {}", ip, e.getMessage());
+            emitAuditFailure(ip, PORT_5000, e, startMs);
+        }
+    }
+
+    /**
+     * Persist the {@code registry_images} metadata blob on the local-origin Device row for the
+     * given IP (R6 — HOST METADATA on the Device row, NOT per-image topology rows).
+     *
+     * <p>Reuses the {@code (ip, "local")} lookup idiom from {@link #raiseFindingForExistingDevice}.
+     * Skips silently if no inventory row exists for the IP.
+     */
+    private void persistRegistryImages(String ip, String blob) {
+        Optional<Device> deviceOpt = deviceRepository.findByIpAddressAndOriginHostIp(ip, "local");
+        if (deviceOpt.isEmpty()) {
+            log.debug("DockerHostProbeService: no inventory row for {} — skipping registry_images write", ip);
+            return;
+        }
+        Device device = deviceOpt.get();
+        device.setRegistryImages(blob.isBlank() ? null : blob);
+        deviceRepository.save(device);
     }
 
     /**

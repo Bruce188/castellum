@@ -1,6 +1,7 @@
 package io.castellum.discovery;
 
 import io.castellum.domain.Device;
+import io.castellum.discovery.RoleConfidence;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -175,5 +176,65 @@ class DeviceRoleClassifierTest {
         d.setHostname(hostname);
         d.setIpAddress(ip);
         return d;
+    }
+
+    // ─── classifyWithConfidence tests ────────────────────────────────────────
+
+    @Test
+    void classifyWithConfidence_dockerContainer_containerHigh() {
+        Device d = dockerContainer("api-1", DiscoveryScope.DOCKER_BRIDGE);
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role()).isEqualTo(DeviceRole.CONTAINER);
+        assertThat(result.confidence()).isEqualTo(RoleConfidence.HIGH);
+    }
+
+    @Test
+    void classifyWithConfidence_macvlanSample_containerLow() {
+        // MAC 02:42:ac:11:00:02, non-DOCKER source, non-.1 IP, no router hostname → LOW
+        Device d = new Device();
+        d.setDiscoverySource(DiscoverySource.ARP);
+        d.setMacAddress("02:42:ac:11:00:02");
+        d.setIpAddress("172.17.0.2");
+        d.setHostname("unknown-host");
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role()).isEqualTo(DeviceRole.CONTAINER);
+        assertThat(result.confidence()).isEqualTo(RoleConfidence.LOW);
+    }
+
+    @Test
+    void classifyWithConfidence_hardwareVendorOui_notContainer() {
+        // REQUIRED false-positive guard (R5): a non-02:42 OUI must NOT produce CONTAINER
+        Device d = new Device();
+        d.setDiscoverySource(DiscoverySource.ARP);
+        d.setMacAddress("3c:5a:b4:01:02:03"); // real hardware OUI prefix, not docker
+        d.setIpAddress("192.168.1.50");
+        d.setHostname("some-device");
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role())
+            .as("non-02:42 OUI must NOT be classified as CONTAINER")
+            .isNotEqualTo(DeviceRole.CONTAINER);
+    }
+
+    @Test
+    void classifyWithConfidence_dockerSourceWith0242Mac_containerHigh() {
+        // DOCKER source + 02:42:* MAC → deterministic DOCKER rule wins (HIGH, not LOW macvlan path)
+        Device d = new Device();
+        d.setDiscoverySource(DiscoverySource.DOCKER);
+        d.setMacAddress("02:42:ac:11:00:05");
+        d.setIpAddress("172.17.0.5");
+        d.setHostname("real-container");
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role()).isEqualTo(DeviceRole.CONTAINER);
+        assertThat(result.confidence())
+            .as("DOCKER source must yield HIGH confidence, not the LOW macvlan path")
+            .isEqualTo(RoleConfidence.HIGH);
+    }
+
+    @Test
+    void classifyWithConfidence_serverOs_serverHigh() {
+        Device d = withOsName("Ubuntu Server 22.04");
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role()).isEqualTo(DeviceRole.SERVER);
+        assertThat(result.confidence()).isEqualTo(RoleConfidence.HIGH);
     }
 }

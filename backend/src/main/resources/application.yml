@@ -130,6 +130,10 @@ castellum:
         enabled: ${DOCKER_PROBE_PORTAINER_ENABLED:true}
       cadvisor:
         enabled: ${DOCKER_PROBE_CADVISOR_ENABLED:true}
+      k8s:
+        enabled: ${DOCKER_PROBE_K8S_ENABLED:true}
+      registry:
+        enabled: ${DOCKER_PROBE_REGISTRY_ENABLED:true}
   taxii:
     base-url: ${TAXII_BASE_URL:}
     collection-id: ${TAXII_COLLECTION_ID:}
