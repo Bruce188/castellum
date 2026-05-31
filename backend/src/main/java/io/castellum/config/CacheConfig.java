@@ -67,6 +67,17 @@ public class CacheConfig {
     private static final Duration FEEDS_STATUS_TTL = Duration.ofSeconds(15);
     private static final long FEEDS_STATUS_MAX_SIZE = 4;
 
+    /**
+     * Affected-device listing per CVE ({@code GET /api/cve/{cveId}/devices}). The reverse
+     * fleet-match scan ({@code findAll()} → per-service {@code CpeMapper.toCpe23} →
+     * {@code CveMatcher.findVulnerableWithEvidence}) runs on every CVE detail open; caching the
+     * per-cveId result collapses repeat opens (and the common case) to one scan until eviction.
+     * Same fleet-derived freshness class as {@link CacheNames#CVE_FLEET}: evicted on scan and
+     * feed-sync completion.
+     */
+    private static final Duration CVE_AFFECTED_TTL = Duration.ofMinutes(5);
+    private static final long CVE_AFFECTED_MAX_SIZE = 1_000;
+
     @Bean
     public CacheManager cacheManager() {
         SimpleCacheManager manager = new SimpleCacheManager();
@@ -74,6 +85,7 @@ public class CacheConfig {
             caffeine(CacheNames.DEVICE_RISK, DEVICE_RISK_TTL, DEVICE_RISK_MAX_SIZE),
             caffeine(CacheNames.TOP_RISK, TOP_RISK_TTL, TOP_RISK_MAX_SIZE),
             caffeine(CacheNames.CVE_FLEET, CVE_FLEET_TTL, CVE_FLEET_MAX_SIZE),
+            caffeine(CacheNames.CVE_AFFECTED, CVE_AFFECTED_TTL, CVE_AFFECTED_MAX_SIZE),
             caffeine(CacheNames.FEEDS_STATUS, FEEDS_STATUS_TTL, FEEDS_STATUS_MAX_SIZE)));
         return manager;
     }

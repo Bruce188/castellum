@@ -19,6 +19,9 @@ public final class CacheNames {
     /** Feed-corpus status (NVD/EPSS/KEV counts + freshness), single keyed entry. */
     public static final String FEEDS_STATUS = "feedsStatus";
 
+    /** Affected-device list per CVE ({@code GET /api/cve/{cveId}/devices}), keyed by cveId. */
+    public static final String CVE_AFFECTED = "cveAffected";
+
     private CacheNames() {
         throw new UnsupportedOperationException("constants holder");
     }

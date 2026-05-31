@@ -6,7 +6,7 @@ import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Component;
 
 /**
- * Single, auditable home for the cache-eviction policy that keeps the four risk/CVE aggregate
+ * Single, auditable home for the cache-eviction policy that keeps the five risk/CVE aggregate
  * caches consistent with the data they summarise. Each method names the <em>event</em> that
  * occurred; the annotations declare which caches that event invalidates.
  *
@@ -17,10 +17,10 @@ import org.springframework.stereotype.Component;
  *
  * <table>
  *   <caption>Event → evicted caches</caption>
- *   <tr><th>Event</th><th>deviceRisk</th><th>topRisk</th><th>cveFleet</th><th>feedsStatus</th></tr>
- *   <tr><td>scan complete</td><td>all</td><td>all</td><td>all</td><td>—</td></tr>
- *   <tr><td>criticality change</td><td>device</td><td>all</td><td>—</td><td>—</td></tr>
- *   <tr><td>feed-sync complete</td><td>all</td><td>all</td><td>all</td><td>all</td></tr>
+ *   <tr><th>Event</th><th>deviceRisk</th><th>topRisk</th><th>cveFleet</th><th>cveAffected</th><th>feedsStatus</th></tr>
+ *   <tr><td>scan complete</td><td>all</td><td>all</td><td>all</td><td>all</td><td>—</td></tr>
+ *   <tr><td>criticality change</td><td>device</td><td>all</td><td>—</td><td>—</td><td>—</td></tr>
+ *   <tr><td>feed-sync complete</td><td>all</td><td>all</td><td>all</td><td>all</td><td>all</td></tr>
  * </table>
  */
 @Component
@@ -34,7 +34,8 @@ public class RiskCacheEvictor {
     @Caching(evict = {
         @CacheEvict(cacheNames = CacheNames.DEVICE_RISK, allEntries = true),
         @CacheEvict(cacheNames = CacheNames.TOP_RISK, allEntries = true),
-        @CacheEvict(cacheNames = CacheNames.CVE_FLEET, allEntries = true)
+        @CacheEvict(cacheNames = CacheNames.CVE_FLEET, allEntries = true),
+        @CacheEvict(cacheNames = CacheNames.CVE_AFFECTED, allEntries = true)
     })
     public void onScanComplete() {
         // No body — annotations perform the eviction.
@@ -64,6 +65,7 @@ public class RiskCacheEvictor {
         @CacheEvict(cacheNames = CacheNames.DEVICE_RISK, allEntries = true),
         @CacheEvict(cacheNames = CacheNames.TOP_RISK, allEntries = true),
         @CacheEvict(cacheNames = CacheNames.CVE_FLEET, allEntries = true),
+        @CacheEvict(cacheNames = CacheNames.CVE_AFFECTED, allEntries = true),
         @CacheEvict(cacheNames = CacheNames.FEEDS_STATUS, allEntries = true)
     })
     public void onFeedSyncComplete() {

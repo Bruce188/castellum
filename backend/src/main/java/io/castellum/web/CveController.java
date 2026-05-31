@@ -104,10 +104,16 @@ public class CveController {
      * the CVE exists but no fleet device is affected (e.g. empty fleet, or no matching
      * service versions).
      *
-     * <p>{@code @Cacheable} is deferred to F1 (fleet-cache iteration). Do NOT add it here.
+     * <p>Cached per {@code cveId} ({@link CacheNames#CVE_AFFECTED}): the reverse fleet-match scan
+     * ({@code findAll()} → per-service match) is the dominant cost of a CVE detail open, so a
+     * repeat or common-case open is served from cache until a scan/feed-sync eviction (see
+     * {@link io.castellum.risk.RiskCacheEvictor}, the same fleet/corpus events that invalidate
+     * {@link CacheNames#CVE_FLEET}). Mirrors the {@code fleet} endpoint's proven
+     * {@code @Cacheable + @PreAuthorize} ordering, so authorization is still enforced.
      */
     @GetMapping("/{cveId}/devices")
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
+    @Cacheable(cacheNames = CacheNames.CVE_AFFECTED, key = "#cveId")
     public ResponseEntity<List<CveAffectedDeviceDto>> getAffectedDevices(
             @PathVariable String cveId) {
         // 404 on unknown CVE — distinct from 200+empty (known CVE, zero affected).
