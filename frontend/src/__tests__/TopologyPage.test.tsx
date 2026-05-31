@@ -282,10 +282,7 @@ describe('<TopologyPage /> ?focus search param — device pre-selection', () => 
       return null;
     }
 
-    // Include both device 42 and a second focus target: device 1 (from DEVICES_WITH_42)
-    const DEVICE_1 = DEVICES[0]; // id=1
-
-    // deviceRisksBatch returns risks for all devices
+    // deviceRisksBatch returns risks for all devices (DEVICES already includes device 1)
     mockApi.deviceRisksBatch.mockResolvedValue(
       new Map([...DEVICES, DEVICE_42].map(d => [d.id, RISK_42])),
     );
