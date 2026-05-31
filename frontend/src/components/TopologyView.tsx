@@ -156,10 +156,9 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           'background-opacity': 0.15,
           'border-width': 2,
           'border-style': 'dashed' as const,
-          // Compound nodes derive their size from children; these values are
-          // cytoscape string keywords not covered by the TS typings.
-          width: 'label' as unknown as number,
-          height: 'label' as unknown as number,
+          // Compound nodes have no independent dimensions — cytoscape auto-sizes
+          // them to their descendants' bounding box, so only padding is meaningful.
+          // (width/height: 'label' is deprecated and ignored for compound parents.)
           padding: '20' as unknown as undefined,
         } },
         // ── Docker-network sub-box compound nodes ────────────────────────────
@@ -178,8 +177,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           'border-style': 'solid' as const,
           'border-color': ZONE_BORDER_COLORS['zone-docker'],
           color: ZONE_LABEL_COLORS['zone-docker'],
-          width: 'label' as unknown as number,
-          height: 'label' as unknown as number,
+          // Compound node: dimensions auto-inferred from children; padding only.
           padding: '14' as unknown as undefined,
         } },
         // ── Muted docker-network compound nodes (stale/unattached fallback box) ─

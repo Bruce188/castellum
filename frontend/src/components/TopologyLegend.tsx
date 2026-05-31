@@ -42,6 +42,7 @@ export function TopologyLegend({ visibility, onChange, presentScopes }: Props) {
       data-testid="topology-legend"
       className="absolute top-2 right-2 bg-white border border-gray-200 rounded shadow-sm p-2 text-xs space-y-1 z-10"
     >
+      <p className="font-semibold text-gray-500 uppercase tracking-wide" style={{ fontSize: 9 }}>Scopes</p>
       <ul className="space-y-1">
         {SCOPES.map(scope => (
           <li key={scope} className="flex items-center gap-2">
@@ -88,6 +89,7 @@ export function TopologyLegend({ visibility, onChange, presentScopes }: Props) {
         </>
       )}
       <hr className="my-1 border-gray-100" />
+      <p className="font-semibold text-gray-500 uppercase tracking-wide" style={{ fontSize: 9 }}>Risk</p>
       <RiskTierKey />
     </div>
   );
