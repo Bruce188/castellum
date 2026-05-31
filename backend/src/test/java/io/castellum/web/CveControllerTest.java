@@ -9,6 +9,7 @@ import io.castellum.cve.CveEnrichmentService.Enrichment;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveMatcher.MatchEvidence;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.FleetCveWindowService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -90,6 +91,9 @@ class CveControllerTest {
     JwtService jwtService;
     @MockBean
     UserRepository userRepository;
+
+    @MockBean
+    FleetCveWindowService fleetWindowService;
 
     /** Default enrichment stub: empty payload (kev=false, epss=null, composite=null per entry). */
     private void stubEnrichmentEmpty() {
@@ -562,6 +566,8 @@ class CveControllerTest {
         enrichMap.put("CVE-B", new Enrichment(Boolean.FALSE, null, new BigDecimal("9.20")));
         enrichMap.put("CVE-C", new Enrichment(Boolean.FALSE, null, new BigDecimal("7.40")));
         when(enrichment.enrich(anyCollection(), any(Criticality.class))).thenReturn(enrichMap);
+        when(fleetWindowService.window(any(), any(), eq("composite"), any()))
+            .thenReturn(new FleetCveWindowService.SortedWindow(List.of(cveB, cveC, cveA), enrichMap));
 
         mockMvc.perform(get("/api/cve/fleet").param("sort", "composite")
                 .accept(MediaType.APPLICATION_JSON))
@@ -570,9 +576,8 @@ class CveControllerTest {
             .andExpect(jsonPath("$.content[1].cveId").value("CVE-C"))
             .andExpect(jsonPath("$.content[2].cveId").value("CVE-A"));
 
-        // The enrichment-window path MUST request a wider candidate set than the page size.
-        // With the scoped union the wider window is now via findByIdIn... with expanded pageable.
-        verify(cveRepository).findByIdInAndCvssV31ScoreIsNotNull(eq(Set.of(1L, 2L, 3L)), argThat(p -> p.getPageSize() > 20));
+        // The page-independent sorted window is produced by FleetCveWindowService (mocked here);
+        // its scan / window-query / ordering behaviour is covered by FleetCveWindowServiceTest.
     }
 
     /**
@@ -603,6 +608,8 @@ class CveControllerTest {
         enrichMap.put("CVE-B", new Enrichment(Boolean.FALSE, null, new BigDecimal("6.00")));
         enrichMap.put("CVE-C", new Enrichment(Boolean.TRUE, null, new BigDecimal("7.00")));
         when(enrichment.enrich(anyCollection(), any(Criticality.class))).thenReturn(enrichMap);
+        when(fleetWindowService.window(any(), any(), eq("kev"), any()))
+            .thenReturn(new FleetCveWindowService.SortedWindow(List.of(cveA, cveC, cveB), enrichMap));
 
         mockMvc.perform(get("/api/cve/fleet").param("sort", "kev")
                 .accept(MediaType.APPLICATION_JSON))

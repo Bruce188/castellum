@@ -6,6 +6,7 @@ import io.castellum.cve.Cve;
 import io.castellum.cve.CveEnrichmentService;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.FleetCveWindowService;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.risk.KevEntryRepository;
@@ -59,6 +60,7 @@ class CveAffectedCacheTest {
     @MockBean CveEnrichmentService enrichmentService;
     @MockBean KevEntryRepository kevEntryRepository;
     @MockBean DeviceRepository deviceRepository;
+    @MockBean FleetCveWindowService fleetWindowService;
 
     @BeforeEach
     void setUp() {
