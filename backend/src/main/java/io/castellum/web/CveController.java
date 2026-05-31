@@ -7,6 +7,7 @@ import io.castellum.cve.CveEnrichmentService.Enrichment;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveMatcher.MatchEvidence;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.FleetCveWindowService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -30,7 +31,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,45 +41,28 @@ import java.util.Set;
 @RequestMapping("/api/cve")
 public class CveController {
 
-    /**
-     * Hard ceiling on the candidate set size used by the enrichment-window sort path
-     * ({@code sort=composite|kev|epss}). Bounds per-request work so an attacker (or a
-     * benign caller asking for a huge page) cannot trigger an unbounded scan +
-     * in-memory sort. Sized to comfortably cover 5 full pages at the largest
-     * {@code size=100} request (5 × 100 = 500). Promoted from magic-number per
-     * review-v44 code-reviewer NB-4.
-     */
-    private static final int ENRICHMENT_WINDOW_CAP = 500;
-
-    /**
-     * Per-page-size multiplier used to derive the enrichment-window candidate
-     * count before capping at {@link #ENRICHMENT_WINDOW_CAP}. Wider than the
-     * requested page so the in-memory sort has enough candidates to surface the
-     * true top-N for composite/kev/epss ordering even when many rows have null
-     * enrichment values. Promoted from magic-number per review-v44 code-reviewer
-     * NB-4.
-     */
-    private static final int ENRICHMENT_WINDOW_MULTIPLIER = 20;
-
     private final CveRepository cveRepository;
     private final CveMatcher cveMatcher;
     private final NetworkServiceRepository networkServiceRepository;
     private final CveEnrichmentService enrichmentService;
     private final KevEntryRepository kevEntryRepository;
     private final DeviceRepository deviceRepository;
+    private final FleetCveWindowService fleetWindowService;
 
     public CveController(CveRepository cveRepository,
                          CveMatcher cveMatcher,
                          NetworkServiceRepository networkServiceRepository,
                          CveEnrichmentService enrichmentService,
                          KevEntryRepository kevEntryRepository,
-                         DeviceRepository deviceRepository) {
+                         DeviceRepository deviceRepository,
+                         FleetCveWindowService fleetWindowService) {
         this.cveRepository = cveRepository;
         this.cveMatcher = cveMatcher;
         this.networkServiceRepository = networkServiceRepository;
         this.enrichmentService = enrichmentService;
         this.kevEntryRepository = kevEntryRepository;
         this.deviceRepository = deviceRepository;
+        this.fleetWindowService = fleetWindowService;
     }
 
     @GetMapping("/{cveId}")
@@ -226,21 +209,19 @@ public class CveController {
         }
 
         if ("composite".equals(sort) || "kev".equals(sort) || "epss".equals(sort)) {
-            // Enrichment-window path — fetch a wider candidate set, enrich, sort
-            // in memory, slice. Capped at ENRICHMENT_WINDOW_CAP rows pre-enrichment to
-            // bound per-request work (analysis Risk HIGH composite scaling).
-            int windowSize = Math.min(ENRICHMENT_WINDOW_CAP, clampedSize * ENRICHMENT_WINDOW_MULTIPLIER);
-            Pageable windowPageable = PageRequest.of(0, windowSize, sortSpec);
-            Page<Cve> window = applyExistingFleetFilters(minScore, deviceId, windowPageable);
-            Map<String, Enrichment> enrichMap = enrichmentService.enrich(window.getContent(), criticality);
-            List<Cve> sorted = window.getContent().stream()
-                    .sorted(comparatorFor(sort, enrichMap))
-                    .toList();
+            // Enrichment-window sort path. The expensive scan + bounded DB fetch + enrich +
+            // in-memory sort is PAGE-INDEPENDENT, so it is computed (and cached) once per
+            // (minScore, deviceId, sort) by FleetCveWindowService — every page of one sorted
+            // query reuses a single window. Here we only slice the requested page out of the
+            // already-sorted window and map each row to its DTO using the window's enrichment.
+            FleetCveWindowService.SortedWindow w =
+                    fleetWindowService.window(minScore, deviceId, sort, criticality);
+            List<Cve> sorted = w.sorted();
             int start = clampedPage * clampedSize;
             int end = Math.min(start + clampedSize, sorted.size());
             List<Cve> pageContent = start < sorted.size() ? sorted.subList(start, end) : List.of();
             List<CveSummaryDto> dtos = pageContent.stream()
-                    .map(c -> toSummary(c, enrichMap.get(c.getCveId())))
+                    .map(c -> toSummary(c, w.enrich().get(c.getCveId())))
                     .toList();
             return new PageImpl<>(dtos, pageable, sorted.size());
         }
@@ -315,33 +296,6 @@ public class CveController {
         return (minScore == null)
                 ? cveRepository.findByIdInAndCvssV31ScoreIsNotNull(cveFks, pageable)
                 : cveRepository.findByIdInAndCvssV31ScoreGreaterThanEqual(cveFks, minScore, pageable);
-    }
-
-    private static Comparator<Cve> comparatorFor(String sort, Map<String, Enrichment> enrich) {
-        Comparator<Cve> primary;
-        if ("composite".equals(sort)) {
-            primary = Comparator.comparing(
-                (Cve c) -> {
-                    Enrichment e = enrich.get(c.getCveId());
-                    return e == null ? null : e.composite();
-                },
-                Comparator.nullsLast(Comparator.reverseOrder()));
-        } else if ("epss".equals(sort)) {
-            primary = Comparator.comparing(
-                (Cve c) -> {
-                    Enrichment e = enrich.get(c.getCveId());
-                    return e == null ? null : e.epss();
-                },
-                Comparator.nullsLast(Comparator.reverseOrder()));
-        } else { // "kev"
-            primary = Comparator.comparing(
-                (Cve c) -> {
-                    Enrichment e = enrich.get(c.getCveId());
-                    return e != null && Boolean.TRUE.equals(e.kev());
-                },
-                Comparator.reverseOrder()); // true sorts first under reverse
-        }
-        return primary.thenComparing(Cve::getCveId); // sort-stability tiebreak
     }
 
     private static CveSummaryDto toSummary(Cve c, Enrichment enrichment) {

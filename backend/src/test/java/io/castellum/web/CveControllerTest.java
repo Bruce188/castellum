@@ -9,6 +9,7 @@ import io.castellum.cve.CveEnrichmentService.Enrichment;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveMatcher.MatchEvidence;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.FleetCveWindowService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
