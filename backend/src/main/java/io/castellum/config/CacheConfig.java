@@ -20,7 +20,7 @@ import java.util.List;
  *
  * <p>Why a {@link SimpleCacheManager} of explicit {@link CaffeineCache} beans rather than a
  * {@link org.springframework.cache.caffeine.CaffeineCacheManager} with a single global spec:
- * the four caches have materially different freshness requirements (the feeds-status cache
+ * the caches have materially different freshness requirements (the feeds-status cache
  * must expire within one front-end poll cycle; the per-device risk cache can live far
  * longer). One spec cannot serve both, and per-cache registration on
  * {@code CaffeineCacheManager} is verbose and easy to get wrong. Explicit beans keep each
@@ -54,6 +54,17 @@ public class CacheConfig {
     private static final long CVE_FLEET_MAX_SIZE = 1_000;
 
     /**
+     * Page-independent fleet-sort window cache. Keyed by {@code (minScore, deviceId, sort)}
+     * only (NOT page/size), so all pages of one sorted query share a single scan + enrich +
+     * sort. Evicted on the same scan/feed-sync events as {@link CacheNames#CVE_FLEET}. The
+     * key space is small — a handful of {@code minScore} floors × the supplied {@code deviceId}
+     * (or none) × three sort modes — so a modest max-size bounds it comfortably while keeping
+     * every active query's window resident.
+     */
+    private static final Duration CVE_FLEET_WINDOW_TTL = Duration.ofMinutes(5);
+    private static final long CVE_FLEET_WINDOW_MAX_SIZE = 256;
+
+    /**
      * Feeds-status cache. This endpoint drives {@code EmptyCorpusBanner}'s 10-second poll
      * that flips the UI from "feeds empty" to "feeds populated" once a sync finishes.
      *
@@ -67,6 +78,17 @@ public class CacheConfig {
     private static final Duration FEEDS_STATUS_TTL = Duration.ofSeconds(15);
     private static final long FEEDS_STATUS_MAX_SIZE = 4;
 
+    /**
+     * Affected-device listing per CVE ({@code GET /api/cve/{cveId}/devices}). The reverse
+     * fleet-match scan ({@code findAll()} → per-service {@code CpeMapper.toCpe23} →
+     * {@code CveMatcher.findVulnerableWithEvidence}) runs on every CVE detail open; caching the
+     * per-cveId result collapses repeat opens (and the common case) to one scan until eviction.
+     * Same fleet-derived freshness class as {@link CacheNames#CVE_FLEET}: evicted on scan and
+     * feed-sync completion.
+     */
+    private static final Duration CVE_AFFECTED_TTL = Duration.ofMinutes(5);
+    private static final long CVE_AFFECTED_MAX_SIZE = 1_000;
+
     @Bean
     public CacheManager cacheManager() {
         SimpleCacheManager manager = new SimpleCacheManager();
@@ -74,6 +96,8 @@ public class CacheConfig {
             caffeine(CacheNames.DEVICE_RISK, DEVICE_RISK_TTL, DEVICE_RISK_MAX_SIZE),
             caffeine(CacheNames.TOP_RISK, TOP_RISK_TTL, TOP_RISK_MAX_SIZE),
             caffeine(CacheNames.CVE_FLEET, CVE_FLEET_TTL, CVE_FLEET_MAX_SIZE),
+            caffeine(CacheNames.CVE_AFFECTED, CVE_AFFECTED_TTL, CVE_AFFECTED_MAX_SIZE),
+            caffeine(CacheNames.CVE_FLEET_WINDOW, CVE_FLEET_WINDOW_TTL, CVE_FLEET_WINDOW_MAX_SIZE),
             caffeine(CacheNames.FEEDS_STATUS, FEEDS_STATUS_TTL, FEEDS_STATUS_MAX_SIZE)));
         return manager;
     }

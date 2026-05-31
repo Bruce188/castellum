@@ -16,8 +16,19 @@ public final class CacheNames {
     /** Fleet CVE listing, keyed by the full query-param tuple. */
     public static final String CVE_FLEET = "cveFleet";
 
+    /**
+     * Page-independent fleet-sort window (scan + enrich + sort) for the
+     * {@code sort=composite|kev|epss} path, keyed by {@code (minScore, deviceId, sort)}
+     * so all pages of one query reuse a single computation. Evicted on the same
+     * fleet/corpus events as {@link #CVE_FLEET}.
+     */
+    public static final String CVE_FLEET_WINDOW = "cveFleetWindow";
+
     /** Feed-corpus status (NVD/EPSS/KEV counts + freshness), single keyed entry. */
     public static final String FEEDS_STATUS = "feedsStatus";
+
+    /** Affected-device list per CVE ({@code GET /api/cve/{cveId}/devices}), keyed by cveId. */
+    public static final String CVE_AFFECTED = "cveAffected";
 
     private CacheNames() {
         throw new UnsupportedOperationException("constants holder");

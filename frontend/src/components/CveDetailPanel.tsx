@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import type { CveDetailDto, CveAffectedDevice } from '../api/types';
@@ -52,33 +52,72 @@ export function CveDetailPanel({ cveId, onClose }: Props) {
   const [affectedError, setAffectedError] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Session-scoped cache of fully-loaded CVE details + affected-device lists,
+  // keyed by cveId. Re-opening a CVE already viewed in this CvesPage session is
+  // served synchronously from the ref — no second round-trip for the multi-KB
+  // detail payload or the (uncached, full-fleet-scan) /devices endpoint. The
+  // cache is component-scoped (a useRef, not a module global) so it resets on
+  // unmount and never leaks across renders or test mounts. Only fully-successful
+  // pairs are cached, so a partial/failed load still retries on re-open.
+  const cacheRef = useRef<Map<string, { detail: CveDetailDto; affected: CveAffectedDevice[] }>>(
+    new Map(),
+  );
+
   useEffect(() => {
     if (!cveId) {
       setDetail(null);
       setDetailError(false);
       setAffected([]);
       setAffectedError(false);
+      setLoading(false);
       return;
     }
+
+    const cached = cacheRef.current.get(cveId);
+    if (cached) {
+      setDetail(cached.detail);
+      setAffected(cached.affected);
+      setDetailError(false);
+      setAffectedError(false);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     setLoading(true);
     setDetailError(false);
     setAffectedError(false);
     Promise.allSettled([api.cveDetail(cveId), api.listAffectedDevices(cveId)])
       .then(([detailResult, affectedResult]) => {
-        if (detailResult.status === 'fulfilled') {
-          setDetail(detailResult.value);
+        if (cancelled) return;
+        const okDetail = detailResult.status === 'fulfilled' ? detailResult.value : null;
+        const okAffected = affectedResult.status === 'fulfilled' ? affectedResult.value : null;
+
+        if (okDetail !== null) {
+          setDetail(okDetail);
         } else {
           setDetail(null);
           setDetailError(true);
         }
-        if (affectedResult.status === 'fulfilled') {
-          setAffected(affectedResult.value);
+        if (okAffected !== null) {
+          setAffected(okAffected);
         } else {
           setAffected([]);
           setAffectedError(true);
         }
+        // Cache only when BOTH calls succeeded — a partial failure must re-fetch
+        // on the next open rather than serving a half-populated panel forever.
+        if (okDetail !== null && okAffected !== null) {
+          cacheRef.current.set(cveId, { detail: okDetail, affected: okAffected });
+        }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [cveId]);
 
   if (!cveId) return null;

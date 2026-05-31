@@ -5,6 +5,7 @@ import io.castellum.config.SecurityConfig;
 import io.castellum.cve.CveEnrichmentService;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
+import io.castellum.cve.FleetCveWindowService;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkServiceRepository;
 import io.castellum.risk.KevEntryRepository;
@@ -51,6 +52,7 @@ class CveCoverageControllerTest {
     @MockBean CveEnrichmentService enrichmentService;
     @MockBean KevEntryRepository kevEntryRepository;
     @MockBean DeviceRepository deviceRepository;
+    @MockBean FleetCveWindowService fleetWindowService;
     @MockBean CastellumUserDetailsService castellumUserDetailsService;
     @MockBean JwtService jwtService;
     @MockBean UserRepository userRepository;

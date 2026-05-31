@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { CveDetailPanel } from '../components/CveDetailPanel';
 import { api } from '../api/client';
@@ -362,5 +363,60 @@ describe('<CveDetailPanel />', () => {
     expect(screen.getByText('7.8')).toBeInTheDocument();
     // AC3: no decoded metric label leaks when the vector is null.
     expect(screen.queryByText('Attack Vector')).toBeNull();
+  });
+
+  // --- Session cache: re-opening a viewed CVE must not re-hit the network ---
+
+  it('caches per-cveId: re-opening a viewed CVE skips refetch; a new CVE fetches once', async () => {
+    vi.mocked(api.cveDetail).mockReset();
+    vi.mocked(api.listAffectedDevices).mockReset();
+    const detailB: CveDetailDto = { ...cveDetail, cveId: 'CVE-2021-0001', description: 'Other vuln.' };
+    vi.mocked(api.cveDetail).mockImplementation(async (id: string) =>
+      id === 'CVE-2021-0001' ? detailB : cveDetail,
+    );
+    vi.mocked(api.listAffectedDevices).mockResolvedValue(affectedDevices);
+
+    // Single stable tree (MemoryRouter mounted once) so CveDetailPanel keeps its
+    // useRef cache across cveId changes — mirrors staying on the CVEs page.
+    function Harness() {
+      const [id, setId] = useState<string | null>('CVE-2020-15778');
+      return (
+        <MemoryRouter>
+          <button onClick={() => setId(null)}>x-close</button>
+          <button onClick={() => setId('CVE-2020-15778')}>x-open-a</button>
+          <button onClick={() => setId('CVE-2021-0001')}>x-open-b</button>
+          <CveDetailPanel cveId={id} onClose={() => setId(null)} />
+        </MemoryRouter>
+      );
+    }
+    render(<Harness />);
+
+    await waitFor(() =>
+      expect(screen.getByText('OpenSSH scp client vulnerability.')).toBeInTheDocument(),
+    );
+    expect(vi.mocked(api.cveDetail)).toHaveBeenCalledTimes(1);
+
+    // Close, then re-open the SAME cve → served from cache, no second fetch.
+    fireEvent.click(screen.getByText('x-close'));
+    fireEvent.click(screen.getByText('x-open-a'));
+    await waitFor(() =>
+      expect(screen.getByText('OpenSSH scp client vulnerability.')).toBeInTheDocument(),
+    );
+    expect(vi.mocked(api.cveDetail)).toHaveBeenCalledTimes(1);
+
+    // A different cve is a genuine cache miss → one new fetch.
+    fireEvent.click(screen.getByText('x-open-b'));
+    await waitFor(() => expect(screen.getByText('Other vuln.')).toBeInTheDocument());
+    expect(vi.mocked(api.cveDetail)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.cveDetail)).toHaveBeenNthCalledWith(2, 'CVE-2021-0001');
+
+    // Back to the first cve → still cached, count unchanged.
+    fireEvent.click(screen.getByText('x-close'));
+    fireEvent.click(screen.getByText('x-open-a'));
+    await waitFor(() =>
+      expect(screen.getByText('OpenSSH scp client vulnerability.')).toBeInTheDocument(),
+    );
+    expect(vi.mocked(api.cveDetail)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.listAffectedDevices)).toHaveBeenCalledTimes(2);
   });
 });
