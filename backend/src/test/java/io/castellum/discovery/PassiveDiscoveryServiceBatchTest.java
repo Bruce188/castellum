@@ -39,9 +39,8 @@ class PassiveDiscoveryServiceBatchTest {
     @Mock private ArpReader arpReader;
     @Mock private MdnsProbe mdnsProbe;
     @Mock private PcapSniffer pcapSniffer;
-    @Mock private LldpDecoder lldpDecoder;
     @Mock private LldpCapture lldpCapture;
-    @Mock private CdpDecoder cdpDecoder;
+    @Mock private CdpCapture cdpCapture;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
     @Mock private DeviceUpsertService upsertService;
@@ -55,7 +54,7 @@ class PassiveDiscoveryServiceBatchTest {
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(42L);
         org.mockito.Mockito.when(arpFactory.select()).thenReturn(arpReader);
         return new PassiveDiscoveryService(arpFactory, mdnsProbe, pcapSniffer,
-            lldpDecoder, lldpCapture, cdpDecoder, connTableReader, gatewayProbe,
+            lldpCapture, cdpCapture, connTableReader, gatewayProbe,
             upsertService, auditService, recorder, false, false, true, true, clock);
     }
 

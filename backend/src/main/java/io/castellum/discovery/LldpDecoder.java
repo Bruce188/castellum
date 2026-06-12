@@ -4,8 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -36,7 +34,6 @@ public class LldpDecoder {
     private static final Logger log = LoggerFactory.getLogger(LldpDecoder.class);
 
     private static final int ETHERTYPE_LLDP = 0x88cc;
-    private static final int ETHERTYPE_8021Q = 0x8100;
 
     private static final int TLV_END = 0;
     private static final int TLV_CHASSIS_ID = 1;
@@ -53,16 +50,11 @@ public class LldpDecoder {
         if (frame == null || frame.length < 14) {
             return List.of();
         }
-        int ethertype = readU16(frame, 12);
-        int lldpStart;
-        if (ethertype == ETHERTYPE_LLDP) {
-            lldpStart = 14;
-        } else if (ethertype == ETHERTYPE_8021Q && frame.length >= 18
-                && readU16(frame, 16) == ETHERTYPE_LLDP) {
-            lldpStart = 18;
-        } else {
-            return List.of();
+        EtherFraming framing = EtherFraming.of(frame);
+        if (framing == null || framing.typeOrLength() != ETHERTYPE_LLDP) {
+            return List.of(); // not the LLDP ethertype
         }
+        int lldpStart = framing.payloadStart();
 
         String mac = null;
         String fallbackMac = null;
@@ -83,25 +75,27 @@ public class LldpDecoder {
             if (valueStart + length > frame.length) {
                 break; // declared length overruns the buffer — keep fields so far
             }
-            byte[] value = Arrays.copyOfRange(frame, valueStart, valueStart + length);
+            // Value bytes are only materialized for consumed TLV types — ignored TLVs
+            // (TTL, port description, capabilities, …) cost no allocation.
             switch (type) {
                 case TLV_CHASSIS_ID -> {
-                    if (mac == null && value.length >= 7 && (value[0] & 0xFF) == CHASSIS_SUBTYPE_MAC) {
-                        mac = formatMac(value, 1);
+                    if (mac == null && length >= 7 && (frame[valueStart] & 0xFF) == CHASSIS_SUBTYPE_MAC) {
+                        mac = MacFormat.format(frame, valueStart + 1);
                     }
                 }
                 case TLV_PORT_ID -> {
-                    if (fallbackMac == null && value.length >= 7 && (value[0] & 0xFF) == PORT_SUBTYPE_MAC) {
-                        fallbackMac = formatMac(value, 1);
+                    if (fallbackMac == null && length >= 7 && (frame[valueStart] & 0xFF) == PORT_SUBTYPE_MAC) {
+                        fallbackMac = MacFormat.format(frame, valueStart + 1);
                     }
                 }
                 case TLV_SYSTEM_NAME -> {
                     if (hostname == null) {
-                        String name = new String(value, StandardCharsets.UTF_8).trim();
+                        String name = new String(frame, valueStart, length, StandardCharsets.UTF_8).trim();
                         hostname = name.isEmpty() ? null : name;
                     }
                 }
                 case TLV_MGMT_ADDRESS -> {
+                    byte[] value = Arrays.copyOfRange(frame, valueStart, valueStart + length);
                     logUnusualMgmtAddress(value);
                     // Each TLV carries one family; first IPv4 wins downstream, else first IPv6.
                     if (ipv4 == null) {
@@ -142,11 +136,7 @@ public class LldpDecoder {
         if (subtype != wantSubtype || addrLen != wantAddrLen || 2 + addrLen > value.length) {
             return null;
         }
-        try {
-            return InetAddress.getByAddress(Arrays.copyOfRange(value, 2, 2 + addrLen)).getHostAddress();
-        } catch (UnknownHostException e) {
-            return null; // wrong raw-address length — cannot happen after the check above
-        }
+        return WireAddress.toLiteral(Arrays.copyOfRange(value, 2, 2 + addrLen));
     }
 
     /**
@@ -167,14 +157,5 @@ public class LldpDecoder {
             log.debug("LLDP management-address TLV with unexpected address length: subtype={} addrLen={}",
                 subtype, addrLen);
         }
-    }
-
-    /** Six bytes at {@code from} → lowercase colon-separated {@code %02x} via {@link MacFormat}. */
-    private static String formatMac(byte[] value, int from) {
-        return MacFormat.format(Arrays.copyOfRange(value, from, from + 6));
-    }
-
-    private static int readU16(byte[] frame, int offset) {
-        return ((frame[offset] & 0xFF) << 8) | (frame[offset + 1] & 0xFF);
     }
 }

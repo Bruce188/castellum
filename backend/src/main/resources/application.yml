@@ -100,6 +100,7 @@ castellum:
       max-captured-frames: ${DISCOVERY_LLDP_MAX_CAPTURED_FRAMES:1000}
     cdp:
       enabled: ${DISCOVERY_CDP_ENABLED:false}
+      max-captured-frames: ${DISCOVERY_CDP_MAX_CAPTURED_FRAMES:1000}
     conn-table:
       enabled: ${DISCOVERY_CONN_TABLE_ENABLED:true}
       max-remotes: ${DISCOVERY_CONN_TABLE_MAX_REMOTES:512}

@@ -726,7 +726,7 @@ docker run --rm -it --entrypoint /busybox/sh castellum:debug
   -e CASTELLUM_ADMIN_PASSWORD_HASH='$2a$12$...' \
   castellum:latest
 </code></pre>
-<p><code>CAP_NET_RAW</code> is required by <code>pcap4j</code>, which is used by the two libpcap-backed passive discovery sources: PCAP and LLDP. If you do not need either capture source, you can drop this capability too.</p>
+<p><code>CAP_NET_RAW</code> is required by <code>pcap4j</code>, which is used by the three libpcap-backed passive discovery sources: PCAP, LLDP, and CDP. If you do not need any of the capture sources, you can drop this capability too.</p>
 <p>Note: <code>HEALTHCHECK</code> is not baked into the image. Wire the <code>/actuator/health</code> endpoint externally via your orchestrator (Kubernetes liveness probe, Docker Compose <code>healthcheck</code>, ECS health check).</p>
 
 <h3 id="kubernetes-example">Kubernetes example</h3>

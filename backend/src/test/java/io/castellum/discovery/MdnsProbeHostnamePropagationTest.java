@@ -45,9 +45,8 @@ class MdnsProbeHostnamePropagationTest {
     @Mock private ArpReader arpReader;
     @Mock private MdnsProbe mdnsProbe;
     @Mock private PcapSniffer pcapSniffer;
-    @Mock private LldpDecoder lldpDecoder;
     @Mock private LldpCapture lldpCapture;
-    @Mock private CdpDecoder cdpDecoder;
+    @Mock private CdpCapture cdpCapture;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
     @Mock private AuditService auditService;
@@ -63,7 +62,7 @@ class MdnsProbeHostnamePropagationTest {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         realUpsert = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier(), new DeviceRoleClassifier());
         service = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
             connTableReader, gatewayProbe,
             realUpsert, auditService, recorder,
             false, false, true, true, clock);
