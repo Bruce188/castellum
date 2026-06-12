@@ -39,6 +39,15 @@ public class AsyncConfig {
     @Value("${castellum.scan.executor.queue-capacity:10}")
     private int queueCapacity;
 
+    @Value("${castellum.scan.wide-executor.core-pool-size:1}")
+    private int wideScanCorePoolSize;
+
+    @Value("${castellum.scan.wide-executor.max-pool-size:1}")
+    private int wideScanMaxPoolSize;
+
+    @Value("${castellum.scan.wide-executor.queue-capacity:8}")
+    private int wideScanQueueCapacity;
+
     @Value("${castellum.initial-sync.executor.core-pool-size:1}")
     private int initialSyncCorePoolSize;
 
@@ -64,6 +73,28 @@ public class AsyncConfig {
         executor.setMaxPoolSize(maxPoolSize);
         executor.setQueueCapacity(queueCapacity);
         executor.setThreadNamePrefix("scan-exec-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Dedicated single-threaded lane for wide (multi-chunk) scans.
+     *
+     * <p>A /16 executes as 64 sequential /22 chunks and can hold a thread for hours.
+     * Routing such scans here (see {@code ScanExecutionService.executeWideAsync})
+     * keeps the interactive {@code scanTaskExecutor} pool free for single-chunk
+     * scans, retries, recovery, and the scheduler. Single-threaded by default with
+     * a small queue; saturation aborts (callers already handle
+     * {@code RejectedExecutionException} and leave the row PENDING).
+     */
+    @Bean("wideScanTaskExecutor")
+    public ThreadPoolTaskExecutor wideScanTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(wideScanCorePoolSize);
+        executor.setMaxPoolSize(wideScanMaxPoolSize);
+        executor.setQueueCapacity(wideScanQueueCapacity);
+        executor.setThreadNamePrefix("wide-scan-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.initialize();
         return executor;

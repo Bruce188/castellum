@@ -50,10 +50,13 @@ export function makeNmapStage(type: ScanType, deps: NmapStageDeps): StageRunner 
 
       const detail = await deps.getScanDetail(id);
 
-      // Report progress for every poll result.
+      // Report progress for every poll result. Chunk fields are forwarded only
+      // when the polled detail carries them — legacy details emit none.
       ctx.report({
         scanStatus: detail.status,
         discoveredDeviceIds: detail.discoveredDeviceIds,
+        ...(detail.chunksTotal !== undefined ? { chunksTotal: detail.chunksTotal } : {}),
+        ...(detail.chunksDone !== undefined ? { chunksDone: detail.chunksDone } : {}),
       });
 
       if (detail.status === 'COMPLETE') {

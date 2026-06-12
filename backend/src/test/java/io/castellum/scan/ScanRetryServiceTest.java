@@ -175,4 +175,27 @@ class ScanRetryServiceTest {
         ScanRetryService svc = new ScanRetryService(scanRepository, scanExecutionService, auditService, clock);
         assertNotNull(svc);
     }
+
+    // -----------------------------------------------------------------------
+    // Wide-CIDR routing: /20 (>1 chunk) dispatches executeWideAsync, not executeAsync
+    // -----------------------------------------------------------------------
+
+    @Test
+    void promoteDueRetries_wideCidr_dispatchesExecuteWideAsync_notExecuteAsync() {
+        Instant failedAt = Instant.parse("2026-05-26T00:00:00Z");
+        Instant now = failedAt.plusSeconds(61); // backoff elapsed for attempt 1
+        Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+        ScanRetryService svc = new ScanRetryService(scanRepository, scanExecutionService, auditService, clock);
+
+        Scan wide = failed(50L, "RuntimeException: nmap timed out", 0, failedAt);
+        wide.setCidr("10.0.0.0/20"); // 4 /22 chunks → isWideScan == true
+
+        when(scanRepository.findByStatus(ScanStatus.FAILED)).thenReturn(List.of(wide));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        svc.promoteDueRetries();
+
+        verify(scanExecutionService).executeWideAsync(50L);
+        verify(scanExecutionService, never()).executeAsync(any(Long.class));
+    }
 }

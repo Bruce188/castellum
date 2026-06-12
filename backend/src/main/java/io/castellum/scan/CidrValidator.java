@@ -68,12 +68,25 @@ public final class CidrValidator {
         if (network == null || addr == null) {
             return false;
         }
-        int mask = (prefix == 0) ? 0 : (0xFFFFFFFF << (32 - prefix));
-        return (network & mask) == (addr & mask);
+        return networkOf(network, prefix) == networkOf(addr, prefix);
+    }
+
+    /**
+     * The network mask for a prefix length as a 32-bit int: /0 → 0, /22 → 0xFFFFFC00.
+     * Shared by {@link #cidrContainsHost} and {@link CidrChunker} so the mask math
+     * lives in one place.
+     */
+    static int maskFor(int prefix) {
+        return (prefix == 0) ? 0 : (0xFFFFFFFF << (32 - prefix));
+    }
+
+    /** The network address of {@code addr} under a /{@code prefix} mask (host bits dropped). */
+    static int networkOf(int addr, int prefix) {
+        return addr & maskFor(prefix);
     }
 
     /** Parse a validated dotted-quad into a 32-bit int, or {@code null} on any malformation. */
-    private static Integer toInt(String dottedQuad) {
+    static Integer toInt(String dottedQuad) {
         String[] parts = dottedQuad.split("\\.");
         if (parts.length != 4) {
             return null;
@@ -92,5 +105,11 @@ public final class CidrValidator {
             value = (value << 8) | octet;
         }
         return value;
+    }
+
+    /** Inverse of {@link #toInt(String)}: format a 32-bit int as a dotted-quad IPv4 address. */
+    static String toDottedQuad(int value) {
+        return ((value >>> 24) & 0xFF) + "." + ((value >>> 16) & 0xFF) + "."
+            + ((value >>> 8) & 0xFF) + "." + (value & 0xFF);
     }
 }

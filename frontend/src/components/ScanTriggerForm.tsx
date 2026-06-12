@@ -12,6 +12,7 @@ interface Props {
 export function ScanTriggerForm({ onScanSubmitted }: Props) {
   const [cidr, setCidr] = useState('192.168.1.0/24');
   const [type, setType] = useState<ScanType>('PING_SWEEP');
+  const [skipHostDiscovery, setSkipHostDiscovery] = useState(false);
   const [activeScanId, setActiveScanId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cidrNote, setCidrNote] = useState<string | null>(null);
@@ -34,7 +35,14 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
     e.preventDefault();
     setError(null);
     try {
-      const result = await api.triggerScan({ cidr, type });
+      // skipHostDiscovery is only honored by the backend for SERVICE_DETECT —
+      // derive inclusion from the selected type so the key is never sent
+      // (silently ignored) for PING_SWEEP / OS_FINGERPRINT.
+      const result = await api.triggerScan({
+        cidr,
+        type,
+        ...(type === 'SERVICE_DETECT' && skipHostDiscovery ? { skipHostDiscovery: true } : {}),
+      });
       setActiveScanId(result.id);
       onScanSubmitted?.(result.id);
     } catch (err) {
@@ -75,6 +83,18 @@ export function ScanTriggerForm({ onScanSubmitted }: Props) {
           {SCAN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </label>
+      {type === 'SERVICE_DETECT' && (
+        <label className="text-sm font-medium">
+          <input
+            type="checkbox"
+            checked={skipHostDiscovery}
+            onChange={e => setSkipHostDiscovery(e.target.checked)}
+            className="mr-2"
+            title="Treat every address in the CIDR as up (nmap -Pn) — slower, but finds hosts that block ping."
+          />
+          Skip host discovery
+        </label>
+      )}
       <button type="submit" className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
         Scan
       </button>

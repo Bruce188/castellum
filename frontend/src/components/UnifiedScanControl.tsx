@@ -202,7 +202,9 @@ export function UnifiedScanControl({ isAdmin = true }: Props) {
                 {stage.status === 'running' && (
                   stage.kind === 'ot' && stage.otTotal != null
                     ? `${stage.otCompleted ?? 0}/${stage.otTotal}`
-                    : stage.scanStatus ?? 'running'
+                    : stage.chunksTotal != null && stage.chunksTotal > 1
+                      ? `${stage.chunksDone ?? 0}/${stage.chunksTotal} chunks`
+                      : stage.scanStatus ?? 'running'
                 )}
                 {stage.status === 'complete' && 'complete'}
                 {stage.status === 'failed' && `failed${stage.error ? `: ${stage.error}` : ''}`}

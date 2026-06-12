@@ -1,9 +1,12 @@
 package io.castellum.scan;
 
 /**
- * Thrown when a scan-submission's CIDR prefix is shorter than
- * {@link ScanSizeGuard#MAX_ALLOWED_PREFIX}. Mapped to HTTP 400 by
- * {@code GlobalExceptionHandler}.
+ * Thrown when a CIDR's prefix is shorter than the applicable sizing tier:
+ * {@link ScanSizeGuard#MAX_ALLOWED_PREFIX} (/22, strict — scheduler/policy and
+ * per-chunk execution bound) or {@link ScanSizeGuard#MIN_CHUNKABLE_PREFIX}
+ * (/16, chunked POST /api/scan intake ceiling). {@code maxAllowedPrefix}
+ * carries whichever threshold the failing caller enforced. Mapped to HTTP 400
+ * by {@code GlobalExceptionHandler}.
  */
 public class ScanScopeTooLargeException extends RuntimeException {
 

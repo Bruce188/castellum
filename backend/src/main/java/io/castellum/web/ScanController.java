@@ -64,8 +64,9 @@ public class ScanController {
         // 1. Structural CIDR validity (IllegalArgumentException → 400 via GlobalExceptionHandler).
         CidrValidator.requireValid(request.cidr());
 
-        // 2. Scope guard — reject /16, /20, etc. (ScanScopeTooLargeException → 400).
-        ScanSizeGuard.requireBoundedScope(request.cidr());
+        // 2. Scope guard — chunkable policy: ranges down to /16 are accepted (executed as
+        // sequential /22 chunks); wider than /16 → ScanScopeTooLargeException → 400.
+        ScanSizeGuard.requireChunkableScope(request.cidr());
 
         // 3. Per-actor rate-limit (20 / hour). On block: 429 + Retry-After.
         String actor = auth == null || auth.getName() == null ? "system" : auth.getName();
@@ -84,15 +85,22 @@ public class ScanController {
         scan.setScanType(request.type().name());
         scan.setStatus(ScanStatus.PENDING);
         scan.setRequestedAt(Instant.now());
+        scan.setSkipHostDiscovery(Boolean.TRUE.equals(request.skipHostDiscovery()));
 
         Scan saved = scanRepository.save(scan);
         auditService.recordEvent(actor, "SCAN_SUBMIT", "scan", String.valueOf(saved.getId()), saved);
 
         // Dispatch async execution AFTER the PENDING row is committed and audited.
-        // Wrap in try/catch so TaskRejectedException (saturated queue) never surfaces to
-        // the HTTP client — the PENDING row remains operator-visible for re-enqueueing.
+        // Multi-chunk scans go to the dedicated wide-scan lane so a multi-hour /16
+        // sweep never occupies the interactive pool. Wrap in try/catch so
+        // TaskRejectedException (saturated queue) never surfaces to the HTTP client —
+        // the PENDING row remains operator-visible for re-enqueueing.
         try {
-            scanExecutionService.executeAsync(saved.getId());
+            if (ScanExecutionService.isWideScan(request.cidr())) {
+                scanExecutionService.executeWideAsync(saved.getId());
+            } else {
+                scanExecutionService.executeAsync(saved.getId());
+            }
         } catch (RejectedExecutionException e) {
             log.warn("Scan {} dispatch rejected (executor queue saturated) — row stays PENDING", saved.getId());
         }
@@ -111,6 +119,7 @@ public class ScanController {
             scan.getId(), scan.getCidr(), scan.getScanType(), scan.getStatus(),
             scan.getRequestedAt(), scan.getCompletedAt(),
             scan.getFailureReason(), scan.getRetryCount(),
+            scan.getChunksTotal(), scan.getChunksDone(),
             ids);
     }
 

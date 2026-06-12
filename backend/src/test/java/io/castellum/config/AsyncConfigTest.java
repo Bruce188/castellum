@@ -10,8 +10,9 @@ import org.springframework.test.context.TestPropertySource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Lightweight @SpringBootTest that verifies the {@code scanTaskExecutor} and
- * {@code initialSyncTaskExecutor} beans are wired with the configured pool properties.
+ * Lightweight @SpringBootTest that verifies the {@code scanTaskExecutor},
+ * {@code wideScanTaskExecutor}, and {@code initialSyncTaskExecutor} beans are
+ * wired with the configured pool properties.
  */
 @SpringBootTest
 @TestPropertySource(properties = {
@@ -28,6 +29,10 @@ class AsyncConfigTest {
     @Qualifier("initialSyncTaskExecutor")
     private ThreadPoolTaskExecutor initialSyncTaskExecutor;
 
+    @Autowired
+    @Qualifier("wideScanTaskExecutor")
+    private ThreadPoolTaskExecutor wideScanTaskExecutor;
+
     @Test
     void scanTaskExecutor_isBoundedThreadPool_withConfiguredProperties() {
         assertNotNull(scanTaskExecutor, "scanTaskExecutor bean must be present");
@@ -39,6 +44,19 @@ class AsyncConfigTest {
             "queue-capacity must reflect property override");
         assertTrue(scanTaskExecutor.getThreadNamePrefix().startsWith("scan-exec-"),
             "thread-name-prefix must be scan-exec-");
+    }
+
+    @Test
+    void wideScanTaskExecutor_isSingleThreaded_withSmallQueue() {
+        assertNotNull(wideScanTaskExecutor, "wideScanTaskExecutor bean must be present");
+        assertEquals(1, wideScanTaskExecutor.getCorePoolSize(),
+            "wide-scan executor core-pool-size must default to 1");
+        assertEquals(1, wideScanTaskExecutor.getMaxPoolSize(),
+            "wide-scan executor max-pool-size must default to 1");
+        assertEquals(8, wideScanTaskExecutor.getQueueCapacity(),
+            "wide-scan executor queue-capacity must default to 8");
+        assertTrue(wideScanTaskExecutor.getThreadNamePrefix().startsWith("wide-scan-"),
+            "thread-name-prefix must be wide-scan-");
     }
 
     @Test

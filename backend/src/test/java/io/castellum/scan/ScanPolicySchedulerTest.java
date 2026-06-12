@@ -6,6 +6,7 @@ import io.castellum.domain.ScanRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
@@ -15,8 +16,10 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -98,5 +101,39 @@ class ScanPolicySchedulerTest {
         sched.checkPolicies();
 
         verify(scanRepository, never()).save(any(Scan.class));
+    }
+
+    // -----------------------------------------------------------------------
+    // Wide-CIDR routing: belt-and-braces — if a wide CIDR reaches dispatch,
+    // it routes to executeWideAsync and never executeAsync.
+    // ScanSizeGuard is bypassed via mockStatic so we can reach the routing code.
+    // -----------------------------------------------------------------------
+
+    @Test
+    void policyFire_wideCidr_dispatchesExecuteWideAsync_notExecuteAsync() {
+        // /20 = 4 /22 chunks → isWideScan == true; requireBoundedScope would reject it
+        // in production, but we stub it to prove the routing code is wired correctly.
+        Instant base = Instant.parse("2026-05-26T01:02:30Z");
+        Clock clock = Clock.fixed(base, ZoneOffset.UTC);
+        ScanPolicy p = new ScanPolicy("wide-test", "0 * * * * *", "10.0.0.0/20", "PING_SWEEP", true);
+        p.setId(99L);
+        p.setCreatedAt(Instant.parse("2026-05-26T01:00:00Z"));
+        p.setLastTriggeredAt(Instant.parse("2026-05-26T01:00:00Z"));
+        when(policyRepository.findByEnabledTrue()).thenReturn(List.of(p));
+
+        Scan saved = new Scan();
+        saved.setId(88L);
+        when(scanRepository.save(any(Scan.class))).thenReturn(saved);
+
+        ScanPolicyScheduler sched = new ScanPolicyScheduler(policyRepository, scanRepository,
+            scanExecutionService, auditService, clock);
+
+        try (MockedStatic<ScanSizeGuard> guardMock = mockStatic(ScanSizeGuard.class)) {
+            guardMock.when(() -> ScanSizeGuard.requireBoundedScope(anyString())).then(inv -> null);
+            sched.checkPolicies();
+        }
+
+        verify(scanExecutionService).executeWideAsync(88L);
+        verify(scanExecutionService, never()).executeAsync(anyLong());
     }
 }

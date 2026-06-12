@@ -13,5 +13,7 @@ public record ScanDetailDto(
     Instant completedAt,
     String failureReason,
     Integer retryCount,
+    Integer chunksTotal,
+    Integer chunksDone,
     List<Long> discoveredDeviceIds
 ) {}
