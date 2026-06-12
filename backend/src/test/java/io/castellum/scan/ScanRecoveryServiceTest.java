@@ -25,6 +25,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 @ExtendWith(MockitoExtension.class)
 class ScanRecoveryServiceTest {
@@ -179,5 +180,62 @@ class ScanRecoveryServiceTest {
 
         verify(scanRepository).findRecoverable(customStart);
         verify(scanRepository, never()).findRecoverable(eq(PROCESS_START));
+    }
+
+    // -----------------------------------------------------------------------
+    // Wide-CIDR routing: /20 (>1 chunk) dispatches executeWideAsync, not executeAsync
+    // -----------------------------------------------------------------------
+
+    @Test
+    void recover_wideCidr_dispatchesExecuteWideAsync_notExecuteAsync() {
+        Scan wide = new Scan();
+        wide.setId(20L);
+        wide.setCidr("10.0.0.0/20"); // 4 /22 chunks → isWideScan == true
+        wide.setScanType("PING_SWEEP");
+        wide.setStatus(ScanStatus.PENDING);
+        wide.setRequestedAt(PROCESS_START.minusSeconds(3600));
+
+        when(scanRepository.findRecoverable(PROCESS_START)).thenReturn(List.of(wide));
+        when(scanRepository.claimForRecovery(20L, ScanStatus.PENDING)).thenReturn(1);
+
+        service().recoverInterruptedScans();
+
+        verify(scanExecutionService).executeWideAsync(20L);
+        verify(scanExecutionService, never()).executeAsync(anyLong());
+    }
+
+    // -----------------------------------------------------------------------
+    // Malformed-CIDR row does not abort sweep; valid subsequent rows still
+    // dispatched and SCAN_RECOVERY audit still fires (pins Finding 1 guard)
+    // -----------------------------------------------------------------------
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void recover_malformedCidr_doesNotAbortSweep_auditStillFires() {
+        Scan bad = new Scan();
+        bad.setId(30L);
+        bad.setCidr("garbage"); // will throw IllegalArgumentException via CidrValidator
+        bad.setScanType("PING_SWEEP");
+        bad.setStatus(ScanStatus.PENDING);
+        bad.setRequestedAt(PROCESS_START.minusSeconds(3600));
+
+        Scan good = scan(31L, ScanStatus.PENDING);
+
+        when(scanRepository.findRecoverable(PROCESS_START)).thenReturn(List.of(bad, good));
+        when(scanRepository.claimForRecovery(30L, ScanStatus.PENDING)).thenReturn(1);
+        when(scanRepository.claimForRecovery(31L, ScanStatus.PENDING)).thenReturn(1);
+
+        service().recoverInterruptedScans();
+
+        // Bad row failed dispatch — must NOT count as requeued; good row dispatched
+        verify(scanExecutionService, never()).executeAsync(30L);
+        verify(scanExecutionService).executeAsync(31L);
+
+        // SCAN_RECOVERY audit fires with requeued=1 (only the valid row)
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(auditService, times(1)).recordEvent(
+            eq("system"), eq("SCAN_RECOVERY"), eq("scan"), eq("-"), captor.capture());
+        Map<String, Object> payload = (Map<String, Object>) captor.getValue();
+        assertEquals(1, payload.get("requeued"), "bad-CIDR row must not count as requeued");
     }
 }

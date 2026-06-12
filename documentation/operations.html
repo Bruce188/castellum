@@ -650,6 +650,8 @@ footer {
       <li class="lvl-3"><a href="#cron-driven-poller-scanpolicyscheduler">Cron-driven poller — ScanPolicyScheduler</a></li>
       <li class="lvl-3"><a href="#submission-rate-limit-scansubmissionratelimiter">Submission rate limit — ScanSubmissionRateLimiter</a></li>
       <li class="lvl-3"><a href="#scope-cap-scansizeguard">Scope cap — ScanSizeGuard</a></li>
+      <li class="lvl-3"><a href="#chunked-execution-cidrchunker">Chunked execution — CidrChunker</a></li>
+      <li class="lvl-3"><a href="#skipping-host-discovery-skiphostdiscovery">Skipping host discovery — skipHostDiscovery</a></li>
       <li class="lvl-3"><a href="#auto-retry-scanretryservice">Auto-retry — ScanRetryService</a></li>
       <li class="lvl-3"><a href="#operator-quick-reference">Operator quick reference</a></li>
       <li class="lvl-2"><a href="#7-integration-credential-rotation">7. Integration Credential Rotation</a></li>
@@ -1082,13 +1084,72 @@ per 60-minute window per authenticated username, tunable via
 with a <code>Retry-After</code> header. Keying is by username, not source IP, because the threat is
 a single legitimate operator saturating <code>scanTaskExecutor</code>, not credential stuffing.</p>
 <h3 id="scope-cap-scansizeguard">Scope cap — <code>ScanSizeGuard</code></h3>
-<p><code>ScanSizeGuard.requireBoundedScope(cidr)</code> rejects any CIDR whose prefix is below <code>/22</code>
-(1024 hosts). A <code>/16</code> against an unresponsive subnet at the F11 <code>--host-timeout 30s</code>
-would otherwise need ~32 wall-clock minutes and blow through the 5-minute outer scan
-timeout. The guard throws <code>ScanScopeTooLargeException</code> which <code>GlobalExceptionHandler</code>
-maps to HTTP 400 with body <code>{"error": "scope_too_large", "message": "..."}</code>. The scope
-guard runs at both <code>POST /api/scan</code> and at <code>ScanPolicyScheduler</code> fire time — there is no
-way to schedule a <code>/16</code> policy that bypasses the cap at creation only.</p>
+<p><code>ScanSizeGuard</code> enforces a two-tier sizing policy. The strict tier,
+<code>requireBoundedScope(cidr)</code>, rejects any CIDR whose prefix is below <code>/22</code>
+(1024 hosts). It still guards <code>ScanPolicyController</code> policy creation and
+<code>ScanPolicyScheduler</code> fire time, and supplies the <code>/22</code> ceiling that
+<code>ActiveNetworkDetector</code> narrows a wider detected prefix down to — a <code>/16</code> policy
+is rejected at create time and again at every tick; scheduled scans never chunk. The
+relaxed tier, <code>requireChunkableScope(cidr)</code> (<code>MIN_CHUNKABLE_PREFIX = 16</code>), guards
+the operator-facing <code>POST /api/scan</code> intake instead: direct submissions down to <code>/16</code>
+are accepted and executed as sequential <code>/22</code> chunks (see "Chunked execution" below).
+Anything wider than <code>/16</code> throws <code>ScanScopeTooLargeException</code>, which
+<code>GlobalExceptionHandler</code> maps to HTTP 400 with body
+<code>{"error": "scope_too_large", "prefix": N, "maxAllowedPrefix": 16, "message": "Scope
+too large: a /N contains X hosts; chunked scans support /16 or smaller."}</code>.</p>
+<p>The per-invocation rationale is unchanged: a single nmap run against a <code>/16</code> of
+unresponsive hosts at the F11 <code>--host-timeout 30s</code> would need ~32 wall-clock minutes
+and blow through the 5-minute outer scan timeout. Chunking keeps every individual
+invocation at <code>/22</code> or narrower instead of forbidding the range outright.</p>
+<h3 id="chunked-execution-cidrchunker">Chunked execution — <code>CidrChunker</code></h3>
+<p>Every accepted scan's CIDR is split into the ascending list of <code>/22</code> chunks covering
+its range (<code>CidrChunker.chunkInto(cidr, 22)</code>; host bits are normalized to the network
+address, and a <code>/22</code>-or-narrower CIDR is a single chunk — identical to the
+pre-chunking flow). Chunks run sequentially inside the one async scan task, one bounded
+nmap invocation per chunk, so each invocation stays within the per-run budget above. A
+<code>/16</code> is 64 chunks. Multi-chunk scans do not run on the interactive
+<code>scanTaskExecutor</code>: dispatch sites route anything wider than <code>/22</code>
+(<code>ScanExecutionService.isWideScan</code>) to a dedicated single-thread
+<code>wideScanTaskExecutor</code> lane (core and max pool size 1, queue capacity 8, tunable
+via <code>castellum.scan.wide-executor.*</code>), so wide scans queue one-at-a-time behind
+each other and can never starve interactive <code>/22</code>-or-narrower scans, retries,
+recovery, or scheduled policy scans. Failure is fail-fast: a failing chunk stops the scan and the
+remaining chunks are not attempted. Multi-chunk scans append the failing chunk's CIDR
+to <code>failure_reason</code> (<code>... (chunk a.b.c.0/22)</code>); single-chunk scans keep the exact
+legacy <code>ClassName: message</code> format, preserving the <code>nmap timed out</code> marker the
+auto-retry path matches on (see "Auto-retry" below). <code>SCAN_EXECUTE</code> and
+<code>SCAN_COMPLETE</code> audit events fire once per scan, never per chunk, and the Docker host
+probe and risk-cache eviction run once after all chunks (unless the empty-inventory
+short-circuit below completes the scan first).</p>
+<p>For <code>SERVICE_DETECT</code> without <code>skipHostDiscovery</code>, the alive-host inventory is
+resolved once for the full scan CIDR before the chunk loop — never per chunk — and
+each chunk filters that list in memory. An empty inventory short-circuits the scan: it
+completes immediately through the no-results path without running nmap, the Docker host
+probe, or the self-check (<code>SCAN_COMPLETE</code> and risk-cache eviction still fire).</p>
+<p>Migration <code>V31__scan_chunk_columns.sql</code> adds progress columns to <code>scan</code>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">scan</span><span class="w"> </span><span class="k">ADD</span><span class="w"> </span><span class="k">COLUMN</span><span class="w"> </span><span class="n">skip_host_discovery</span><span class="w"> </span><span class="nb">BOOLEAN</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">FALSE</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">scan</span><span class="w"> </span><span class="k">ADD</span><span class="w"> </span><span class="k">COLUMN</span><span class="w"> </span><span class="n">chunks_total</span><span class="w"> </span><span class="nb">INT</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">scan</span><span class="w"> </span><span class="k">ADD</span><span class="w"> </span><span class="k">COLUMN</span><span class="w"> </span><span class="n">chunks_done</span><span class="w"> </span><span class="nb">INT</span><span class="p">;</span>
+</code></pre></div>
+
+<p>Pre-existing rows are backfilled as single implicit chunks: <code>chunks_total = 1</code>
+everywhere, <code>chunks_done = 1</code> only for <code>COMPLETE</code> rows. At runtime the counters are
+seeded at the <code>RUNNING</code> transition and <code>chunks_done</code> is persisted after each finished
+chunk. When a failed multi-chunk scan is auto-retried, execution resumes from the first
+incomplete chunk using the persisted <code>chunks_done</code> rather than re-scanning completed
+chunks. <code>GET /api/scans/{id}</code> (<code>ScanDetailDto</code>) returns them as <code>chunksTotal</code> /
+<code>chunksDone</code>, and the unified-scan panel (<code>UnifiedScanControl</code>) shows an
+"N/M chunks" fraction on the running nmap stage row whenever <code>chunksTotal &gt; 1</code>.</p>
+<h3 id="skipping-host-discovery-skiphostdiscovery">Skipping host discovery — <code>skipHostDiscovery</code></h3>
+<p><code>POST /api/scan</code> accepts an optional boolean <code>skipHostDiscovery</code> (default
+<code>false</code>; an omitted key means <code>false</code>, so legacy two-field submissions behave
+exactly as before). The flag affects only <code>SERVICE_DETECT</code> scans: it bypasses the
+alive-host pre-resolution and runs nmap against the whole chunk with <code>-Pn</code> (treat all
+hosts as up) — useful for ICMP-silent or external ranges where host discovery yields
+nothing. Phantom-device suppression remains active on this path, so a <code>-Pn</code> host with
+zero open services is never upserted. <code>PING_SWEEP</code> and <code>OS_FINGERPRINT</code> ignore the
+flag. The manual scan form (<code>ScanTriggerForm</code>) exposes it as a "Skip host discovery"
+checkbox; the automated unified-scan pipeline never sends it.</p>
 <h3 id="auto-retry-scanretryservice">Auto-retry — <code>ScanRetryService</code></h3>
 <p>Nmap-timeout failures (failure reason contains <code>"nmap timed out"</code>) auto-retry up to
 <code>MAX_RETRIES = 2</code>. The retry uses a <code>60 × 3^(n-1)</code> second backoff — 60 s for attempt 1,

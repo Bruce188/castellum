@@ -125,7 +125,13 @@ public class ScanRetryService {
                 Map.of("attempt", nextAttempt, "reason", "nmap timed out"));
 
             try {
-                scanExecutionService.executeAsync(scan.getId());
+                // Wide (multi-chunk) retries go to the dedicated wide-scan lane and
+                // resume from the last completed chunk inside the execution body.
+                if (ScanExecutionService.isWideScan(scan.getCidr())) {
+                    scanExecutionService.executeWideAsync(scan.getId());
+                } else {
+                    scanExecutionService.executeAsync(scan.getId());
+                }
             } catch (RejectedExecutionException e) {
                 log.warn("scan {} retry dispatch rejected — row stays PENDING", scan.getId());
             }

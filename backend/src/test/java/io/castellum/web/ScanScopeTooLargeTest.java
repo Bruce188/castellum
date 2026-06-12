@@ -32,7 +32,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Acceptance for AC1: /16 → 400; /22 → 202.
+ * Acceptance for the submit-endpoint scope boundary: anything wider than the
+ * chunkable /16 ceiling → 400 with the scope_too_large body; /22 → 202.
+ * (/20..../16 acceptance lives in ScanControllerChunkedScanTest.)
  */
 @WebMvcTest(ScanController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RbacAccessDeniedHandler.class, RbacAuthenticationEntryPoint.class, GlobalExceptionHandler.class})
@@ -51,15 +53,15 @@ class ScanScopeTooLargeTest {
     @MockBean private UserRepository userRepository;
 
     @Test
-    void slash16_returns400WithScopeTooLargeError() throws Exception {
+    void slash15_returns400WithScopeTooLargeError() throws Exception {
         when(scanRateLimiter.tryAcquire(anyString())).thenReturn(true);
         mockMvc.perform(post("/api/scan")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"cidr\":\"10.0.0.0/16\",\"type\":\"PING_SWEEP\"}"))
+                .content("{\"cidr\":\"10.0.0.0/15\",\"type\":\"PING_SWEEP\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error").value("scope_too_large"))
-            .andExpect(jsonPath("$.prefix").value(16))
-            .andExpect(jsonPath("$.maxAllowedPrefix").value(22));
+            .andExpect(jsonPath("$.prefix").value(15))
+            .andExpect(jsonPath("$.maxAllowedPrefix").value(16));
     }
 
     @Test

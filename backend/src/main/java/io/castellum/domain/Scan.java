@@ -33,6 +33,15 @@ public class Scan {
     @Column(name = "retry_count", nullable = false)
     private int retryCount = 0;
 
+    @Column(name = "skip_host_discovery", nullable = false)
+    private boolean skipHostDiscovery = false;
+
+    @Column(name = "chunks_total")
+    private Integer chunksTotal;
+
+    @Column(name = "chunks_done")
+    private Integer chunksDone;
+
     public Scan() {}
 
     public Scan(Long id, String cidr, String scanType, ScanStatus status, Instant requestedAt, Instant completedAt) {
@@ -77,4 +86,13 @@ public class Scan {
 
     public int getRetryCount() { return retryCount; }
     public void setRetryCount(int retryCount) { this.retryCount = retryCount; }
+
+    public boolean isSkipHostDiscovery() { return skipHostDiscovery; }
+    public void setSkipHostDiscovery(boolean skipHostDiscovery) { this.skipHostDiscovery = skipHostDiscovery; }
+
+    public Integer getChunksTotal() { return chunksTotal; }
+    public void setChunksTotal(Integer chunksTotal) { this.chunksTotal = chunksTotal; }
+
+    public Integer getChunksDone() { return chunksDone; }
+    public void setChunksDone(Integer chunksDone) { this.chunksDone = chunksDone; }
 }

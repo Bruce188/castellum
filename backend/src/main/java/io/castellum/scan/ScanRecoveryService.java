@@ -100,12 +100,20 @@ public class ScanRecoveryService {
             int claimed = scanRepository.claimForRecovery(scan.getId(), observed);
             if (claimed == 1) {
                 try {
-                    scanExecutionService.executeAsync(scan.getId());
+                    // Wide (multi-chunk) scans recover onto the dedicated wide-scan lane
+                    // and resume from the last completed chunk inside the execution body.
+                    if (ScanExecutionService.isWideScan(scan.getCidr())) {
+                        scanExecutionService.executeWideAsync(scan.getId());
+                    } else {
+                        scanExecutionService.executeAsync(scan.getId());
+                    }
+                    requeued++;
                 } catch (RejectedExecutionException e) {
                     log.warn("scan {} recovery dispatch rejected by executor — row stays PENDING",
                         scan.getId());
+                } catch (RuntimeException e) {
+                    log.warn("scan {} recovery dispatch failed, skipping row: {}", scan.getId(), e.getMessage());
                 }
-                requeued++;
             } else {
                 log.debug("scan {} skipped recovery — status changed by concurrent actor", scan.getId());
             }

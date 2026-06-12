@@ -243,11 +243,14 @@ export interface ScanDetail {
   failureReason?: string | null;
   retryCount?: number;
   discoveredDeviceIds: number[];
+  chunksTotal?: number | null;
+  chunksDone?: number | null;
 }
 
 export interface ScanRequest {
   cidr: string;
   type: ScanType;
+  skipHostDiscovery?: boolean;
 }
 
 export interface ScanPolicyDto {

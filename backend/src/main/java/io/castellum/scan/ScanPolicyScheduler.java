@@ -106,7 +106,14 @@ public class ScanPolicyScheduler {
             Map.of("scanId", saved.getId(), "policyName", policy.getName()));
 
         try {
-            scanExecutionService.executeAsync(saved.getId());
+            // requireBoundedScope above keeps policy CIDRs single-chunk today, but route
+            // through the shared wide/interactive split anyway so every dispatch site
+            // shares one source of truth.
+            if (ScanExecutionService.isWideScan(policy.getCidr())) {
+                scanExecutionService.executeWideAsync(saved.getId());
+            } else {
+                scanExecutionService.executeAsync(saved.getId());
+            }
         } catch (RejectedExecutionException e) {
             log.warn("scan-policy {} dispatch rejected — scan {} stays PENDING",
                 policy.getId(), saved.getId());

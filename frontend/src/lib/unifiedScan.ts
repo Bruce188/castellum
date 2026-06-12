@@ -21,6 +21,8 @@ export interface StageProgress {
   discoveredDeviceIds?: number[];
   otCompleted?: number;
   otTotal?: number;
+  chunksTotal?: number | null;
+  chunksDone?: number | null;
 }
 
 export interface StageContext {
@@ -52,6 +54,8 @@ export interface StageState {
   discoveredDeviceIds?: number[];
   otCompleted?: number;
   otTotal?: number;
+  chunksTotal?: number | null;
+  chunksDone?: number | null;
   error?: string;
   rateLimited?: boolean;
 }
