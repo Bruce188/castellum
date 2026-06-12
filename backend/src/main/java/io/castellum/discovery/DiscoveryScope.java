@@ -9,7 +9,9 @@ package io.castellum.discovery;
  * routable public IPs. Buckets are persisted on the {@code Device} entity
  * (column {@code discovery_scope}, see Flyway V17) — never filtered out at
  * the discovery layer per the project's "find everything, label rather than
- * filter" principle.
+ * filter" principle. One retention exception applies after discovery:
+ * {@link #PUBLIC}-scope rows from passive observation sources are subject to
+ * TTL-based pruning — see {@link DevicePruneService}.
  */
 public enum DiscoveryScope {
     HOME,
