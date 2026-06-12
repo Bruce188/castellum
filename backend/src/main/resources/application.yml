@@ -94,11 +94,15 @@ castellum:
       service-types: ${DISCOVERY_MDNS_SERVICE_TYPES:_workstation._tcp.local.,_http._tcp.local.,_ssh._tcp.local.,_smb._tcp.local.,_printer._tcp.local.}
     pcap:
       enabled: ${DISCOVERY_PCAP_ENABLED:false}
+      max-captured-neighbors: ${DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS:50000}
     lldp:
       enabled: ${DISCOVERY_LLDP_ENABLED:false}
     cdp:
       enabled: ${DISCOVERY_CDP_ENABLED:false}
-    bpf-filter: ${DISCOVERY_BPF_FILTER:arp or (udp and port 5353) or (udp and port 67) or (udp and port 68)}
+    conn-table:
+      enabled: ${DISCOVERY_CONN_TABLE_ENABLED:true}
+      max-remotes: ${DISCOVERY_CONN_TABLE_MAX_REMOTES:512}
+    bpf-filter: ${DISCOVERY_BPF_FILTER:ip or ip6 or arp}
   graph:
     subnet-cap: ${GRAPH_SUBNET_CAP:64}
     vulns-per-pair-cap: ${GRAPH_VULNS_PER_PAIR_CAP:5}

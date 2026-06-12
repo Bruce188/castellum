@@ -26,5 +26,17 @@ public enum DiscoverySource {
      * {@code docker inspect}). Unlike the wire-emitting sources above, this reads the
      * host's own container runtime — no network traffic is generated.
      */
-    DOCKER
+    DOCKER,
+    /**
+     * Host connection-table scan of {@code /proc/net/{tcp,tcp6,udp,udp6}} — the remote
+     * endpoints of the host's own established TCP and connected UDP sockets. Like
+     * {@link #DOCKER}, this is a pure local read with no wire traffic; it is the source
+     * that surfaces off-network (PUBLIC-scope) peers on any host with outbound connections.
+     */
+    CONN_TABLE,
+    /**
+     * Default-route gateway extracted from {@code /proc/net/route}. Read-only,
+     * single-neighbor probe that guarantees the router itself lands in the inventory.
+     */
+    GATEWAY
 }

@@ -358,6 +358,64 @@ describe('<TopologyView /> role badge (Task 3.2)', () => {
   });
 });
 
+// WAN edges — PUBLIC-scope devices must hang off the LAN's egress router
+// instead of floating isolated inside zone-public.
+describe('<TopologyView /> WAN edges', () => {
+  beforeEach(() => {
+    factoryMock.mockClear();
+    mocks.add.mockClear();
+    mocks.elements.mockClear();
+    mocks.layout.mockClear();
+    mocks.layoutRun.mockClear();
+  });
+
+  it('topologyView_addsWanEdgePerPublicDevice_anchoredToRouter', () => {
+    const devices: Device[] = [
+      { ...makeDevice(1, '192.168.68.1', 'HOME'), deviceRole: 'ROUTER' },
+      makeDevice(2, '192.168.68.50', 'HOME'),
+      makeDevice(3, '8.8.8.8', 'PUBLIC'),
+      makeDevice(4, '1.1.1.1', 'PUBLIC'),
+    ];
+    render(
+      <TopologyView devices={devices} risksById={new Map<number, DeviceRiskDto>()} onNodeClick={() => {}} onBackgroundClick={() => {}} />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string; source?: string; target?: string; kind?: string }; classes?: string }>;
+    const wanEdges = addArgs.filter(e => e.data.id.startsWith('wan:'));
+    expect(wanEdges).toHaveLength(2);
+    expect(wanEdges.every(e => e.data.source === '1')).toBe(true);
+    expect(wanEdges.every(e => e.data.kind === 'wan')).toBe(true);
+    expect(wanEdges.every(e => e.classes === 'wan-edge')).toBe(true);
+    expect(wanEdges.map(e => e.data.target).sort()).toEqual(['3', '4']);
+  });
+
+  it('topologyView_noWanEdges_whenPublicScopeHidden', () => {
+    const devices: Device[] = [
+      { ...makeDevice(1, '192.168.68.1', 'HOME'), deviceRole: 'ROUTER' },
+      makeDevice(2, '8.8.8.8', 'PUBLIC'),
+    ];
+    const visibility = {
+      HOME: true,
+      DOCKER_BRIDGE: true,
+      LINK_LOCAL: true,
+      LOOPBACK: true,
+      PUBLIC: false,
+    } as const;
+    render(
+      <TopologyView
+        devices={devices}
+        risksById={new Map<number, DeviceRiskDto>()}
+        onNodeClick={() => {}}
+        onBackgroundClick={() => {}}
+        scopeVisibility={visibility}
+      />
+    );
+    expect(mocks.add).toHaveBeenCalled();
+    const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string } }>;
+    expect(addArgs.some(e => e.data.id.startsWith('wan:'))).toBe(false);
+  });
+});
+
 // ─── Task 3.5: per-origin behind-gateway render ───────────────────────────────
 
 describe('<TopologyView /> Task 3.5: per-origin behind-gateway zones', () => {

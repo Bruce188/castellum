@@ -706,10 +706,10 @@ footer {
 </tr>
 <tr>
 <td>Passive discovery</td>
-<td>ARP cache, mDNS announcements, raw frames</td>
+<td>ARP cache, mDNS announcements, raw frames, connection-table remotes, default-route gateway</td>
 <td>None</td>
 <td>None</td>
-<td>NIC → JVM via libpcap (CAP_NET_RAW)</td>
+<td>NIC → JVM via libpcap (CAP_NET_RAW); <code>/proc/net</code> reads (no capability)</td>
 </tr>
 <tr>
 <td>Threat-intel ingest</td>
@@ -857,18 +857,18 @@ An ADMIN could submit a scan against a large CIDR (e.g. /16) repeatedly, consumi
 The scan controller enforces <code>ADMIN</code> only for scan submission. A VIEWER cannot submit scans. If a future refactor degrades the <code>hasRole('ADMIN')</code> expression to <code>hasAnyRole</code>, VIEWERs would gain scan submission rights — code review must verify the <code>@PreAuthorize</code> annotation is not weakened.</p>
 <hr>
 <h3 id="module-2-passive-discovery">Module 2 — Passive Discovery</h3>
-<p>Package: <code>discovery/</code> — <code>PcapSniffer</code>, <code>ArpCacheReader</code>, <code>MdnsProbe</code>, <code>LldpDecoder</code>, <code>CdpDecoder</code><br>
-Trust boundary: physical NIC → JVM via CAP_NET_RAW / libpcap JNA</p>
+<p>Package: <code>discovery/</code> — <code>PcapSniffer</code>, <code>ArpCacheReader</code>, <code>MdnsProbe</code>, <code>ConnTableReader</code>, <code>GatewayProbe</code>, <code>LldpDecoder</code>, <code>CdpDecoder</code><br>
+Trust boundary: physical NIC → JVM via CAP_NET_RAW / libpcap JNA; <code>/proc/net</code> → JVM via plain file reads (CONN_TABLE, GATEWAY — no capability)</p>
 <p><strong>S — Spoofing</strong><br>
 ARP spoofing by a device on the monitored segment causes Castellum to record incorrect MAC-to-IP mappings in the device table. This is an environmental threat, not a Castellum implementation flaw, but its impact is inventory poisoning. Mitigation: correlate ARP observations with mDNS and LLDP/CDP to cross-validate identity claims.</p>
 <p><strong>T — Tampering</strong><br>
-A rogue device injecting crafted mDNS or LLDP frames could insert false service records into the Castellum inventory. <code>LldpDecoder</code> and <code>CdpDecoder</code> parse TLV frames directly; malformed or oversized TLVs must be rejected rather than heap-allocated verbatim. Current parsers should enforce maximum TLV length limits.</p>
+A rogue device injecting crafted mDNS or LLDP frames could insert false service records into the Castellum inventory. <code>LldpDecoder</code> and <code>CdpDecoder</code> parse TLV frames directly; malformed or oversized TLVs must be rejected rather than heap-allocated verbatim. Current parsers should enforce maximum TLV length limits. The connection-table source has a related vector: any remote endpoint the host exchanges traffic with lands in the inventory as a PUBLIC-scope device. The per-read cap (see D below) bounds the volume, and connection-table rows carry no MAC, so MAC-primary dedupe prevents them from displacing MAC-keyed LAN devices.</p>
 <p><strong>R — Repudiation</strong><br>
 Passive discovery events are not individually audited (no <code>AuditService.recordEvent</code> per frame captured). An operator cannot retroactively determine which specific frame caused a device row to be created. Enhancement opportunity: log the triggering source (ARP/mDNS/LLDP) per device-creation event.</p>
 <p><strong>I — Information Disclosure</strong><br>
 The CAP_NET_RAW capability grants the JVM ability to read all frames on the interface, including frames unrelated to Castellum's scope. If an operator on the same host runs a packet-capture tool, Castellum's sniffer and their tool share the same NIC view. The container security policy must limit who can run additional processes alongside Castellum.</p>
 <p><strong>D — Denial of Service</strong><br>
-A flood of ARP or mDNS traffic on the monitored segment could cause <code>PcapSniffer</code> to buffer large frame queues. The libpcap BPF filter should be as specific as possible (e.g. <code>arp or mdns</code>) to discard irrelevant traffic before it reaches user space. Without a tight BPF filter, a broadcast storm could exhaust JVM heap.</p>
+A flood of traffic on the monitored segment could cause <code>PcapSniffer</code> to buffer large frame queues. Two bounds contain this: the capture source is disabled by default (<code>DISCOVERY_PCAP_ENABLED=false</code>), and when enabled the in-memory capture queue is capped per window by <code>DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS</code> (default <code>50000</code>) — once reached, further neighbors are dropped with a single WARN. The libpcap BPF filter (<code>DISCOVERY_BPF_FILTER</code>, default <code>ip or ip6 or arp</code>) should remain as specific as possible to discard irrelevant traffic before it reaches user space. On the connection-table side, remote peers choose to connect to the host and would otherwise control inventory growth — <code>DISCOVERY_CONN_TABLE_MAX_REMOTES</code> (default <code>512</code>) caps the distinct remotes collected per read and logs when it truncates. See <a href="runtime-flags.html#discovery-variables">documentation/runtime-flags.html</a> for the full tunable set.</p>
 <p><strong>E — Elevation of Privilege</strong><br>
 CAP_NET_RAW itself is a capability elevation relative to a normal process. The Docker security policy (<code>--cap-drop=ALL --cap-add=NET_RAW</code>) scopes this capability to packet capture only. If the container were started with <code>--privileged</code> instead, all capabilities would be granted — the <code>docker run</code> and Compose configuration must specify <code>cap_add: [NET_RAW]</code> explicitly, not <code>privileged: true</code>. See <a href="runtime-flags.html">documentation/runtime-flags.html</a>.</p>
 <hr>

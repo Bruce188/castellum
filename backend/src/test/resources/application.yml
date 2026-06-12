@@ -58,6 +58,19 @@ castellum:
       read-timeout-ms: 500
       total-timeout-ms: 1000
       max-concurrent: 4
+  # Docker host probe runs inside scan execution against fixture IPs that do not exist on
+  # the test host's network. Production timeouts (2 s TCP connect, 1.5 s x 2 SNMP) make the
+  # probe of a single dead host take ~30 s, blowing the integration tests' await windows
+  # whenever the host network silently drops packets instead of failing fast. Bound them
+  # tightly (same rationale as ot.probe above) so the probe path still executes but is
+  # deterministic.
+  docker:
+    probe:
+      connect-timeout-ms: 200
+      read-timeout-ms: 500
+      snmp:
+        timeout-ms: 100
+        retries: 0
   discovery:
     default-duration-seconds: 30
     passive-sweep-cron: "-"

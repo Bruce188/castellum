@@ -234,6 +234,70 @@ class NmapOutputParserTest {
         assertNull(host.os().accuracy(), "non-numeric accuracy must yield null");
     }
 
+    // -----------------------------------------------------------------------
+    // Host address keying: IPv4 preferred, IPv6-only fallback, no-IP skip
+    // -----------------------------------------------------------------------
+
+    @Test
+    void ipv6OnlyHost_isKeyedByIpv6Address() {
+        String xml = """
+                <?xml version="1.0"?>
+                <nmaprun>
+                <host><status state="up" reason="nd-response"/>
+                <address addr="fd12:3456::10" addrtype="ipv6"/>
+                <address addr="AA:BB:CC:DD:EE:FF" addrtype="mac"/>
+                <hostnames></hostnames>
+                <ports>
+                <port protocol="tcp" portid="80"><state state="open"/><service name="http"/></port>
+                </ports>
+                </host>
+                <runstats><finished/></runstats>
+                </nmaprun>
+                """;
+        NmapOutputParser.ParsedScan result = parser.parse(xml, ScanType.SERVICE_DETECT);
+        assertEquals(1, result.hosts().size(), "IPv6-only host must not be skipped");
+        assertEquals("fd12:3456::10", result.hosts().get(0).ipAddress());
+        assertEquals(1, result.services().size(), "the open port must yield a service");
+        assertEquals("fd12:3456::10", result.services().get(0).ipAddress());
+    }
+
+    @Test
+    void dualStackHost_prefersIpv4Address() {
+        String xml = """
+                <?xml version="1.0"?>
+                <nmaprun>
+                <host><status state="up" reason="echo-reply"/>
+                <address addr="fe80::1" addrtype="ipv6"/>
+                <address addr="192.168.1.20" addrtype="ipv4"/>
+                <hostnames></hostnames>
+                </host>
+                <runstats><finished/></runstats>
+                </nmaprun>
+                """;
+        NmapOutputParser.ParsedScan result = parser.parse(xml, ScanType.PING_SWEEP);
+        assertEquals(1, result.hosts().size(), "dual-stack host must be discovered");
+        assertEquals("192.168.1.20", result.hosts().get(0).ipAddress(),
+            "IPv4 must win over IPv6 when both are present");
+    }
+
+    @Test
+    void hostWithNoIpAddress_isSkipped() {
+        // MAC-only host (no ipv4/ipv6 <address>) cannot key a device — skipped.
+        String xml = """
+                <?xml version="1.0"?>
+                <nmaprun>
+                <host><status state="up" reason="arp-response"/>
+                <address addr="AA:BB:CC:DD:EE:FF" addrtype="mac"/>
+                <hostnames></hostnames>
+                </host>
+                <runstats><finished/></runstats>
+                </nmaprun>
+                """;
+        NmapOutputParser.ParsedScan result = parser.parse(xml, ScanType.PING_SWEEP);
+        assertTrue(result.hosts().isEmpty(), "host without any IP address must be skipped");
+        assertTrue(result.services().isEmpty(), "skipped host must contribute no services");
+    }
+
     @Test
     void closedPorts_areExcluded() {
         // A host with one open and one closed port; only the open one becomes a service.

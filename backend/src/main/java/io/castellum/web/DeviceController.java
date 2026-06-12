@@ -37,7 +37,9 @@ public class DeviceController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('VIEWER','ADMIN')")
-    public Page<Device> list(@PageableDefault(size = 100) Pageable pageable) {
+    public Page<Device> list(@PageableDefault(size = 100, sort = "id") Pageable pageable) {
+        // Default sort keeps pagination deterministic — unsorted findAll lets pages
+        // overlap/skip rows, which breaks clients that walk all pages.
         return deviceRepository.findAll(pageable);
     }
 

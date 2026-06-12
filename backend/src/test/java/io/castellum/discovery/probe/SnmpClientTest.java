@@ -1,17 +1,22 @@
 package io.castellum.discovery.probe;
 
 import org.junit.jupiter.api.Test;
+import org.snmp4j.Snmp;
+import org.snmp4j.TransportMapping;
 import org.snmp4j.smi.OID;
 import org.snmp4j.smi.OctetString;
 import org.snmp4j.smi.Integer32;
 import org.snmp4j.smi.VariableBinding;
 
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Unit tests for {@link SnmpClient} using the walker seam.
@@ -124,7 +129,100 @@ class SnmpClientTest {
         assertThat(result.get().get(0).netMask()).isEqualTo("255.255.0.0");
     }
 
-    // ---- R4: reflection surface test — all public methods start with "walk", no SET method ----
+    // ---- closeQuietly / factory-seam tests ----
+
+    /**
+     * closeQuietly — when Snmp.close() throws an IOException the walker must
+     * still return the collected varbinds (walk result is NOT discarded).
+     *
+     * The production walker calls {@code createSession(transport)} which is overridable
+     * in a subclass. We override it here to return an Snmp stub whose close() throws,
+     * verifying that closeQuietly swallows the IOException and does not propagate it.
+     *
+     * Because the stub Snmp has no live transport, send() will return null → the walker
+     * treats that as a timeout and returns the (empty) collected list. The important
+     * assertion is that NO exception escapes from the walker call.
+     */
+    @Test
+    void closeQuietly_ioExceptionOnClose_doesNotEscape() throws Exception {
+        AtomicBoolean closeCalled = new AtomicBoolean(false);
+        SnmpClient client = new SnmpClient(1, 0) {
+            @Override
+            protected Snmp createSession(TransportMapping<?> transport) throws IOException {
+                return new Snmp(transport) {
+                    @Override
+                    public void close() throws IOException {
+                        closeCalled.set(true);
+                        throw new IOException("simulated WSL2 close failure");
+                    }
+                };
+            }
+        };
+
+        // The walker must not throw; it should return an empty Optional (no SNMP response
+        // from the stub — the send() returns null → timeout path).
+        assertThatCode(() -> client.walkInterfaces("127.0.0.1", "public"))
+            .doesNotThrowAnyException();
+        assertThat(closeCalled.get())
+            .as("close() must have been called (closeQuietly exercised)")
+            .isTrue();
+    }
+
+    /**
+     * closeQuietly — when Snmp.close() throws an Error (the scenario documented
+     * in the Javadoc — DatagramSocket.close() wrapping an IOException inside Error on
+     * some WSL2 kernels) the walker must still NOT propagate the Error.
+     */
+    @Test
+    void closeQuietly_errorOnClose_doesNotEscape() throws Exception {
+        AtomicBoolean closeCalled = new AtomicBoolean(false);
+        SnmpClient client = new SnmpClient(1, 0) {
+            @Override
+            protected Snmp createSession(TransportMapping<?> transport) throws IOException {
+                return new Snmp(transport) {
+                    @Override
+                    public void close() throws IOException {
+                        closeCalled.set(true);
+                        throw new Error("simulated DatagramSocket.close() Error");
+                    }
+                };
+            }
+        };
+
+        assertThatCode(() -> client.walkInterfaces("127.0.0.1", "public"))
+            .doesNotThrowAnyException();
+        assertThat(closeCalled.get())
+            .as("close() must have been called even when it throws Error")
+            .isTrue();
+    }
+
+    /**
+     * Factory-seam test — the two-arg constructor calls {@code createSession()}
+     * rather than constructing Snmp directly, so the seam is reachable and invoked.
+     * This test subclasses SnmpClient, counts how many times createSession is called
+     * per walk, and verifies the seam is not bypassed.
+     */
+    @Test
+    void factorySeam_createSessionIsCalledPerWalkOid() throws Exception {
+        int[] callCount = {0};
+        SnmpClient client = new SnmpClient(1, 0) {
+            @Override
+            protected Snmp createSession(TransportMapping<?> transport) throws IOException {
+                callCount[0]++;
+                // Delegate to real constructor — the session won't connect anywhere
+                // (127.0.0.1:161, 1ms timeout), so send() will return null (timeout path).
+                return super.createSession(transport);
+            }
+        };
+
+        // walkInterfaces issues 3 walker calls (ifDescr, ifName, ifType)
+        client.walkInterfaces("127.0.0.1", "public");
+        assertThat(callCount[0])
+            .as("createSession must be called once per OID sub-tree walk (3 for walkInterfaces)")
+            .isEqualTo(3);
+    }
+
+    // ---- Reflection surface test — all public methods start with "walk", no SET method ----
 
     @Test
     void reflectionSurface_allPublicMethodsStartWithWalk_noSet() {

@@ -59,7 +59,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 3,
       deviceIds: [1, 2, 3],
-      perSourceCount: { ARP: 2, MDNS: 1, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
+      perSourceCount: { ARP: 2, MDNS: 1, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0, CONN_TABLE: 0, GATEWAY: 0 },
       sweepId: 9,
     });
 
@@ -79,7 +79,7 @@ describe('<DiscoveryControlPanel />', () => {
     });
     // All-defaults payload except the custom window duration we set
     expect(discoverPassive).toHaveBeenCalledWith(
-      { iface: '', durationSeconds: 45, sources: ['ARP', 'MDNS', 'PCAP'] },
+      { iface: '', durationSeconds: 45, sources: ['ARP', 'MDNS', 'PCAP', 'CONN_TABLE', 'GATEWAY'] },
       expect.anything()
     );
     await waitFor(() => {
@@ -106,7 +106,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0, CONN_TABLE: 0, GATEWAY: 0 },
       sweepId: null,
     });
 
@@ -117,18 +117,34 @@ describe('<DiscoveryControlPanel />', () => {
     fireEvent.click(advancedToggle);
     await waitFor(() => expect(screen.getByTestId('source-mdns')).toBeInTheDocument());
 
-    // Under new defaults ALL_SOURCES=['ARP','MDNS','PCAP'] are all checked.
-    // Toggle MDNS off → sources: ['ARP','PCAP']
+    // Under new defaults ALL_SOURCES=['ARP','MDNS','PCAP','CONN_TABLE','GATEWAY']
+    // are all checked. Toggle MDNS off → sources drop only MDNS.
     fireEvent.click(screen.getByTestId('source-mdns')); // toggle MDNS off
 
     fireEvent.click(screen.getByTestId('passive-activate-btn'));
 
     await waitFor(() => {
       expect(discoverPassive).toHaveBeenCalledWith(
-        expect.objectContaining({ sources: ['ARP', 'PCAP'] }),
+        expect.objectContaining({ sources: ['ARP', 'PCAP', 'CONN_TABLE', 'GATEWAY'] }),
         expect.anything()
       );
     });
+  });
+
+  // --- New sources: CONN_TABLE / GATEWAY checkboxes with friendly labels ---
+  it('renders CONN_TABLE and GATEWAY checkboxes with friendly labels, checked by default', async () => {
+    listInterfaces.mockResolvedValueOnce([]);
+    render(<DiscoveryControlPanel isAdmin={true} />);
+
+    fireEvent.click(screen.getByTestId('advanced-toggle'));
+    await waitFor(() => expect(screen.getByTestId('source-conn_table')).toBeInTheDocument());
+
+    expect(screen.getByTestId('source-conn_table')).toBeChecked();
+    expect(screen.getByTestId('source-gateway')).toBeChecked();
+    // Enum names read poorly as checkboxes — operator-friendly labels instead.
+    expect(screen.getByText('Connections')).toBeInTheDocument();
+    expect(screen.getByText('Gateway')).toBeInTheDocument();
+    expect(screen.queryByText('CONN_TABLE')).not.toBeInTheDocument();
   });
 
   // --- NEW case 6: AC1 one-button activates with all defaults ---
@@ -137,7 +153,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0, CONN_TABLE: 0, GATEWAY: 0 },
       sweepId: null,
     });
 
@@ -151,7 +167,7 @@ describe('<DiscoveryControlPanel />', () => {
     });
     // Must be called with ALL-DEFAULTS: blank iface, 30s, all sources
     expect(discoverPassive).toHaveBeenCalledWith(
-      { iface: '', durationSeconds: 30, sources: ['ARP', 'MDNS', 'PCAP'] },
+      { iface: '', durationSeconds: 30, sources: ['ARP', 'MDNS', 'PCAP', 'CONN_TABLE', 'GATEWAY'] },
       expect.anything()
     );
     // scan-scope shows the "all" summary
@@ -167,7 +183,7 @@ describe('<DiscoveryControlPanel />', () => {
     discoverPassive.mockResolvedValueOnce({
       discovered: 0,
       deviceIds: [],
-      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0 },
+      perSourceCount: { ARP: 0, MDNS: 0, PCAP: 0, LLDP: 0, CDP: 0, OT_PROBE: 0, NMAP_SCAN: 0, DOCKER: 0, CONN_TABLE: 0, GATEWAY: 0 },
       sweepId: null,
     });
 
@@ -192,7 +208,7 @@ describe('<DiscoveryControlPanel />', () => {
     });
     // Narrowed iface and sources must be sent verbatim
     expect(discoverPassive).toHaveBeenCalledWith(
-      expect.objectContaining({ iface: 'eth1', sources: ['ARP', 'PCAP'] }),
+      expect.objectContaining({ iface: 'eth1', sources: ['ARP', 'PCAP', 'CONN_TABLE', 'GATEWAY'] }),
       expect.anything()
     );
   });

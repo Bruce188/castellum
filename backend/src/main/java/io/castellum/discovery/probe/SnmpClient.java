@@ -11,6 +11,7 @@ import org.snmp4j.smi.OID;
 import org.snmp4j.smi.OctetString;
 import org.snmp4j.smi.UdpAddress;
 import org.snmp4j.smi.VariableBinding;
+import org.snmp4j.TransportMapping;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.springframework.stereotype.Component;
 
@@ -105,7 +106,9 @@ public class SnmpClient {
                 "${castellum.docker.probe.snmp.timeout-ms:1500}") int timeoutMs,
             @org.springframework.beans.factory.annotation.Value(
                 "${castellum.docker.probe.snmp.retries:1}") int retries) {
-        this(buildDefaultWalker(timeoutMs, retries));
+        // buildDefaultWalker is an instance method (references createSession via this),
+        // so the walker field is initialised after the object is fully constructed.
+        this.walker = buildDefaultWalker(timeoutMs, retries);
     }
 
     /**
@@ -235,15 +238,31 @@ public class SnmpClient {
     }
 
     /**
+     * Factory method for the production SNMP session. Overridable in tests so that
+     * a stub {@link Snmp} can be injected without requiring a live UDP transport.
+     *
+     * <p>The default implementation wraps the given transport in a real {@link Snmp}
+     * session; the caller ({@link #buildDefaultWalker}'s walker lambda) creates the
+     * transport and calls {@code listen()} on it before invoking this factory.
+     *
+     * <p>This seam is {@code protected} and non-{@code static} so subclasses created
+     * in tests can override it. It must NOT be called outside {@link #buildDefaultWalker}.
+     */
+    protected Snmp createSession(TransportMapping<?> transport) throws IOException {
+        return new Snmp(transport);
+    }
+
+    /**
      * Build a production snmp4j GETBULK walker using UDP transport.
      * READ-ONLY: only PDU.GETBULK (read-only operation) is used; NO SET.
      */
-    private static SnmpWalker buildDefaultWalker(int timeoutMs, int retries) {
+    private SnmpWalker buildDefaultWalker(int timeoutMs, int retries) {
         return (host, community, baseOidStr) -> {
             try {
                 DefaultUdpTransportMapping transport = new DefaultUdpTransportMapping();
                 transport.listen();
-                try (Snmp snmp = new Snmp(transport)) {
+                Snmp snmp = createSession(transport);
+                try {
                     CommunityTarget<UdpAddress> target = new CommunityTarget<>();
                     target.setCommunity(new OctetString(community));
                     target.setAddress(new UdpAddress(InetAddress.getByName(host), 161));
@@ -285,11 +304,34 @@ public class SnmpClient {
                         if (!advanced) break;
                     }
                     return Optional.of(result);
+                } finally {
+                    closeQuietly(snmp, host);
                 }
             } catch (IOException e) {
                 log.debug("SnmpClient: SNMP walk failed for {}:{} — {}", host, baseOidStr, e.getMessage());
                 return Optional.empty();
             }
         };
+    }
+
+    /**
+     * Close the SNMP session, tolerating ANY close-time failure — including
+     * {@link Error}.
+     *
+     * <p>On some kernels (notably WSL2), signalling the snmp4j listen thread blocked in
+     * {@code receive()} during datagram-socket pre-close fails with an {@link IOException}
+     * (e.g. {@code EINPROGRESS}), which the JDK's {@code DatagramSocketAdaptor.close()}
+     * rethrows wrapped in {@link java.lang.Error} because {@code DatagramSocket.close()}
+     * declares no checked exception. A failed close of a finished walk session is harmless:
+     * swallowing it preserves the walk result and keeps the walker's "timeout/unreachable
+     * degrades to a no-op" contract — instead of an Error escaping every
+     * {@code catch (Exception)} isolation layer and wedging the scan lifecycle.
+     */
+    private static void closeQuietly(Snmp snmp, String host) {
+        try {
+            snmp.close();
+        } catch (Exception | Error e) {
+            log.debug("SnmpClient: ignoring SNMP session close failure for {} — {}", host, e.toString());
+        }
     }
 }

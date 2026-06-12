@@ -87,9 +87,47 @@ export interface DeviceUpdatePayload {
   criticality?: Criticality;
 }
 
+/** Page size for the device walk. Matches the backend's max page size. */
+const DEVICE_PAGE_SIZE = 200;
+/**
+ * Safety ceiling on the device-page walk — 25 pages × 200 = 5 000 devices.
+ * Hitting it warns and returns the partial result rather than hammering the
+ * backend forever on a pathological fleet (or a totalElements that grows
+ * while we paginate).
+ */
+const DEVICE_PAGE_CEILING = 25;
+
 export const api = {
-  listDevices: () =>
-    request<Page<Device>>('/api/devices?size=200'),
+  /**
+   * GET /api/devices — walks ALL pages and returns a single merged
+   * {@link Page} (merged content, original totalElements) so existing
+   * callers keep their shape. Sorted {@code id,asc} so the walk is
+   * deterministic across pages (the backend guarantees a stable id sort).
+   * Stops early at {@link DEVICE_PAGE_CEILING} pages with a console.warn —
+   * callers can detect the cap via {@code content.length < totalElements}.
+   */
+  listDevices: async (): Promise<Page<Device>> => {
+    const first = await request<Page<Device>>(`/api/devices?size=${DEVICE_PAGE_SIZE}&sort=id,asc`);
+    const content = [...first.content];
+    let pageIndex = 1;
+    while (content.length < first.totalElements) {
+      if (pageIndex >= DEVICE_PAGE_CEILING) {
+        console.warn(
+          `listDevices: page ceiling (${DEVICE_PAGE_CEILING}) hit — returning ${content.length} of ${first.totalElements} devices`,
+        );
+        break;
+      }
+      const next = await request<Page<Device>>(
+        `/api/devices?size=${DEVICE_PAGE_SIZE}&page=${pageIndex}&sort=id,asc`,
+      );
+      // Defensive: an empty page despite content.length < totalElements means
+      // the fleet shrank mid-walk — stop rather than loop forever.
+      if (next.content.length === 0) break;
+      content.push(...next.content);
+      pageIndex += 1;
+    }
+    return { ...first, content };
+  },
   getDevice: (id: number) =>
     request<Device>(`/api/devices/${id}`),
   updateDevice: (id: number, current: Device, patch: DeviceUpdatePayload) => {
