@@ -98,7 +98,9 @@ castellum:
       enabled: ${DISCOVERY_LLDP_ENABLED:false}
     cdp:
       enabled: ${DISCOVERY_CDP_ENABLED:false}
-    bpf-filter: ${DISCOVERY_BPF_FILTER:arp or (udp and port 5353) or (udp and port 67) or (udp and port 68)}
+    conn-table:
+      enabled: ${DISCOVERY_CONN_TABLE_ENABLED:true}
+    bpf-filter: ${DISCOVERY_BPF_FILTER:ip or ip6 or arp}
   graph:
     subnet-cap: ${GRAPH_SUBNET_CAP:64}
     vulns-per-pair-cap: ${GRAPH_VULNS_PER_PAIR_CAP:5}

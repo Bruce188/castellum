@@ -75,6 +75,10 @@ function FocusParamApplier({
 export function TopologyPage() {
   const auth = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
+  // Server-side fleet size from the device page. Diverges from devices.length
+  // only when listDevices hit its pagination safety ceiling — drives the
+  // "Showing N of M devices" warning below.
+  const [totalDevices, setTotalDevices] = useState<number>(0);
   const [risksById, setRisksById] = useState<Map<number, DeviceRiskDto>>(new Map());
   const [risksLoading, setRisksLoading] = useState<boolean>(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -99,6 +103,7 @@ export function TopologyPage() {
     try {
       const page = await api.listDevices();
       setDevices(page.content);
+      setTotalDevices(page.totalElements);
       const map = await api.deviceRisksBatch(page.content.map(d => d.id));
       setRisksById(map);
       setLoadError(null);
@@ -119,6 +124,7 @@ export function TopologyPage() {
         const page = await api.listDevices();
         if (cancelled) return;
         setDevices(page.content);
+        setTotalDevices(page.totalElements);
         const map = await api.deviceRisksBatch(page.content.map(d => d.id));
         if (cancelled) return;
         setRisksById(map);
@@ -187,6 +193,16 @@ export function TopologyPage() {
         <header className="flex items-center justify-between gap-4">
           <ScanTriggerForm />
         </header>
+        {devices.length > 0 && devices.length < totalDevices && (
+          // listDevices hit its pagination safety ceiling — surface the gap
+          // unobtrusively rather than letting late devices vanish silently.
+          <p
+            data-testid="device-cap-warning"
+            className="mt-1 inline-block text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5"
+          >
+            Showing {devices.length} of {totalDevices} devices
+          </p>
+        )}
         <details className="mt-2">
           <summary className="text-sm text-gray-600 cursor-pointer select-none">
             OT/ICS fingerprint probe

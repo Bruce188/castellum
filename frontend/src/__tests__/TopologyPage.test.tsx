@@ -134,6 +134,24 @@ describe('<TopologyPage /> mount fanout', () => {
     expect(screen.getByTestId('ot-probe-panel')).toBeInTheDocument();
   });
 
+  describe('pagination-ceiling warning', () => {
+    it('renders "Showing N of M devices" when listDevices returned a partial fleet', async () => {
+      // Merged content shorter than totalElements means the client-side page
+      // walk hit its safety ceiling.
+      mockApi.listDevices.mockResolvedValue({ ...DEVICES_PAGE, totalElements: 10 });
+      render(<TopologyPage />);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      const warning = screen.getByTestId('device-cap-warning');
+      expect(warning).toHaveTextContent('Showing 3 of 10 devices');
+    });
+
+    it('does NOT render the warning when the full fleet loaded', async () => {
+      render(<TopologyPage />);
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(screen.queryByTestId('device-cap-warning')).not.toBeInTheDocument();
+    });
+  });
+
   describe('scope visibility persistence', () => {
     it('hydrates LOOPBACK=false from localStorage on mount', async () => {
       localStorage.setItem(

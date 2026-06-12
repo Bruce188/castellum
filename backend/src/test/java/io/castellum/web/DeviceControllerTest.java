@@ -24,9 +24,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 import java.util.Optional;
 
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
@@ -196,6 +199,23 @@ class DeviceControllerTest {
         mockMvc.perform(get("/api/devices"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].serviceCount").value(3));
+    }
+
+    @Test
+    void list_defaultPageable_sortsByIdAscending() throws Exception {
+        // Deterministic paging: clients walk all pages, so the default Pageable must
+        // carry a stable sort — unsorted findAll lets pages overlap/skip rows.
+        when(deviceRepository.findAll(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/api/devices"))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(deviceRepository).findAll(captor.capture());
+        Sort.Order idOrder = captor.getValue().getSort().getOrderFor("id");
+        assertThat(idOrder).isNotNull();
+        assertThat(idOrder.getDirection()).isEqualTo(Sort.Direction.ASC);
     }
 
     @Test

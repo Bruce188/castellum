@@ -372,12 +372,14 @@ export interface AuditFilters {
 /**
  * Passive and active discovery sources — mirrors the backend {@code DiscoverySource} enum.
  *
- * @remarks Full 8-value set: ARP | MDNS | PCAP | LLDP | CDP | OT_PROBE | NMAP_SCAN | DOCKER.
- * Previously this type omitted OT_PROBE and NMAP_SCAN; widened here so
- * {@link Device.discoverySource} is correctly typed for all backend values. DOCKER is the
- * local Docker-daemon inventory source ({@code POST /api/discovery/docker}).
+ * @remarks Full 10-value set: ARP | MDNS | PCAP | LLDP | CDP | OT_PROBE | NMAP_SCAN | DOCKER
+ * | CONN_TABLE | GATEWAY. Previously this type omitted OT_PROBE and NMAP_SCAN; widened here
+ * so {@link Device.discoverySource} is correctly typed for all backend values. DOCKER is the
+ * local Docker-daemon inventory source ({@code POST /api/discovery/docker}). CONN_TABLE
+ * reads the host's established-connection table (the main producer of PUBLIC-scope
+ * devices); GATEWAY records the default-route egress router.
  */
-export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'OT_PROBE' | 'NMAP_SCAN' | 'DOCKER';
+export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'OT_PROBE' | 'NMAP_SCAN' | 'DOCKER' | 'CONN_TABLE' | 'GATEWAY';
 
 export interface PassiveDiscoveryRequest {
   iface: string;

@@ -69,8 +69,9 @@ public class NmapOutputParser {
      * Parse nmap XML stdout into discovered hosts and services.
      *
      * <p>A host is included when its {@code <status state="up"/>}. Only ports whose
-     * {@code <state state="open"/>} contribute services. Only IPv4 addresses
-     * ({@code addrtype="ipv4"}) are used as the host address.
+     * {@code <state state="open"/>} contribute services. IPv4 addresses
+     * ({@code addrtype="ipv4"}) are preferred as the host address; IPv6-only hosts
+     * fall back to their {@code addrtype="ipv6"} address.
      *
      * @param stdout raw stdout string from {@link NmapResult#stdout()} (nmap {@code -oX -})
      * @param type   the scan type (informational; XML shape drives parsing)
@@ -102,9 +103,9 @@ public class NmapOutputParser {
                 continue;
             }
 
-            String ip = ipv4Address(host);
+            String ip = hostAddress(host);
             if (ip == null) {
-                continue; // no IPv4 address — cannot key a device
+                continue; // no IP address — cannot key a device
             }
             String hostname = firstHostname(host);
 
@@ -210,12 +211,22 @@ public class NmapOutputParser {
         return status != null && "up".equals(status.getAttribute("state"));
     }
 
-    /** First {@code <address>} child with {@code addrtype="ipv4"}, or null. */
-    private static String ipv4Address(Element host) {
+    /**
+     * Host address used as the device key: the first {@code <address>} child with
+     * {@code addrtype="ipv4"}, falling back to the first {@code addrtype="ipv6"} for
+     * IPv6-only hosts. Null when the host has no IP address at all (e.g. MAC only).
+     */
+    private static String hostAddress(Element host) {
+        String ipv4 = addressOfType(host, "ipv4");
+        return ipv4 != null ? ipv4 : addressOfType(host, "ipv6");
+    }
+
+    /** First {@code <address>} child with the given {@code addrtype}, or null. */
+    private static String addressOfType(Element host, String addrtype) {
         NodeList addresses = host.getElementsByTagName("address");
         for (int i = 0; i < addresses.getLength(); i++) {
             Element addr = (Element) addresses.item(i);
-            if ("ipv4".equals(addr.getAttribute("addrtype"))) {
+            if (addrtype.equals(addr.getAttribute("addrtype"))) {
                 String value = addr.getAttribute("addr");
                 return value.isEmpty() ? null : value;
             }

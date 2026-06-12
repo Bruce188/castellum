@@ -35,8 +35,40 @@ class DiscoveryScopeClassifierTest {
             Arguments.of("169.254.73.152", DiscoveryScope.LINK_LOCAL),
             // LOOPBACK — verbatim spec line 366
             Arguments.of("127.0.0.1", DiscoveryScope.LOOPBACK),
+            // HOME — 100.64.0.0/10 RFC 6598 shared address space (CGNAT / mesh peers)
+            Arguments.of("100.64.0.1", DiscoveryScope.HOME),
+            Arguments.of("100.127.255.255", DiscoveryScope.HOME),
+            // PUBLIC — just outside the CGNAT /10 on both sides
+            Arguments.of("100.63.255.255", DiscoveryScope.PUBLIC),
+            Arguments.of("100.128.0.0", DiscoveryScope.PUBLIC),
             // PUBLIC — verbatim spec line 367
             Arguments.of("8.8.8.8", DiscoveryScope.PUBLIC)
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("ipv6Prefixes")
+    void classify_ipv6_returnsExpectedBucket(String ipv6, DiscoveryScope expected) {
+        assertThat(classifier.classify(ipv6)).isEqualTo(expected);
+    }
+
+    static Stream<Arguments> ipv6Prefixes() {
+        return Stream.of(
+            // LOOPBACK — ::1
+            Arguments.of("::1", DiscoveryScope.LOOPBACK),
+            // LINK_LOCAL — fe80::/10, case-insensitive
+            Arguments.of("fe80::1", DiscoveryScope.LINK_LOCAL),
+            Arguments.of("FE80::abcd", DiscoveryScope.LINK_LOCAL),
+            Arguments.of("febf::1", DiscoveryScope.LINK_LOCAL),
+            // HOME — fc00::/7 ULA = private LAN
+            Arguments.of("fd00::1", DiscoveryScope.HOME),
+            Arguments.of("fc00::1", DiscoveryScope.HOME),
+            Arguments.of("fd12:3456::1", DiscoveryScope.HOME),
+            // PUBLIC — global unicast
+            Arguments.of("2001:4860:4860::8888", DiscoveryScope.PUBLIC),
+            // PUBLIC — fec0 is outside fe80::/10; fe8 is a short (non-matching) hextet
+            Arguments.of("fec0::1", DiscoveryScope.PUBLIC),
+            Arguments.of("fe8::1", DiscoveryScope.PUBLIC)
         );
     }
 
@@ -51,8 +83,8 @@ class DiscoveryScopeClassifierTest {
     }
 
     @Test
-    void classify_ipv6Input_returnsPublic() {
-        // Spec line 317: IPv6 falls through to PUBLIC as a safe default.
-        assertThat(classifier.classify("::1")).isEqualTo(DiscoveryScope.PUBLIC);
+    void classify_ipv6Loopback_returnsLoopback() {
+        // IPv6 is bucketed by prefix; ::1 must not pollute the External/Public zone.
+        assertThat(classifier.classify("::1")).isEqualTo(DiscoveryScope.LOOPBACK);
     }
 }

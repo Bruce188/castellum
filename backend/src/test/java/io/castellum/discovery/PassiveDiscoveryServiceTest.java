@@ -46,6 +46,8 @@ class PassiveDiscoveryServiceTest {
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpDecoder lldpDecoder;
     @Mock private CdpDecoder cdpDecoder;
+    @Mock private ConnTableReader connTableReader;
+    @Mock private GatewayProbe gatewayProbe;
     @Mock private DeviceUpsertService upsertService;
     @Mock private AuditService auditService;
     @Mock private DiscoverySweepRecorder recorder;
@@ -58,10 +60,12 @@ class PassiveDiscoveryServiceTest {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         service = new PassiveDiscoveryService(
             arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false /* lldpEnabled */,
             false /* cdpEnabled */,
             true /* pcapEnabled — existing PCAP cases assume enabled */,
+            true /* connTableEnabled */,
             clock
         );
         when(arpFactory.select()).thenReturn(arpReader);
@@ -161,14 +165,59 @@ class PassiveDiscoveryServiceTest {
         // Build a service variant with pcapEnabled=false
         PassiveDiscoveryService disabled = new PassiveDiscoveryService(
             arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
-            false, false, false, clock);
+            false, false, false, true, clock);
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.PCAP));
         PassiveDiscoveryResponse resp = disabled.sweep(req);
 
         assertThat(resp.discovered()).isEqualTo(0);
         org.mockito.Mockito.verifyNoInteractions(pcapSniffer);
+    }
+
+    @Test
+    void sweep_connTableDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
+        // Build a service variant with connTableEnabled=false
+        PassiveDiscoveryService disabled = new PassiveDiscoveryService(
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            connTableReader, gatewayProbe,
+            upsertService, auditService, recorder,
+            false, false, true, false, clock);
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.CONN_TABLE));
+        PassiveDiscoveryResponse resp = disabled.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(0);
+        org.mockito.Mockito.verifyNoInteractions(connTableReader);
+    }
+
+    @Test
+    void sweep_connTableEnabled_collectsRemoteEndpoints() throws Exception {
+        when(connTableReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("8.8.8.8", null, null, null, null, null),
+            new DiscoveredNeighbor("140.82.121.4", null, null, null, null, null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.CONN_TABLE));
+        PassiveDiscoveryResponse resp = service.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(2);
+        assertThat(resp.perSourceCount().get(DiscoverySource.CONN_TABLE)).isEqualTo(2);
+    }
+
+    @Test
+    void sweep_gatewaySource_dispatchesProbe() throws Exception {
+        when(gatewayProbe.probe()).thenReturn(List.of(
+            new DiscoveredNeighbor("192.168.1.1", null, null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.GATEWAY));
+        PassiveDiscoveryResponse resp = service.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(1);
+        assertThat(resp.perSourceCount().get(DiscoverySource.GATEWAY)).isEqualTo(1);
+        verify(gatewayProbe, times(1)).probe();
     }
 
     @Test
@@ -254,6 +303,34 @@ class PassiveDiscoveryServiceTest {
 
         // The request has iface=null, but the collected neighbor carries "eth0"
         verify(recorder).finish(eq(42L), eq("OK"), eq(1), eq(1), any(), eq("eth0"));
+    }
+
+    /**
+     * Scheduled sweeps now fan out the three local-read sources (ARP, CONN_TABLE,
+     * GATEWAY) — not ARP alone — so off-network peers and the router appear in the
+     * inventory without a manual sweep.
+     */
+    @Test
+    void scheduledSweep_requestsArpConnTableAndGatewaySources() throws Exception {
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.8.1", "dd:00:00:00:00:01", "0x1", "0x2", "eth0", null)
+        ));
+        when(connTableReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("8.8.8.8", null, null, null, null, null)
+        ));
+        when(gatewayProbe.probe()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.8.254", null, null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryResponse resp = service.scheduledSweep();
+
+        verify(recorder).start(eq("ARP,CONN_TABLE,GATEWAY"), isNull(), eq("SCHEDULER"));
+        verify(connTableReader, times(1)).read();
+        verify(gatewayProbe, times(1)).probe();
+        assertThat(resp.perSourceCount().get(DiscoverySource.ARP)).isEqualTo(1);
+        assertThat(resp.perSourceCount().get(DiscoverySource.CONN_TABLE)).isEqualTo(1);
+        assertThat(resp.perSourceCount().get(DiscoverySource.GATEWAY)).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(3);
     }
 
     /**

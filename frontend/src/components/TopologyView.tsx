@@ -6,6 +6,7 @@ import type { Device, DeviceRiskDto, DeviceRole, DiscoveryScope, DiscoverySource
 import { toRiskTier, tierColor } from '../lib/riskTier';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
+import { buildWanEdges } from '../lib/wanEdges';
 import { buildDockerNetworkGroups, isDockerNetGateway, dockerNetworkName } from '../lib/dockerNetworkGroups';
 import {
   scopeToZoneId,
@@ -136,6 +137,10 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         // dashed in the DOCKER_BRIDGE scope color so they read visually as a
         // distinct overlay rather than physical L2 adjacency.
         { selector: 'edge[kind = "docker-bridge"]', style: { 'line-color': EDGE_STYLES.dockerBridge.color, 'line-style': 'dashed' as const, width: EDGE_STYLES.dockerBridge.width, opacity: EDGE_STYLES.dockerBridge.opacity } },
+        // WAN edges (egress router → PUBLIC device) — dashed in the PUBLIC
+        // scope orange so external nodes read as hanging off the gateway
+        // rather than floating isolated inside zone-public.
+        { selector: 'edge.wan-edge', style: { 'line-color': scopeBorderColor.PUBLIC, 'line-style': 'dashed' as const, width: 2, opacity: 0.8 } },
         // Risk-still-loading overlay — dashed blue ring + dimmed fill. Appended
         // last so it wins border resolution while the parent's deviceRisk fanout
         // is in flight. The instant scores resolve the class is dropped and the
@@ -370,6 +375,10 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     });
 
     const edges = buildGatewayEdges(visibleDevices);
+    // WAN edges anchor PUBLIC-scope devices to the LAN's egress router so
+    // they don't render edge-less. Built from the same visibility-filtered
+    // device list, so a hidden anchor or hidden PUBLIC scope drops the edges.
+    const wanEdges = buildWanEdges(visibleDevices);
 
     // When a path is provided, add ad-hoc edges for path pairs that aren't
     // already covered by the subnet-edge layer (the attack graph may traverse
@@ -396,7 +405,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     //   2. Behind-gateway zone compound nodes (per-origin, additive)
     //   3. Docker-network sub-box compound nodes (parent = zone-docker or behind-gw zone)
     //   4. Device leaf nodes (parent = network-box or zone)
-    cy.add([...zoneNodes, ...behindGwZoneNodes, ...dockerNetworkBoxNodes, ...nodes, ...edges, ...extraEdges]);
+    cy.add([...zoneNodes, ...behindGwZoneNodes, ...dockerNetworkBoxNodes, ...nodes, ...edges, ...wanEdges, ...extraEdges]);
     // randomize:true prevents collinear collapse on sparse graphs — without it
     // cose-bilkent starts from degenerate (0,0) seed positions and converges
     // to a straight line when the fleet is small.

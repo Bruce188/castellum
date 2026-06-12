@@ -47,6 +47,8 @@ class MdnsProbeHostnamePropagationTest {
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpDecoder lldpDecoder;
     @Mock private CdpDecoder cdpDecoder;
+    @Mock private ConnTableReader connTableReader;
+    @Mock private GatewayProbe gatewayProbe;
     @Mock private AuditService auditService;
     @Mock private DiscoverySweepRecorder recorder;
     @Mock private DeviceRepository deviceRepository;
@@ -61,8 +63,9 @@ class MdnsProbeHostnamePropagationTest {
         realUpsert = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier(), new DeviceRoleClassifier());
         service = new PassiveDiscoveryService(
             arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            connTableReader, gatewayProbe,
             realUpsert, auditService, recorder,
-            false, false, true, clock);
+            false, false, true, true, clock);
         when(recorder.start(anyString(), any(), anyString())).thenReturn(7L);
         // Saved devices echo back with sequential IDs
         when(deviceRepository.findByIpAddress(anyString())).thenReturn(Optional.empty());

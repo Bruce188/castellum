@@ -16,7 +16,12 @@ interface Props {
   onDiscovered?: (updated: number) => void;
 }
 
-const ALL_SOURCES: DiscoverySource[] = ['ARP', 'MDNS', 'PCAP'];
+const ALL_SOURCES: DiscoverySource[] = ['ARP', 'MDNS', 'PCAP', 'CONN_TABLE', 'GATEWAY'];
+/** Operator-friendly labels for sources whose enum name reads poorly as a checkbox. */
+const SOURCE_LABELS: Partial<Record<DiscoverySource, string>> = {
+  CONN_TABLE: 'Connections',
+  GATEWAY: 'Gateway',
+};
 const FALLBACK_INTERFACES: InterfaceInfo[] = [
   { name: 'eth0', displayName: 'eth0', mtu: 1500 },
   { name: 'wlan0', displayName: 'wlan0', mtu: 1500 },
@@ -292,7 +297,7 @@ export function DiscoveryControlPanel({ isAdmin, onDiscovered }: Props) {
                       onChange={() => toggleSource(src)}
                       disabled={formDisabled}
                     />
-                    <span>{src}</span>
+                    <span>{SOURCE_LABELS[src] ?? src}</span>
                   </label>
                 ))}
               </div>

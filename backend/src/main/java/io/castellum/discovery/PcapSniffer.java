@@ -8,6 +8,8 @@ import org.pcap4j.core.PcapNetworkInterface;
 import org.pcap4j.core.PcapNetworkInterface.PromiscuousMode;
 import org.pcap4j.core.Pcaps;
 import org.pcap4j.packet.ArpPacket;
+import org.pcap4j.packet.IpV4Packet;
+import org.pcap4j.packet.IpV6Packet;
 import org.pcap4j.packet.Packet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
+import java.net.InetAddress;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -100,9 +103,28 @@ public class PcapSniffer {
 
     private void decode(Packet packet, String iface, ConcurrentLinkedQueue<DiscoveredNeighbor> queue) {
         if (packet == null) return;
-        ArpPacket arp = packet.get(ArpPacket.class);
-        if (arp == null) return;
 
+        ArpPacket arp = packet.get(ArpPacket.class);
+        if (arp != null) {
+            decodeArp(arp, iface, queue);
+            return; // ARP frames carry no IP payload — fully handled above
+        }
+
+        IpV4Packet ipv4 = packet.get(IpV4Packet.class);
+        if (ipv4 != null && ipv4.getHeader() != null) {
+            offerIpNeighbor(ipv4.getHeader().getSrcAddr(), iface, queue);
+            offerIpNeighbor(ipv4.getHeader().getDstAddr(), iface, queue);
+            return;
+        }
+
+        IpV6Packet ipv6 = packet.get(IpV6Packet.class);
+        if (ipv6 != null && ipv6.getHeader() != null) {
+            offerIpNeighbor(ipv6.getHeader().getSrcAddr(), iface, queue);
+            offerIpNeighbor(ipv6.getHeader().getDstAddr(), iface, queue);
+        }
+    }
+
+    private void decodeArp(ArpPacket arp, String iface, ConcurrentLinkedQueue<DiscoveredNeighbor> queue) {
         var header = arp.getHeader();
         if (header == null) return;
 
@@ -115,5 +137,31 @@ public class PcapSniffer {
 
         queue.offer(new DiscoveredNeighbor(ip, mac, null, null, iface, null));
         log.debug("PCAP ARP decoded: {} -> {}", ip, mac);
+    }
+
+    /**
+     * Emits a MAC-less neighbor for one IP-layer address. The frame's ethernet MAC is
+     * deliberately NOT attached: for routed traffic it is the local gateway's NIC, and
+     * {@link PassiveDiscoveryService} dedupes MAC-primary — attaching it would collapse
+     * every off-network peer into a single bogus device.
+     */
+    private void offerIpNeighbor(InetAddress addr, String iface, ConcurrentLinkedQueue<DiscoveredNeighbor> queue) {
+        if (!isHostAddress(addr)) return;
+        String ip = addr.getHostAddress();
+        queue.offer(new DiscoveredNeighbor(ip, null, null, null, iface, null));
+        log.debug("PCAP IP decoded: {}", ip);
+    }
+
+    /**
+     * Rejects non-host addresses: unspecified (0.0.0.0 / ::), limited broadcast
+     * (255.255.255.255) and multicast (224.0.0.0/4 / ff00::/8). Loopback and link-local
+     * pass through — {@link DiscoveryScopeClassifier} labels those downstream.
+     */
+    private static boolean isHostAddress(InetAddress addr) {
+        if (addr == null) return false;
+        String ip = addr.getHostAddress();
+        if (ip == null || ip.isBlank()) return false;
+        if (addr.isAnyLocalAddress() || addr.isMulticastAddress()) return false;
+        return !"255.255.255.255".equals(ip);
     }
 }

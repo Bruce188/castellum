@@ -243,7 +243,8 @@ public class SnmpClient {
             try {
                 DefaultUdpTransportMapping transport = new DefaultUdpTransportMapping();
                 transport.listen();
-                try (Snmp snmp = new Snmp(transport)) {
+                Snmp snmp = new Snmp(transport);
+                try {
                     CommunityTarget<UdpAddress> target = new CommunityTarget<>();
                     target.setCommunity(new OctetString(community));
                     target.setAddress(new UdpAddress(InetAddress.getByName(host), 161));
@@ -285,11 +286,34 @@ public class SnmpClient {
                         if (!advanced) break;
                     }
                     return Optional.of(result);
+                } finally {
+                    closeQuietly(snmp, host);
                 }
             } catch (IOException e) {
                 log.debug("SnmpClient: SNMP walk failed for {}:{} — {}", host, baseOidStr, e.getMessage());
                 return Optional.empty();
             }
         };
+    }
+
+    /**
+     * Close the SNMP session, tolerating ANY close-time failure — including
+     * {@link Error}.
+     *
+     * <p>On some kernels (notably WSL2), signalling the snmp4j listen thread blocked in
+     * {@code receive()} during datagram-socket pre-close fails with an {@link IOException}
+     * (e.g. {@code EINPROGRESS}), which the JDK's {@code DatagramSocketAdaptor.close()}
+     * rethrows wrapped in {@link java.lang.Error} because {@code DatagramSocket.close()}
+     * declares no checked exception. A failed close of a finished walk session is harmless:
+     * swallowing it preserves the walk result and keeps the walker's "timeout/unreachable
+     * degrades to a no-op" contract — instead of an Error escaping every
+     * {@code catch (Exception)} isolation layer and wedging the scan lifecycle.
+     */
+    private static void closeQuietly(Snmp snmp, String host) {
+        try {
+            snmp.close();
+        } catch (Exception | Error e) {
+            log.debug("SnmpClient: ignoring SNMP session close failure for {} — {}", host, e.toString());
+        }
     }
 }

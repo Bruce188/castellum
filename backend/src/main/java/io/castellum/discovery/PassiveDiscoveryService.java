@@ -32,12 +32,15 @@ public class PassiveDiscoveryService {
     private final PcapSniffer pcapSniffer;
     private final LldpDecoder lldpDecoder;
     private final CdpDecoder cdpDecoder;
+    private final ConnTableReader connTableReader;
+    private final GatewayProbe gatewayProbe;
     private final DeviceUpsertService upsertService;
     private final AuditService auditService;
     private final DiscoverySweepRecorder recorder;
     private final boolean lldpEnabled;
     private final boolean cdpEnabled;
     private final boolean pcapEnabled;
+    private final boolean connTableEnabled;
     private final Clock clock;
 
     public PassiveDiscoveryService(
@@ -46,24 +49,30 @@ public class PassiveDiscoveryService {
             PcapSniffer pcapSniffer,
             LldpDecoder lldpDecoder,
             CdpDecoder cdpDecoder,
+            ConnTableReader connTableReader,
+            GatewayProbe gatewayProbe,
             DeviceUpsertService upsertService,
             AuditService auditService,
             DiscoverySweepRecorder recorder,
             @Value("${castellum.discovery.lldp.enabled:false}") boolean lldpEnabled,
             @Value("${castellum.discovery.cdp.enabled:false}") boolean cdpEnabled,
             @Value("${castellum.discovery.pcap.enabled:false}") boolean pcapEnabled,
+            @Value("${castellum.discovery.conn-table.enabled:true}") boolean connTableEnabled,
             Clock clock) {
         this.arpFactory = arpFactory;
         this.mdnsProbe = mdnsProbe;
         this.pcapSniffer = pcapSniffer;
         this.lldpDecoder = lldpDecoder;
         this.cdpDecoder = cdpDecoder;
+        this.connTableReader = connTableReader;
+        this.gatewayProbe = gatewayProbe;
         this.upsertService = upsertService;
         this.auditService = auditService;
         this.recorder = recorder;
         this.lldpEnabled = lldpEnabled;
         this.cdpEnabled = cdpEnabled;
         this.pcapEnabled = pcapEnabled;
+        this.connTableEnabled = connTableEnabled;
         this.clock = clock;
     }
 
@@ -77,11 +86,13 @@ public class PassiveDiscoveryService {
     }
 
     /**
-     * Scheduler-path entry point. Constructs a default ARP-only request and threads
+     * Scheduler-path entry point. Constructs a default ARP + CONN_TABLE + GATEWAY request
+     * (the local-read sources that need no interface or duration) and threads
      * {@code triggered_by=SCHEDULER} into the sweep audit row. Never returns null.
      */
     public PassiveDiscoveryResponse scheduledSweep() throws DiscoveryUnavailableException {
-        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 30, List.of(DiscoverySource.ARP));
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 30,
+            List.of(DiscoverySource.ARP, DiscoverySource.CONN_TABLE, DiscoverySource.GATEWAY));
         return internalSweep(req, "SCHEDULER");
     }
 
@@ -176,6 +187,18 @@ public class PassiveDiscoveryService {
                             }));
                             submittedSources.add(source);
                         }
+                    }
+                    case CONN_TABLE -> {
+                        if (!connTableEnabled) {
+                            log.info("CONN_TABLE source requested but disabled by flag; skipping");
+                            break;
+                        }
+                        futures.add(executor.submit(() -> connTableReader.read()));
+                        submittedSources.add(source);
+                    }
+                    case GATEWAY -> {
+                        futures.add(executor.submit(() -> gatewayProbe.probe()));
+                        submittedSources.add(source);
                     }
                 }
             }
