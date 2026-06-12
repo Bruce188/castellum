@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildWanEdges } from './wanEdges';
+import { describe, it, expect, vi } from 'vitest';
+import { buildWanEdges, WAN_EDGE_CAP } from './wanEdges';
 import type { Device, DeviceRole, DiscoveryScope } from '../api/types';
 
 function makeDevice(
@@ -106,6 +106,31 @@ describe('buildWanEdges', () => {
       makeDevice(2, '192.168.68.50', 'HOME'),
     ];
     expect(buildWanEdges(devices)).toEqual([]);
+  });
+
+  it('over_cap_public_devices_yields_empty_with_single_warn', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      ...Array.from({ length: WAN_EDGE_CAP + 1 }, (_, i) =>
+        makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
+      ),
+    ];
+    expect(buildWanEdges(devices)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('exactly_cap_public_devices_builds_all_edges', () => {
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      ...Array.from({ length: WAN_EDGE_CAP }, (_, i) =>
+        makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
+      ),
+    ];
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(WAN_EDGE_CAP);
+    expect(edges.every(e => e.data.source === '1')).toBe(true);
   });
 
   it('edge_def_shape_id_kind_and_class', () => {

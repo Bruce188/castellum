@@ -32,9 +32,12 @@ class ConnTableReaderTest {
     private static final String UDP_HEADER =
         "   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops";
 
+    /** Remote ceiling high enough that no fixture here triggers truncation. */
+    private static final int NO_TRUNCATION = 512;
+
     private List<DiscoveredNeighbor> readWith(String fileName, String content) throws IOException {
         Files.writeString(procDir.resolve(fileName), content);
-        return new ConnTableReader(procDir.toString()).read();
+        return new ConnTableReader(procDir.toString(), NO_TRUNCATION).read();
     }
 
     private static List<String> ips(List<DiscoveredNeighbor> neighbors) {
@@ -102,7 +105,7 @@ class ConnTableReaderTest {
             "  201: 0000000000000000FFFF00003500A8C0:D2F0 00470626000000470000000011110000:0035 01 00000000:00000000 00:00000000 00000000  1000        0 31001 2 0000000000000000 0",
             ""));
 
-        List<DiscoveredNeighbor> result = new ConnTableReader(procDir.toString()).read();
+        List<DiscoveredNeighbor> result = new ConnTableReader(procDir.toString(), NO_TRUNCATION).read();
 
         String expectedV6 = InetAddress.getByName("2606:4700:4700::1111").getHostAddress();
         assertThat(ips(result)).containsExactly("1.1.1.1", expectedV6);
@@ -121,14 +124,15 @@ class ConnTableReaderTest {
             "  101: 3500A8C0:E1F0 08080808:0035 01 00000000:00000000 00:00000000 00000000  1000        0 30001 2 0000000000000000 0",
             ""));
 
-        List<DiscoveredNeighbor> result = new ConnTableReader(procDir.toString()).read();
+        List<DiscoveredNeighbor> result = new ConnTableReader(procDir.toString(), NO_TRUNCATION).read();
 
         assertThat(ips(result)).containsExactly("8.8.8.8");
     }
 
     @Test
     void read_missingProcDir_returnsEmptyList() {
-        ConnTableReader reader = new ConnTableReader(procDir.resolve("does-not-exist").toString());
+        ConnTableReader reader =
+            new ConnTableReader(procDir.resolve("does-not-exist").toString(), NO_TRUNCATION);
 
         assertThat(reader.read()).isEmpty();
     }
@@ -146,5 +150,35 @@ class ConnTableReaderTest {
             ""));
 
         assertThat(ips(result)).containsExactly("192.168.1.185");
+    }
+
+    @Test
+    void read_moreRemotesThanCap_truncatesToFirstNInFileOrderAfterDedupe() throws IOException {
+        // Five ESTABLISHED rows but only four distinct remotes (1.1.1.1 repeats):
+        // with the cap at 2, the duplicate must not consume cap budget — dedupe runs
+        // first, then exactly the first two distinct remotes in file order survive.
+        Files.writeString(procDir.resolve("tcp"), String.join("\n",
+            TCP_HEADER,
+            "   0: 3500A8C0:A1B2 01010101:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 40000 2 0000000000000000 20 4 30 10 -1",
+            "   1: 3500A8C0:A1B3 01010101:0050 01 00000000:00000000 02:00012345 00000000  1000        0 40001 2 0000000000000000 20 4 30 10 -1",
+            "   2: 3500A8C0:A1B4 02020202:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 40002 2 0000000000000000 20 4 30 10 -1",
+            "   3: 3500A8C0:A1B5 03030303:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 40003 2 0000000000000000 20 4 30 10 -1",
+            "   4: 3500A8C0:A1B6 04040404:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 40004 2 0000000000000000 20 4 30 10 -1",
+            ""));
+
+        List<DiscoveredNeighbor> result = new ConnTableReader(procDir.toString(), 2).read();
+
+        assertThat(ips(result)).containsExactly("1.1.1.1", "2.2.2.2");
+    }
+
+    @Test
+    void read_remotesAtOrBelowCap_returnedUntruncated() throws IOException {
+        List<DiscoveredNeighbor> result = readWith("tcp", String.join("\n",
+            TCP_HEADER,
+            "   0: 3500A8C0:A1B2 01010101:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 41000 2 0000000000000000 20 4 30 10 -1",
+            "   1: 3500A8C0:A1B3 02020202:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 41001 2 0000000000000000 20 4 30 10 -1",
+            ""));
+
+        assertThat(ips(result)).containsExactly("1.1.1.1", "2.2.2.2");
     }
 }

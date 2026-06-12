@@ -16,11 +16,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PcapSnifferReplayTest {
 
+    /** Mirrors the annotation default of castellum.discovery.pcap.max-captured-neighbors. */
+    private static final int DEFAULT_CAP = 50_000;
+
     @Test
     void replay_arpFixture_decodesArpRequests_returnsNeighbors(@TempDir Path tmp) throws Exception {
         // Synthetic single-record pcap built at runtime — replaces the prior committed binary
         // fixture (arp-self-discovery.pcap) so the test resources directory contains no opaque blobs.
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path syntheticPcap = tmp.resolve("synthetic-arp.pcap");
         Files.write(syntheticPcap, buildArpRequestPcap());
 
@@ -37,7 +40,7 @@ class PcapSnifferReplayTest {
     void replay_arpFixture_emitsExactlyOneNeighborWithMac(@TempDir Path tmp) throws Exception {
         // Regression guard for the IP-decoding extension: an ARP frame must still yield the
         // single sender-side neighbor and nothing else (ARP frames carry no IP payload).
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path syntheticPcap = tmp.resolve("synthetic-arp.pcap");
         Files.write(syntheticPcap, buildArpRequestPcap());
 
@@ -51,7 +54,7 @@ class PcapSnifferReplayTest {
 
     @Test
     void replay_ipv4Tcp_emitsSrcAndDstNeighbors_withNullMac(@TempDir Path tmp) throws Exception {
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path pcap = tmp.resolve("ipv4-tcp.pcap");
         Files.write(pcap, buildIpV4TcpPcap("192.168.1.50", "203.0.113.7"));
 
@@ -69,7 +72,7 @@ class PcapSnifferReplayTest {
 
     @Test
     void replay_ipv4Tcp_multicastDst_emitsOnlySrc(@TempDir Path tmp) throws Exception {
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path pcap = tmp.resolve("ipv4-mcast.pcap");
         Files.write(pcap, buildIpV4TcpPcap("192.168.1.50", "239.255.255.250"));
 
@@ -80,7 +83,7 @@ class PcapSnifferReplayTest {
 
     @Test
     void replay_ipv4Tcp_broadcastDst_emitsOnlySrc(@TempDir Path tmp) throws Exception {
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path pcap = tmp.resolve("ipv4-bcast.pcap");
         Files.write(pcap, buildIpV4TcpPcap("192.168.1.50", "255.255.255.255"));
 
@@ -90,9 +93,40 @@ class PcapSnifferReplayTest {
     }
 
     @Test
+    void replay_ipv4Tcp_directedBroadcastDst_emitsOnlySrc(@TempDir Path tmp) throws Exception {
+        // 192.168.1.255-style subnet-directed broadcast (NetBIOS/SSDP noise) must not
+        // become a phantom device; the unicast src must still come through.
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
+        Path pcap = tmp.resolve("ipv4-directed-bcast.pcap");
+        Files.write(pcap, buildIpV4TcpPcap("192.168.1.50", "192.168.1.255"));
+
+        List<DiscoveredNeighbor> neighbors = sniffer.replay(pcap.toFile());
+        assertThat(neighbors).extracting(DiscoveredNeighbor::ipAddress)
+            .containsExactly("192.168.1.50");
+    }
+
+    @Test
+    void replay_moreHostsThanCap_truncatesAtCap_withoutThrowing(@TempDir Path tmp) throws Exception {
+        // Cap of 3 against 3 packets carrying 6 distinct host addresses: the buffer must
+        // stop growing at the cap and the replay must still complete normally.
+        PcapSniffer sniffer = new PcapSniffer("arp", 3);
+        Path pcap = tmp.resolve("ipv4-flood.pcap");
+        Files.write(pcap, wrapFrames(
+            buildIpV4TcpFrame("10.0.0.1", "10.0.0.2"),
+            buildIpV4TcpFrame("10.0.0.3", "10.0.0.4"),
+            buildIpV4TcpFrame("10.0.0.5", "10.0.0.6")));
+
+        List<DiscoveredNeighbor> neighbors = sniffer.replay(pcap.toFile());
+        assertThat(neighbors).hasSize(3);
+        // Offline replay is single-threaded, so truncation keeps arrival order
+        assertThat(neighbors).extracting(DiscoveredNeighbor::ipAddress)
+            .containsExactly("10.0.0.1", "10.0.0.2", "10.0.0.3");
+    }
+
+    @Test
     void replay_ipv4Tcp_unspecifiedSrcAndBroadcastDst_emitsNothing(@TempDir Path tmp) throws Exception {
         // DHCP-DISCOVER shape: 0.0.0.0 -> 255.255.255.255 carries no host address at all
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path pcap = tmp.resolve("ipv4-dhcp.pcap");
         Files.write(pcap, buildIpV4TcpPcap("0.0.0.0", "255.255.255.255"));
 
@@ -101,7 +135,7 @@ class PcapSnifferReplayTest {
 
     @Test
     void replay_ipv6Udp_emitsSrcAndDstNeighbors_withNullMac(@TempDir Path tmp) throws Exception {
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path pcap = tmp.resolve("ipv6-udp.pcap");
         Files.write(pcap, buildIpV6UdpPcap("2001:db8::1", "2606:4700::6810:84e5"));
 
@@ -116,7 +150,7 @@ class PcapSnifferReplayTest {
 
     @Test
     void replay_ipv6Udp_multicastDst_emitsOnlySrc(@TempDir Path tmp) throws Exception {
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         Path pcap = tmp.resolve("ipv6-mcast.pcap");
         Files.write(pcap, buildIpV6UdpPcap("fe80::1", "ff02::fb"));
 
@@ -133,14 +167,14 @@ class PcapSnifferReplayTest {
         byte[] globalHdr = buildPcapGlobalHeader();
         Files.write(emptyPcap, globalHdr);
 
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         List<DiscoveredNeighbor> neighbors = sniffer.replay(emptyPcap.toFile());
         assertThat(neighbors).isEmpty();
     }
 
     @Test
     void live_handle_close_inFinally() {
-        PcapSniffer sniffer = new PcapSniffer("arp");
+        PcapSniffer sniffer = new PcapSniffer("arp", DEFAULT_CAP);
         // An interface that does not exist should cause PcapNativeException
         assertThatThrownBy(() -> sniffer.sniff("nonexistent99", 1))
             .isInstanceOf(PcapNativeException.class);
@@ -191,6 +225,11 @@ class PcapSnifferReplayTest {
      * MACs are locally-administered throwaways; decode must never propagate them.
      */
     private byte[] buildIpV4TcpPcap(String srcIp, String dstIp) throws Exception {
+        return wrapFrame(buildIpV4TcpFrame(srcIp, dstIp));
+    }
+
+    /** Builds one raw Ethernet+IPv4+TCP frame (no pcap headers) for multi-record fixtures. */
+    private byte[] buildIpV4TcpFrame(String srcIp, String dstIp) throws Exception {
         // Ethernet header (14) + IPv4 header (20) + TCP header (20) = 54-byte frame
         ByteBuffer eth = ByteBuffer.allocate(54).order(ByteOrder.BIG_ENDIAN);
         // Ethernet: dst 02:00:00:00:00:02, src 02:00:00:00:00:01, ethertype 0x0800 (IPv4)
@@ -218,7 +257,7 @@ class PcapSnifferReplayTest {
         eth.putShort((short) 0xffff);   // window
         eth.putShort((short) 0);        // checksum (unverified)
         eth.putShort((short) 0);        // urgent pointer
-        return wrapFrame(eth.array());
+        return eth.array();
     }
 
     /**
@@ -248,18 +287,27 @@ class PcapSnifferReplayTest {
 
     /** Wraps a single ethernet frame in a pcap global header + one record header. */
     private byte[] wrapFrame(byte[] frame) {
-        // pcap record header (16 bytes, little-endian) + frame
-        ByteBuffer rec = ByteBuffer.allocate(16 + frame.length).order(ByteOrder.LITTLE_ENDIAN);
-        rec.putInt(0);                  // ts_sec
-        rec.putInt(0);                  // ts_usec
-        rec.putInt(frame.length);       // incl_len
-        rec.putInt(frame.length);       // orig_len
-        rec.put(frame);
+        return wrapFrames(frame);
+    }
 
+    /** Wraps ethernet frames in a pcap global header, one record header per frame. */
+    private byte[] wrapFrames(byte[]... frames) {
         byte[] global = buildPcapGlobalHeader();
-        byte[] out = new byte[global.length + rec.array().length];
-        System.arraycopy(global, 0, out, 0, global.length);
-        System.arraycopy(rec.array(), 0, out, global.length, rec.array().length);
-        return out;
+        int total = global.length;
+        for (byte[] frame : frames) {
+            total += 16 + frame.length;
+        }
+
+        ByteBuffer out = ByteBuffer.allocate(total).order(ByteOrder.LITTLE_ENDIAN);
+        out.put(global);
+        for (byte[] frame : frames) {
+            // pcap record header (16 bytes, little-endian) + frame
+            out.putInt(0);              // ts_sec
+            out.putInt(0);              // ts_usec
+            out.putInt(frame.length);   // incl_len
+            out.putInt(frame.length);   // orig_len
+            out.put(frame);
+        }
+        return out.array();
     }
 }

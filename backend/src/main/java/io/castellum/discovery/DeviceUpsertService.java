@@ -317,8 +317,10 @@ public class DeviceUpsertService {
      * batch rolls back and the sweep is recorded FAILED. Per-row catch-and-continue is
      * explicitly <em>not</em> used. This design is safe because:
      * <ul>
-     *   <li>The batch is deduped upstream by {@link PassiveDiscoveryService} (MAC-primary, then
-     *       IP-fallback) so an intra-batch IP collision cannot occur.</li>
+     *   <li>An intra-batch (ip, origin) collision — e.g. a MAC-bearing and a null-MAC
+     *       observation of the same IP slipping past the upstream MAC-primary dedupe in
+     *       {@link PassiveDiscoveryService} — folds into a single pending INSERT instead of
+     *       producing two rows that would violate {@code device_ip_origin_unique} at flush.</li>
      *   <li>AC1 (every observed IP added to {@code ipSet} unconditionally) closes the
      *       DB-vs-batch keying gap: a MAC-bearing re-observation of a known-IP/null-MAC row
      *       now hits the UPDATE branch, preventing the {@code device_ip_unique} violation that
@@ -376,6 +378,11 @@ public class DeviceUpsertService {
         // after both saveAll calls have run (and inserts have IDs assigned).
         record Slot(boolean isUpdate, int idx) {}
         List<Slot> slots = new ArrayList<>(discoveries.size());
+        // Pending inserts keyed by IP. All upsertAll callers are origin='local', so the IP
+        // alone identifies a pending (ip_address, origin_host_ip) row within this batch.
+        // A later row matching neither a DB row nor a MAC must fold into the pending insert —
+        // a second INSERT for the same key would violate device_ip_origin_unique at flush.
+        Map<String, Integer> pendingInsertIdxByIp = new HashMap<>();
 
         for (Discovery d : discoveries) {
             String incomingHostname = sanitizeHostname(d.hostname());
@@ -385,6 +392,37 @@ public class DeviceUpsertService {
             }
             if (existing == null) {
                 existing = existingByIp.get(d.ipAddress());
+            }
+            if (existing == null) {
+                Integer pendingIdx = pendingInsertIdxByIp.get(d.ipAddress());
+                if (pendingIdx != null) {
+                    Device pending = inserts.get(pendingIdx);
+                    // Fold semantics mirror the UPDATE branch: lastSeen/discoverySource
+                    // last-writer-wins, mac/hostname fill-when-null (alias superseded),
+                    // iface overwrite-only-when-non-null.
+                    pending.setLastSeen(d.observedAt());
+                    if (pending.getMacAddress() == null
+                            && d.macAddress() != null && !d.macAddress().isBlank()) {
+                        pending.setMacAddress(d.macAddress());
+                    }
+                    if (incomingHostname != null) {
+                        if (pending.getHostname() == null || isBridgeAlias(pending.getHostname())) {
+                            pending.setHostname(incomingHostname);
+                        }
+                    }
+                    if (d.iface() != null) {
+                        pending.setLastSeenIface(d.iface());
+                    }
+                    pending.setDiscoverySource(d.source());
+                    // Re-classify after the fold — backfilled fields may carry role signal.
+                    RoleClassification rcFold = roleClassifier.classifyWithConfidence(pending);
+                    if (rcFold.role() != DeviceRole.UNKNOWN || pending.getDeviceRole() == DeviceRole.UNKNOWN) {
+                        pending.setDeviceRole(rcFold.role());
+                        pending.setRoleConfidence(rcFold.confidence());
+                    }
+                    slots.add(new Slot(false, pendingIdx));
+                    continue;
+                }
             }
             if (existing != null) {
                 existing.setLastSeen(d.observedAt());
@@ -436,6 +474,7 @@ public class DeviceUpsertService {
                     fresh.setRoleConfidence(rcAllI.confidence());
                 }
                 slots.add(new Slot(false, inserts.size()));
+                pendingInsertIdxByIp.put(d.ipAddress(), inserts.size());
                 inserts.add(fresh);
             }
         }

@@ -66,4 +66,30 @@ class GatewayProbeTest {
 
         assertThat(probe.probe()).isEmpty();
     }
+
+    @Test
+    void probe_malformedGatewayHex_skipsRowAndKeepsLaterValidDefaultRoute() throws IOException {
+        // Row 1: default-route shape but non-hex gateway — must be skipped, not thrown.
+        // Row 2: valid default route — still found.
+        GatewayProbe probe = probeWith(
+            ROUTE_HEADER,
+            "eth6\t00000000\tZZZZZZZZ\t0003\t0\t0\t100\t00000000\t0\t0\t0",
+            "eth6\t00000000\t0144A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0");
+
+        List<DiscoveredNeighbor> result = probe.probe();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).ipAddress()).isEqualTo("192.168.68.1");
+    }
+
+    @Test
+    void probe_onlyMalformedDefaultRoutes_returnsEmptyWithoutThrowing() throws IOException {
+        // Non-hex and wrong-length gateway fields — both skipped, empty result.
+        GatewayProbe probe = probeWith(
+            ROUTE_HEADER,
+            "eth6\t00000000\tZZZZZZZZ\t0003\t0\t0\t100\t00000000\t0\t0\t0",
+            "eth6\t00000000\t0144A8C\t0003\t0\t0\t100\t00000000\t0\t0\t0");
+
+        assertThat(probe.probe()).isEmpty();
+    }
 }

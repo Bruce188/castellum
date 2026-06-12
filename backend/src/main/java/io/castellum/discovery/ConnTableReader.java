@@ -30,6 +30,11 @@ import java.util.Set;
  * injectable for tests (mirror of {@link ActiveNetworkDetector}); missing files
  * (Windows/macOS, locked-down containers) degrade to an empty list — never an
  * exception.
+ *
+ * <p>Output is capped at {@code castellum.discovery.conn-table.max-remotes} distinct
+ * remotes per read (first-N in file-read order, applied after dedupe) so a busy
+ * public-facing host cannot grow the device inventory without bound — remote peers
+ * choose to connect, so they would otherwise control the row count.
  */
 @Service
 public class ConnTableReader {
@@ -40,14 +45,21 @@ public class ConnTableReader {
     private static final String TCP_ESTABLISHED = "01";
 
     private final String procDir;
+    private final int maxRemotes;
 
-    public ConnTableReader(@Value("${castellum.discovery.conn-table.proc-dir:/proc/net}") String procDir) {
+    public ConnTableReader(
+            @Value("${castellum.discovery.conn-table.proc-dir:/proc/net}") String procDir,
+            @Value("${castellum.discovery.conn-table.max-remotes:512}") int maxRemotes) {
         this.procDir = procDir;
+        // A non-positive cap would silence the source entirely (or re-open the
+        // unbounded path); clamp to at least one neighbor.
+        this.maxRemotes = Math.max(1, maxRemotes);
     }
 
     /**
-     * Reads all four proc tables and returns the deduplicated remote endpoints.
-     * Returns an empty list when no table is readable (non-Linux hosts).
+     * Reads all four proc tables and returns the deduplicated remote endpoints,
+     * truncated to the configured ceiling. Returns an empty list when no table is
+     * readable (non-Linux hosts).
      */
     public List<DiscoveredNeighbor> read() {
         Set<String> remoteIps = new LinkedHashSet<>();
@@ -56,8 +68,18 @@ public class ConnTableReader {
         collect(Path.of(procDir, "udp"), false, remoteIps);
         collect(Path.of(procDir, "udp6"), false, remoteIps);
 
-        List<DiscoveredNeighbor> results = new ArrayList<>(remoteIps.size());
+        int dropped = remoteIps.size() - maxRemotes;
+        if (dropped > 0) {
+            log.warn("Connection tables yielded {} distinct remotes; keeping the first {} and "
+                    + "dropping {} (castellum.discovery.conn-table.max-remotes)",
+                remoteIps.size(), maxRemotes, dropped);
+        }
+
+        List<DiscoveredNeighbor> results = new ArrayList<>(Math.min(remoteIps.size(), maxRemotes));
         for (String ip : remoteIps) {
+            if (results.size() == maxRemotes) {
+                break;
+            }
             results.add(new DiscoveredNeighbor(ip, null, null, null, null, null));
         }
         return results;

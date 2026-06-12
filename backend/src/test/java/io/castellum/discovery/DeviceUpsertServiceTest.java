@@ -195,6 +195,53 @@ class DeviceUpsertServiceTest {
         assertThat(found.getLastSeenIface()).isEqualTo("eth0");
     }
 
+    /**
+     * Intra-batch collision: the same IP arriving once WITH a MAC (ARP) and once WITHOUT
+     * (GATEWAY/CONN_TABLE) against an EMPTY repository must produce exactly ONE insert.
+     * Both rows miss the existingByMac/existingByIp lookups, so without the pending-insert
+     * fold each would INSERT and the flush would violate {@code device_ip_origin_unique}
+     * for (ip_address, origin_host_ip='local').
+     */
+    @Test
+    void upsertAll_sameIpMacAndNullMacRows_emptyRepo_singleInsert() {
+        List<Discovery> batch = List.of(
+            new Discovery("10.0.42.1", "aa:bb:cc:dd:ee:42", null, DiscoverySource.ARP, T1, "eth0", false),
+            new Discovery("10.0.42.1", null, "gw-host", DiscoverySource.GATEWAY, T2, null, false)
+        );
+        List<Device> result = service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.42.1").orElseThrow();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:42");
+        assertThat(found.getHostname()).isEqualTo("gw-host");   // folded row fills the null slot
+        assertThat(found.getLastSeenIface()).isEqualTo("eth0"); // folded row's null iface must not clobber
+        assertThat(found.getLastSeen()).isEqualTo(T2);          // last-writer-wins, mirrors UPDATE branch
+        assertThat(found.getOriginHostIp()).isEqualTo("local");
+
+        // Input-order contract: both slots resolve to the same persisted device.
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getId()).isEqualTo(result.get(1).getId());
+    }
+
+    /**
+     * Fold in the opposite arrival order: the null-MAC row creates the pending insert and
+     * the later MAC-bearing row backfills mac/iface into it (fill-when-null) — still one row.
+     */
+    @Test
+    void upsertAll_sameIpNullMacFirst_macBackfilledIntoPendingInsert() {
+        List<Discovery> batch = List.of(
+            new Discovery("10.0.42.2", null, null, DiscoverySource.GATEWAY, T1, null, false),
+            new Discovery("10.0.42.2", "aa:bb:cc:dd:ee:43", null, DiscoverySource.ARP, T2, "eth0", false)
+        );
+        service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.42.2").orElseThrow();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:43"); // backfilled into pending insert
+        assertThat(found.getLastSeenIface()).isEqualTo("eth0");
+        assertThat(found.getLastSeen()).isEqualTo(T2);
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // AC2 — discoverySource persistence (single upsert + batch upsertAll)
     // ────────────────────────────────────────────────────────────────────────

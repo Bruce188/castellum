@@ -71,6 +71,11 @@ public class GatewayProbe {
             if (ALL_ZEROS_HEX.equals(dest) && ALL_ZEROS_HEX.equals(mask)
                     && !ALL_ZEROS_HEX.equals(gw)) {
                 String gatewayIp = hexLeToIp(gw);
+                if (gatewayIp == null) {
+                    log.debug("Skipping default-route row with unparseable gateway '{}' in {}",
+                        gw, routePath);
+                    continue;
+                }
                 return List.of(new DiscoveredNeighbor(gatewayIp, null, null, null, fields[0], null));
             }
         }
@@ -79,9 +84,21 @@ public class GatewayProbe {
         return List.of();
     }
 
-    /** Converts a little-endian 8-hex-char field to a dotted-quad IPv4 string. */
+    /**
+     * Converts a little-endian 8-hex-char field to a dotted-quad IPv4 string, or null
+     * when the field is not exactly 8 hex chars — the route file is config-redirectable,
+     * so a malformed row must be skipped, not thrown (the class contract is never-throws).
+     */
     private static String hexLeToIp(String hexLe) {
-        int be = Integer.reverseBytes((int) Long.parseLong(hexLe, 16));
+        if (hexLe.length() != 8) {
+            return null;
+        }
+        int be;
+        try {
+            be = Integer.reverseBytes((int) Long.parseLong(hexLe, 16));
+        } catch (NumberFormatException e) {
+            return null;
+        }
         return ((be >>> 24) & 0xFF) + "."
              + ((be >>> 16) & 0xFF) + "."
              + ((be >>> 8)  & 0xFF) + "."

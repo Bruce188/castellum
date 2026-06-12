@@ -239,12 +239,16 @@ public class PassiveDiscoveryService {
             }
         }
 
+        reconcileMacPrimacy(withMac, withoutMac);
+
         // Upsert unique discoveries — single batch round-trip via upsertAll
         List<Long> deviceIds = new ArrayList<>();
-        int totalDeduped = withMac.size() + withoutMac.size();
         List<Discovery> batch = new ArrayList<>(withMac.size() + withoutMac.size());
         batch.addAll(withMac.values());
         batch.addAll(withoutMac.values());
+        // Count from the reconciled batch — summing the two map sizes would double-count
+        // an IP observed by both a MAC-bearing and a null-MAC source.
+        int totalDeduped = batch.size();
         if (totalDeduped > 0) {
             List<Device> persisted = upsertService.upsertAll(batch);
             for (Device d : persisted) {
@@ -278,6 +282,42 @@ public class PassiveDiscoveryService {
         recorder.finish(sweepId, "OK", totalDeduped, deviceIds.size(), auditLogId, observedIface);
 
         return new PassiveDiscoveryResponse(totalDeduped, deviceIds, perSourceCount, sweepId);
+    }
+
+    /**
+     * Drops every IP-keyed (null-MAC) entry whose IP already appears among the MAC-keyed
+     * entries — the MAC-bearing observation supersedes, carrying strictly more information.
+     * Without this, the gateway (virtually always present in the ARP cache) would enter the
+     * upsert batch twice — ARP row with MAC plus GATEWAY/CONN_TABLE row without — and on a
+     * first sweep both rows would INSERT and violate the {@code device_ip_origin_unique}
+     * constraint. Hostname/iface from a dropped row backfill the surviving entry when it
+     * lacks them (fill-when-null, mirroring upsert semantics), so e.g. an mDNS hostname is
+     * not lost to a bare ARP row for the same IP.
+     */
+    private void reconcileMacPrimacy(Map<String, Discovery> withMac, Map<String, Discovery> withoutMac) {
+        if (withMac.isEmpty() || withoutMac.isEmpty()) {
+            return;
+        }
+        Map<String, String> macKeyByIp = new HashMap<>();
+        for (Map.Entry<String, Discovery> e : withMac.entrySet()) {
+            macKeyByIp.put(e.getValue().ipAddress(), e.getKey());
+        }
+        Iterator<Discovery> ipKeyed = withoutMac.values().iterator();
+        while (ipKeyed.hasNext()) {
+            Discovery dropped = ipKeyed.next();
+            String macKey = macKeyByIp.get(dropped.ipAddress());
+            if (macKey == null) {
+                continue;
+            }
+            Discovery kept = withMac.get(macKey);
+            String hostname = kept.hostname() != null ? kept.hostname() : dropped.hostname();
+            String iface = kept.iface() != null ? kept.iface() : dropped.iface();
+            if (!Objects.equals(hostname, kept.hostname()) || !Objects.equals(iface, kept.iface())) {
+                withMac.put(macKey, new Discovery(kept.ipAddress(), kept.macAddress(), hostname,
+                    kept.source(), kept.observedAt(), iface, kept.publishesHostPort()));
+            }
+            ipKeyed.remove();
+        }
     }
 
     private Discovery toDiscovery(DiscoveredNeighbor n, DiscoverySource source, Instant observedAt) {

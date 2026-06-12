@@ -20,6 +20,14 @@ export interface WanEdge {
   classes: 'wan-edge';
 }
 
+/**
+ * Ceiling on PUBLIC devices anchored by WAN edges — mirrors GraphBuilder's
+ * subnet-cap (64). Past it, the single-anchor fan-in becomes the densest
+ * edge cluster in the graph and degrades the cose-bilkent layout, so the
+ * whole edge set is dropped and PUBLIC nodes render unanchored instead.
+ */
+export const WAN_EDGE_CAP = 64;
+
 function lastOctet(ip: string): number | null {
   const parts = ip.split('.');
   if (parts.length !== 4) return null;
@@ -93,12 +101,19 @@ function pickWanAnchor(devices: Device[]): Device | null {
 
 /**
  * Build WAN edges connecting the egress router to every PUBLIC-scope device.
- * Returns {@code []} when no anchor can be identified — PUBLIC nodes still
+ * Returns {@code []} when no anchor can be identified, or when the PUBLIC
+ * count exceeds {@link WAN_EDGE_CAP} (one console.warn) — PUBLIC nodes still
  * render inside zone-public, just unanchored.
  */
 export function buildWanEdges(devices: Device[]): WanEdge[] {
   const publicDevices = devices.filter(d => d.discoveryScope === 'PUBLIC');
   if (publicDevices.length === 0) return [];
+  if (publicDevices.length > WAN_EDGE_CAP) {
+    console.warn(
+      `buildWanEdges: WAN-edge cap (${WAN_EDGE_CAP}) exceeded — leaving ${publicDevices.length} PUBLIC devices unanchored`,
+    );
+    return [];
+  }
 
   const anchor = pickWanAnchor(devices);
   if (anchor === null) return [];

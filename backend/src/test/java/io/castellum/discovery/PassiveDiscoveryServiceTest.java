@@ -160,6 +160,70 @@ class PassiveDiscoveryServiceTest {
         assertThat(resp.discovered()).isEqualTo(2);
     }
 
+    /**
+     * Cross-source reconcile: the gateway is virtually always present in the ARP cache, so
+     * ARP yields (mac, gw-ip) while GATEWAY yields (null, gw-ip) for the SAME IP. The
+     * null-MAC row must be dropped before the batch reaches upsertAll — two rows for one
+     * (ip, origin) would both INSERT on an empty DB and violate device_ip_origin_unique,
+     * failing the whole sweep. The discovered count and recorder total must reflect the
+     * reconciled batch, not the sum of the two dedupe maps.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_arpAndGatewaySameIp_dropsNullMacRow_singleBatchEntry() throws Exception {
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.1", "aa:bb:cc:dd:ee:01", "0x1", "0x2", "eth0", null)
+        ));
+        when(gatewayProbe.probe()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.1", null, null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5,
+            List.of(DiscoverySource.ARP, DiscoverySource.GATEWAY));
+        PassiveDiscoveryResponse resp = service.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress()).isEqualTo("10.0.9.1");
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:01"); // MAC row survives
+
+        // Per-source counts still report raw observations; the dedupe applies to the batch only.
+        assertThat(resp.perSourceCount().get(DiscoverySource.ARP)).isEqualTo(1);
+        assertThat(resp.perSourceCount().get(DiscoverySource.GATEWAY)).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(1);
+        verify(recorder).finish(eq(42L), eq("OK"), eq(1), eq(1), any(), eq("eth0"));
+    }
+
+    /**
+     * Reconcile must not lose information from the dropped null-MAC row: an mDNS hostname
+     * observed for an IP that ARP also saw (with a MAC, no hostname) backfills the surviving
+     * MAC-bearing discovery (fill-when-null).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_arpAndMdnsSameIp_survivingMacRowCarriesMdnsHostname() throws Exception {
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.2", "aa:bb:cc:dd:ee:02", "0x1", "0x2", "eth0", null)
+        ));
+        when(mdnsProbe.probe(anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.2", null, null, null, null, "printer.local")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5,
+            List.of(DiscoverySource.ARP, DiscoverySource.MDNS));
+        PassiveDiscoveryResponse resp = service.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:02");
+        assertThat(batch.get(0).hostname()).isEqualTo("printer.local");
+        assertThat(resp.discovered()).isEqualTo(1);
+    }
+
     @Test
     void sweep_pcapDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
         // Build a service variant with pcapEnabled=false
