@@ -243,6 +243,123 @@ class DeviceUpsertServiceTest {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // Pending-insert fold semantics
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Fold: discoverySource uses last-writer-wins in the pending-insert fold.
+     *
+     * The first (null-MAC) row creates the pending insert with source=GATEWAY.
+     * The second (MAC-bearing) row folds in with source=ARP. The persisted source must
+     * be ARP (the later writer), mirroring the UPDATE-branch last-writer-wins contract.
+     */
+    @Test
+    void upsertAll_foldPath_sourceLastWriterWins() {
+        List<Discovery> batch = List.of(
+            new Discovery("10.0.43.1", null, null, DiscoverySource.GATEWAY, T1, null, false),
+            new Discovery("10.0.43.1", "aa:bb:cc:dd:ee:43", null, DiscoverySource.ARP, T2, "eth1", false)
+        );
+        service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.43.1").orElseThrow();
+        assertThat(found.getDiscoverySource())
+            .as("fold: discoverySource must be the last writer (ARP, not GATEWAY)")
+            .isEqualTo(DiscoverySource.ARP);
+    }
+
+    /**
+     * Fold: bridge-alias hostname on the FIRST row (pending insert) must not
+     * be stored even in the pending slot.  When a subsequent MAC-bearing row folds in,
+     * the MAC fills the pending insert but the alias hostname stays suppressed (null).
+     */
+    @Test
+    void upsertAll_foldPath_bridgeAliasOnFirstRow_hostnameRemainsNull() {
+        List<Discovery> batch = List.of(
+            // First row (null-MAC, bridge-alias hostname) creates the pending insert
+            new Discovery("10.0.43.2", null, "host.docker.internal", DiscoverySource.MDNS, T1, null, false),
+            // Second row (MAC, no hostname) folds in — alias must not be in the slot
+            new Discovery("10.0.43.2", "aa:bb:cc:dd:ee:44", null, DiscoverySource.ARP, T2, "eth0", false)
+        );
+        service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.43.2").orElseThrow();
+        assertThat(found.getHostname())
+            .as("fold: bridge alias on first row must not be stored even in pending slot")
+            .isNull();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:44");
+    }
+
+    /**
+     * Fold: a real hostname on the SECOND (fold) row fills a pending-insert slot whose
+     * hostname is still null (fill-when-null half of the hostname fold contract).
+     */
+    @Test
+    void upsertAll_foldPath_realHostnameOnSecondRowFillsNullSlot() {
+        List<Discovery> batch = List.of(
+            // First row: null-MAC, null hostname — pending insert, hostname=null
+            new Discovery("10.0.43.3", null, null, DiscoverySource.GATEWAY, T1, null, false),
+            // Second row: MAC + real hostname — folds in, hostname filled
+            new Discovery("10.0.43.3", "aa:bb:cc:dd:ee:45", "router.local", DiscoverySource.ARP, T2, "eth0", false)
+        );
+        service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.43.3").orElseThrow();
+        assertThat(found.getHostname())
+            .as("fold: real hostname on second row must fill the null hostname slot in the pending insert")
+            .isEqualTo("router.local");
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:45");
+    }
+
+    /**
+     * Fold: a real hostname already in the pending-insert slot must NOT be clobbered
+     * by a different hostname on a later folded row (no-clobber half of the hostname
+     * fold contract — fill-when-null only, alias excepted).
+     */
+    @Test
+    void upsertAll_foldPath_realHostnameInPendingSlot_notClobberedByFoldedRow() {
+        List<Discovery> batch = List.of(
+            // First row: null-MAC with a real hostname — pending insert holds "nas.local"
+            new Discovery("10.0.43.4", null, "nas.local", DiscoverySource.MDNS, T1, null, false),
+            // Second row: MAC + a DIFFERENT hostname — must not overwrite the real one
+            new Discovery("10.0.43.4", "aa:bb:cc:dd:ee:46", "other.local", DiscoverySource.ARP, T2, "eth0", false)
+        );
+        service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.43.4").orElseThrow();
+        assertThat(found.getHostname())
+            .as("fold: real hostname in pending slot must not be clobbered by a folded row")
+            .isEqualTo("nas.local");
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:46");
+    }
+
+    /**
+     * Fold: three same-IP rows in one batch (GATEWAY, ARP, MDNS) repeatedly fold into
+     * the same pending insert — exactly one row persists and all three result slots
+     * resolve to that one device.
+     */
+    @Test
+    void upsertAll_threeSameIpRows_emptyRepo_singleInsert_allSlotsShareId() {
+        List<Discovery> batch = List.of(
+            new Discovery("10.0.43.5", null, null, DiscoverySource.GATEWAY, T1, null, false),
+            new Discovery("10.0.43.5", "aa:bb:cc:dd:ee:47", null, DiscoverySource.ARP, T2, "eth0", false),
+            new Discovery("10.0.43.5", null, "gw.local", DiscoverySource.MDNS, T2, null, false)
+        );
+        List<Device> result = service.upsertAll(batch);
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.43.5").orElseThrow();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:47"); // backfilled by row 2
+        assertThat(found.getHostname()).isEqualTo("gw.local");           // filled by row 3
+        assertThat(result).hasSize(3);
+        assertThat(result.get(0).getId()).isEqualTo(result.get(1).getId());
+        assertThat(result.get(1).getId()).isEqualTo(result.get(2).getId());
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // AC2 — discoverySource persistence (single upsert + batch upsertAll)
     // ────────────────────────────────────────────────────────────────────────
 

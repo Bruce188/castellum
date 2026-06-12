@@ -224,6 +224,46 @@ class PassiveDiscoveryServiceTest {
         assertThat(resp.discovered()).isEqualTo(1);
     }
 
+    /**
+     * reconcileMacPrimacy iface backfill: when the MAC-bearing row carries null iface
+     * and the dropped null-MAC row carries a real iface, the surviving MAC row must be
+     * updated with the dropped row's iface (fill-when-null, mirrors hostname semantics).
+     *
+     * <p>Scenario: GATEWAY probe finds the router by IP only (null-MAC, iface="eth0"),
+     * while ARP also sees the same IP but the ARP entry carries no iface (null). After
+     * reconcile the ARP (MAC-bearing) row must carry "eth0" — so the upsertAll call
+     * receives a Discovery with both the MAC and the iface set.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_arpAndGatewaySameIp_ifaceBackfilledFromDroppedRow() throws Exception {
+        // ARP row: has MAC, but null iface
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.5", "aa:bb:cc:dd:ee:05", "0x1", "0x2", null, null)
+        ));
+        // GATEWAY row: null-MAC, iface="eth0"
+        when(gatewayProbe.probe()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.9.5", null, null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5,
+            List.of(DiscoverySource.ARP, DiscoverySource.GATEWAY));
+        service.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+
+        // The null-MAC GATEWAY row must be dropped — only the ARP MAC row survives
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).macAddress())
+            .as("surviving row must be the ARP (MAC-bearing) row")
+            .isEqualTo("aa:bb:cc:dd:ee:05");
+        assertThat(batch.get(0).iface())
+            .as("iface from the dropped GATEWAY row must backfill the surviving ARP row")
+            .isEqualTo("eth0");
+    }
+
     @Test
     void sweep_pcapDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
         // Build a service variant with pcapEnabled=false

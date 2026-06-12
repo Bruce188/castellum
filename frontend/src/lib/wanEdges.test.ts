@@ -145,4 +145,68 @@ describe('buildWanEdges', () => {
       classes: 'wan-edge',
     });
   });
+
+  it('fallback_equal_population_slash24_tiebreak_lower_dot1_wins', () => {
+    // Two /24 groups with identical HOME population (2 each), both having a .1 device.
+    // 10.0.0.1 (numerically lower) should beat 192.168.1.1 as the anchor.
+    const devices: Device[] = [
+      makeDevice(1, '10.0.0.1', 'HOME'),
+      makeDevice(2, '10.0.0.50', 'HOME'),
+      makeDevice(3, '192.168.1.1', 'HOME'),
+      makeDevice(4, '192.168.1.50', 'HOME'),
+      makeDevice(5, '8.8.8.8', 'PUBLIC'),
+    ];
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(1);
+    // 10.0.0.1 < 192.168.1.1 numerically → device 1 anchors.
+    expect(edges[0].data.source).toBe('1');
+    expect(edges[0].data.target).toBe('5');
+  });
+
+  it('router_non_ipv4_address_id_fallback_lowest_id_wins', () => {
+    // Two HOME ROUTERs with IPv6 addresses — ipToInt returns null for both
+    // so byIpThenId falls back to a.id - b.id; the lowest id (10) anchors.
+    const devices: Device[] = [
+      makeDevice(20, '2001:db8::2', 'HOME', 'ROUTER'),
+      makeDevice(10, '2001:db8::1', 'HOME', 'ROUTER'),
+      makeDevice(99, '8.8.8.8', 'PUBLIC'),
+    ];
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].data.source).toBe('10');
+  });
+
+  it('ipv6_public_devices_receive_wan_edges_and_count_toward_cap', () => {
+    // IPv6 PUBLIC devices are included in publicDevices (scope-only filter).
+    // 63 IPv4 + 2 IPv6 PUBLIC = 65 > WAN_EDGE_CAP (64) → cap warning → [].
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ipv4Public = Array.from({ length: 63 }, (_, i) =>
+      makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
+    );
+    const ipv6Public = [
+      makeDevice(200, '2001:db8::1', 'PUBLIC'),
+      makeDevice(201, '2001:db8::2', 'PUBLIC'),
+    ];
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      ...ipv4Public,
+      ...ipv6Public,
+    ];
+    expect(buildWanEdges(devices)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('ipv6_public_devices_below_cap_receive_wan_edges', () => {
+    // A mix of IPv4 and IPv6 PUBLIC devices within cap → all get edges.
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      makeDevice(2, '8.8.8.8', 'PUBLIC'),
+      makeDevice(3, '2001:db8::1', 'PUBLIC'),
+    ];
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(2);
+    expect(edges.every(e => e.data.source === '1')).toBe(true);
+    expect(edges.map(e => e.data.target).sort()).toEqual(['2', '3']);
+  });
 });

@@ -171,6 +171,50 @@ class ConnTableReaderTest {
         assertThat(ips(result)).containsExactly("1.1.1.1", "2.2.2.2");
     }
 
+    /**
+     * Wrong-length hex address — {@code decodeHexAddress} returns null when the hex
+     * portion of the remote address is neither 8 (IPv4) nor 32 (IPv6) chars. The row
+     * must be silently skipped while the next valid row is still returned.
+     *
+     * <p>This exercises the {@code return null} branch at the bottom of
+     * {@code decodeHexAddress} (the "unexpected length" guard) which is not reached by
+     * the existing malformed-line test (that test has non-hex chars, triggering
+     * {@code NumberFormatException}, not the length guard).
+     *
+     * <p>A 6-character hex portion ("AABBCC") is neither 8 nor 32 chars and contains
+     * only valid hex digits, so it reaches the length guard and returns null.
+     */
+    @Test
+    void read_wrongLengthHexAddress_skippedWithoutThrowing() throws IOException {
+        // Row 0: 6-char hex remote (neither 8 nor 32) — wrong-length guard → skip
+        // Row 1: valid ESTABLISHED row → kept (8.8.8.8)
+        List<DiscoveredNeighbor> result = readWith("tcp", String.join("\n",
+            TCP_HEADER,
+            "   0: 3500A8C0:0016 AABBCC:01BB 01 00000000:00000000 00:00000000 00000000     0        0 1 1",
+            "   1: 3500A8C0:A1B2 08080808:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 12347 2 0000000000000000 20 4 30 10 -1",
+            ""));
+
+        assertThat(ips(result)).containsExactly("8.8.8.8");
+    }
+
+    /**
+     * 16-char hex (halfway to IPv6 length) — also wrong-length, also skipped.
+     * Ensures the guard is not confused between IPv4 (8), some intermediate value (16),
+     * and IPv6 (32).
+     */
+    @Test
+    void read_intermediateHexLength_skippedWithoutThrowing() throws IOException {
+        // Row 0: 16-char hex (not 8 or 32) — wrong-length guard → skip
+        // Row 1: valid → kept (1.1.1.1)
+        List<DiscoveredNeighbor> result = readWith("tcp", String.join("\n",
+            TCP_HEADER,
+            "   0: 3500A8C0:0016 AABBCCDDEEFF0011:01BB 01 00000000:00000000 00:00000000 00000000     0        0 1 1",
+            "   1: 3500A8C0:A1B2 01010101:01BB 01 00000000:00000000 02:00012345 00000000  1000        0 12347 2 0000000000000000 20 4 30 10 -1",
+            ""));
+
+        assertThat(ips(result)).containsExactly("1.1.1.1");
+    }
+
     @Test
     void read_remotesAtOrBelowCap_returnedUntruncated() throws IOException {
         List<DiscoveredNeighbor> result = readWith("tcp", String.join("\n",
