@@ -2,6 +2,9 @@ package io.castellum.discovery;
 
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+
 /**
  * Stateless first-match rule chain that buckets an IPv4 or IPv6 string into a
  * {@link DiscoveryScope}. Malformed input falls through to
@@ -34,7 +37,13 @@ public class DiscoveryScopeClassifier {
         if (ip == null || ip.isBlank()) return DiscoveryScope.PUBLIC;
         String s = ip.trim();
         // A colon means IPv6 — handled by its own prefix chain below.
-        if (s.indexOf(':') >= 0) return classifyIpv6(s.toLowerCase());
+        if (s.indexOf(':') >= 0) {
+            String normalized = normalizeIpv6(s);
+            // IPv4-mapped literals (::ffff:a.b.c.d) collapse to a plain Inet4Address,
+            // leaving a colon-free dotted quad — bucket those via the IPv4 chain.
+            if (normalized.indexOf(':') >= 0) return classifyIpv6(normalized);
+            s = normalized;
+        }
         // Cheap shape check — anything else falls through.
         int dots = 0;
         for (int i = 0; i < s.length(); i++) if (s.charAt(i) == '.') dots++;
@@ -57,12 +66,43 @@ public class DiscoveryScopeClassifier {
     }
 
     /**
-     * IPv6 bucketing by well-known prefix. Dependency-free string checks (no
-     * {@code InetAddress} — this class is deliberately allocation-light);
-     * {@code s} is already trimmed and lowercased.
+     * Normalize an IPv6 literal to the canonical form produced by
+     * {@link InetAddress#getHostAddress()} — fully expanded, e.g.
+     * {@code "0:0:0:0:0:0:0:1"} for {@code ::1}.
+     *
+     * <p>Producers such as {@code ConnTableReader} and {@code PcapSniffer} emit
+     * that form already; normalising here makes compressed literals from any
+     * other caller bucket identically.
+     *
+     * <p>An IPv4-mapped literal ({@code ::ffff:a.b.c.d}) parses to a plain
+     * {@link java.net.Inet4Address}, so the result may be a colon-free dotted
+     * quad — the caller routes that through the IPv4 chain.
+     *
+     * <p>The input is always a literal address (a colon-containing string can
+     * never be a resolvable hostname), so {@code InetAddress.getByName} never
+     * performs a DNS lookup; malformed literals throw and fall back unchanged.
+     */
+    private static String normalizeIpv6(String s) {
+        try {
+            return InetAddress.getByName(s).getHostAddress().toLowerCase(java.util.Locale.ROOT);
+        } catch (UnknownHostException e) {
+            // Malformed — return as-is; classifyIpv6 will fall through to PUBLIC.
+            return s.toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    /**
+     * IPv6 bucketing by well-known prefix. Dependency-free string checks;
+     * {@code s} is trimmed, lowercased, contains at least one colon, and is
+     * normalised to the expanded {@link InetAddress#getHostAddress()} form when
+     * the literal parsed (malformed input falls through here unchanged).
+     *
+     * <p>Loopback is matched in both the expanded form ({@code "0:0:0:0:0:0:0:1"},
+     * the normalizer's output) and the compressed form ({@code "::1"}, reachable
+     * only via the malformed-fallback path — kept as a cheap belt-and-braces check).
      */
     private DiscoveryScope classifyIpv6(String s) {
-        if (s.equals("::1")) return DiscoveryScope.LOOPBACK;
+        if (s.equals("::1") || s.equals("0:0:0:0:0:0:0:1")) return DiscoveryScope.LOOPBACK;
         int colon = s.indexOf(':');
         String hextet = s.substring(0, colon);
         // Both prefixes below have a full 4-hex-digit first hextet (no droppable

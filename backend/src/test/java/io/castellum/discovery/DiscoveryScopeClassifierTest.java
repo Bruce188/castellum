@@ -5,6 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.net.InetAddress;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,6 +70,58 @@ class DiscoveryScopeClassifierTest {
             // PUBLIC — fec0 is outside fe80::/10; fe8 is a short (non-matching) hextet
             Arguments.of("fec0::1", DiscoveryScope.PUBLIC),
             Arguments.of("fe8::1", DiscoveryScope.PUBLIC)
+        );
+    }
+
+    /**
+     * Producer-form (uncompressed) IPv6 cases: ConnTableReader and PcapSniffer emit
+     * InetAddress.getHostAddress() which may produce the fully-expanded form of an
+     * address (e.g. "0:0:0:0:0:0:0:1" instead of "::1"). The classifier must
+     * normalise before bucketing so these cases are NOT mis-classified as PUBLIC.
+     */
+    @ParameterizedTest
+    @MethodSource("ipv6ProducerForm")
+    void classify_ipv6ProducerForm_returnsExpectedBucket(String ipv6, DiscoveryScope expected) {
+        assertThat(classifier.classify(ipv6)).isEqualTo(expected);
+    }
+
+    static Stream<Arguments> ipv6ProducerForm() throws Exception {
+        return Stream.of(
+            // Loopback — producer may emit the expanded form of ::1
+            Arguments.of(InetAddress.getByName("::1").getHostAddress(), DiscoveryScope.LOOPBACK),
+            // Link-local — producer may emit full form of fe80::1
+            Arguments.of(InetAddress.getByName("fe80::1").getHostAddress(), DiscoveryScope.LINK_LOCAL),
+            // ULA / HOME — producer may emit full form of fd00::1
+            Arguments.of(InetAddress.getByName("fd00::1").getHostAddress(), DiscoveryScope.HOME),
+            // Global unicast — must still classify PUBLIC
+            Arguments.of(InetAddress.getByName("2001:4860:4860::8888").getHostAddress(), DiscoveryScope.PUBLIC)
+        );
+    }
+
+    /**
+     * IPv4-mapped IPv6 literals: InetAddress collapses {@code ::ffff:a.b.c.d} to a
+     * plain Inet4Address (no colons), so the classifier must route the result through
+     * the IPv4 chain — not crash in classifyIpv6, and not blanket-classify PUBLIC.
+     * Malformed colon-bearing strings must fall back to the prefix chain unharmed.
+     */
+    @ParameterizedTest
+    @MethodSource("ipv6V4MappedAndMalformed")
+    void classify_ipv6V4MappedAndMalformed_returnsExpectedBucket(String ip, DiscoveryScope expected) {
+        assertThat(classifier.classify(ip)).isEqualTo(expected);
+    }
+
+    static Stream<Arguments> ipv6V4MappedAndMalformed() {
+        return Stream.of(
+            // v4-mapped private — collapses to 192.168.1.1 → HOME via the IPv4 chain
+            Arguments.of("::ffff:192.168.1.1", DiscoveryScope.HOME),
+            // same address in expanded hex-group form
+            Arguments.of("0:0:0:0:0:ffff:c0a8:101", DiscoveryScope.HOME),
+            // v4-mapped loopback and public
+            Arguments.of("::ffff:127.0.0.1", DiscoveryScope.LOOPBACK),
+            Arguments.of("::ffff:8.8.8.8", DiscoveryScope.PUBLIC),
+            // malformed but colon-bearing — falls back to the string prefix chain
+            Arguments.of("fe80::zzzz", DiscoveryScope.LINK_LOCAL),
+            Arguments.of("not:an:ip", DiscoveryScope.PUBLIC)
         );
     }
 
