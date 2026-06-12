@@ -212,4 +212,135 @@ describe('<AttackGraphPage />', () => {
     await waitFor(() => expect(screen.getByTestId('attack-graph-error')).toBeInTheDocument());
     expect(screen.getByTestId('attack-graph-error').textContent).toContain('500');
   });
+
+  it('renders a specific degrade notice when the backend rejects with GRAPH_TOO_LARGE', async () => {
+    // Shape matches the client contract for non-OK responses: the rejection
+    // carries the HTTP status and the parsed JSON error body.
+    shortestPath.mockRejectedValueOnce(Object.assign(new Error('503 Service Unavailable'), {
+      status: 503,
+      body: {
+        error: 'GRAPH_TOO_LARGE',
+        message: 'device count 6200 exceeds castellum.graph.max-devices=5000',
+      },
+    }));
+
+    render(<AttackGraphPage isAdmin={true} />);
+    await waitFor(() => expect(listDevices).toHaveBeenCalled());
+
+    fireEvent.focus(screen.getByTestId('attack-graph-from-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-from-option-1')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-from-option-1'));
+    fireEvent.focus(screen.getByTestId('attack-graph-to-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-to-option-3')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-to-option-3'));
+    fireEvent.click(screen.getByTestId('attack-graph-compute-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('attack-graph-error')).toBeInTheDocument());
+    const text = screen.getByTestId('attack-graph-error').textContent ?? '';
+    // NOT the generic raw passthrough...
+    expect(text).not.toBe('503 Service Unavailable');
+    // ...but a specific explanation: the graph exceeds the device limit...
+    expect(text).toMatch(/too large|exceed/i);
+    expect(text).toMatch(/device/i);
+    expect(text).toMatch(/limit|max/i);
+    // ...with an actionable suggestion (narrow the fleet / raise the limit).
+    expect(text).toMatch(/narrow|reduce|raise|increase|refine/i);
+  });
+
+  it('keeps generic error text for a 503 that does NOT carry the GRAPH_TOO_LARGE code', async () => {
+    shortestPath.mockRejectedValueOnce(Object.assign(new Error('503 Service Unavailable'), {
+      status: 503,
+      body: { error: 'discovery_unavailable', message: 'collector offline' },
+    }));
+
+    render(<AttackGraphPage isAdmin={true} />);
+    await waitFor(() => expect(listDevices).toHaveBeenCalled());
+
+    fireEvent.focus(screen.getByTestId('attack-graph-from-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-from-option-1')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-from-option-1'));
+    fireEvent.focus(screen.getByTestId('attack-graph-to-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-to-option-3')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-to-option-3'));
+    fireEvent.click(screen.getByTestId('attack-graph-compute-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('attack-graph-error')).toBeInTheDocument());
+    const text = screen.getByTestId('attack-graph-error').textContent ?? '';
+    expect(text).toContain('503');
+    // The degrade copy is reserved for GRAPH_TOO_LARGE.
+    expect(text).not.toMatch(/too large|exceed/i);
+  });
+
+  it('appends the backend detail to the degrade copy when the 503 body carries a message', async () => {
+    shortestPath.mockRejectedValueOnce(Object.assign(new Error('503 Service Unavailable'), {
+      status: 503,
+      body: {
+        error: 'GRAPH_TOO_LARGE',
+        message: 'device count 6200 exceeds castellum.graph.max-devices=5000',
+      },
+    }));
+
+    render(<AttackGraphPage isAdmin={true} />);
+    await waitFor(() => expect(listDevices).toHaveBeenCalled());
+
+    fireEvent.focus(screen.getByTestId('attack-graph-from-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-from-option-1')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-from-option-1'));
+    fireEvent.focus(screen.getByTestId('attack-graph-to-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-to-option-3')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-to-option-3'));
+    fireEvent.click(screen.getByTestId('attack-graph-compute-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('attack-graph-error')).toBeInTheDocument());
+    const text = screen.getByTestId('attack-graph-error').textContent ?? '';
+    // The composed degrade copy is present...
+    expect(text).toMatch(/too large/i);
+    expect(text).toMatch(/narrow|raise/i);
+    // ...AND the backend's actionable numbers ride along.
+    expect(text).toContain('device count 6200 exceeds castellum.graph.max-devices=5000');
+  });
+
+  it('keeps the composed degrade copy unchanged when the 503 body has no message', async () => {
+    shortestPath.mockRejectedValueOnce(Object.assign(new Error('503 Service Unavailable'), {
+      status: 503,
+      body: { error: 'GRAPH_TOO_LARGE' },
+    }));
+
+    render(<AttackGraphPage isAdmin={true} />);
+    await waitFor(() => expect(listDevices).toHaveBeenCalled());
+
+    fireEvent.focus(screen.getByTestId('attack-graph-from-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-from-option-1')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-from-option-1'));
+    fireEvent.focus(screen.getByTestId('attack-graph-to-input'));
+    await waitFor(() => expect(screen.getByTestId('attack-graph-to-option-3')).toBeInTheDocument());
+    fireEvent.mouseDown(screen.getByTestId('attack-graph-to-option-3'));
+    fireEvent.click(screen.getByTestId('attack-graph-compute-btn'));
+
+    await waitFor(() => expect(screen.getByTestId('attack-graph-error')).toBeInTheDocument());
+    const text = screen.getByTestId('attack-graph-error').textContent ?? '';
+    expect(text).toMatch(/too large/i);
+    // No detail parenthetical when the backend supplied no message.
+    expect(text).not.toContain('(');
+  });
+
+  it('renders the degrade copy when the device load itself rejects with GRAPH_TOO_LARGE', async () => {
+    listDevices.mockRejectedValueOnce(Object.assign(new Error('503 Service Unavailable'), {
+      status: 503,
+      body: {
+        error: 'GRAPH_TOO_LARGE',
+        message: 'device count 6200 exceeds castellum.graph.max-devices=5000',
+      },
+    }));
+
+    render(<AttackGraphPage isAdmin={true} />);
+
+    await waitFor(() => expect(screen.getByTestId('attack-graph-error')).toBeInTheDocument());
+    const text = screen.getByTestId('attack-graph-error').textContent ?? '';
+    // The load path goes through the same translation as compute — never the
+    // raw passthrough message.
+    expect(text).not.toBe('503 Service Unavailable');
+    expect(text).toMatch(/too large/i);
+    expect(text).toContain('device count 6200');
+  });
 });

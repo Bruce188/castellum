@@ -24,11 +24,45 @@ const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080') as s
 const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 /** Delay before the single retry attempt. ~750ms keeps the worst-case latency under 1.5s. */
 const RETRY_BACKOFF_MS = 750;
+/**
+ * Cap on reading a non-OK response's error body. A gateway that returns 5xx
+ * headers but stalls the body stream must not hang the request forever — after
+ * this long the body is abandoned and the error throws without one.
+ */
+const ERROR_BODY_READ_TIMEOUT_MS = 2000;
+
+/** Parsed JSON error body from a non-OK response (GlobalExceptionHandler shape). */
+export interface ApiErrorBody {
+  error?: string;
+  message?: string;
+}
 
 /**
- * Single fetch attempt. Throws {@link Error} with the canonical
+ * Error thrown on non-OK responses. The message keeps the canonical
+ * {@code `${status} ${statusText}`} prefix (string-matching callers and
+ * {@link isRetryable} depend on it); {@code status} and {@code body} let
+ * pages branch on the machine-readable error code instead.
+ */
+export interface ApiError extends Error {
+  status: number;
+  /**
+   * Present only when a >= 500 error response carried a parseable JSON body.
+   * 4xx responses throw without reading the body, so this is always unset
+   * for client errors.
+   */
+  body?: ApiErrorBody;
+}
+
+/**
+ * Single fetch attempt. Throws {@link ApiError} with the canonical
  * {@code `${status} ${statusText}`} message on non-OK responses (after the 401
- * side-effect). Network failures bubble up as the underlying {@link TypeError}.
+ * side-effect), carrying the HTTP status. For >= 500 responses only, the
+ * parsed JSON error body is attached when one exists — server errors may
+ * carry machine-readable degrade codes (e.g. GRAPH_TOO_LARGE) that
+ * {@link isRetryable} and pages branch on. Client errors (4xx) throw
+ * immediately without reading the body, so they never stall on a
+ * slow-draining stream. Network failures bubble up as the underlying
+ * {@link TypeError}.
  */
 async function requestOnce<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
@@ -37,15 +71,62 @@ async function requestOnce<T>(path: string, init?: RequestInit): Promise<T> {
     ...((init?.headers as Record<string, string>) ?? {}),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const response = await fetch(`${BASE}${path}`, { ...init, headers });
-  if (response.status === 401) {
-    clearAuth();
-    throw new Error('401 Unauthorized — please sign in again');
+  // Owned controller so a wedged error-body read can be aborted below. A
+  // caller-supplied signal (discoverPassive / discoverDocker pass one) is
+  // composed rather than overridden: an abort on either side cancels the fetch.
+  const controller = new AbortController();
+  const callerSignal = init?.signal;
+  const relayAbort = () => controller.abort(callerSignal?.reason);
+  if (callerSignal != null) {
+    if (callerSignal.aborted) {
+      controller.abort(callerSignal.reason);
+    } else {
+      callerSignal.addEventListener('abort', relayAbort, { once: true });
+    }
   }
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+  try {
+    const response = await fetch(`${BASE}${path}`, { ...init, headers, signal: controller.signal });
+    if (response.status === 401) {
+      clearAuth();
+      throw new Error('401 Unauthorized — please sign in again');
+    }
+    if (!response.ok) {
+      const err = new Error(`${response.status} ${response.statusText}`) as ApiError;
+      err.status = response.status;
+      // 4xx: throw immediately with no body. The only body consumers are the
+      // retry carve-out in isRetryable (502/503/504) and the GRAPH_TOO_LARGE
+      // degrade branch (503) — server errors may carry machine-readable degrade
+      // codes, client errors don't, and waiting on a slow-draining 4xx body
+      // would stall callers that rely on the synchronous throw.
+      if (response.status < 500) throw err;
+      // 5xx: parse the body BEFORE throwing so the retry decision in request()
+      // can see deterministic error codes (e.g. GRAPH_TOO_LARGE). Non-JSON
+      // bodies simply leave `body` unset; a stalled body stream is abandoned
+      // after ERROR_BODY_READ_TIMEOUT_MS — the abort rejects the pending json()
+      // read (absorbed by its .catch) and releases the wedged stream.
+      let bodyTimer: ReturnType<typeof setTimeout> | undefined;
+      const body = await Promise.race([
+        response.json().catch(() => null),
+        new Promise<null>(resolve => {
+          bodyTimer = setTimeout(() => {
+            resolve(null);
+            controller.abort();
+          }, ERROR_BODY_READ_TIMEOUT_MS);
+        }),
+      ]) as ApiErrorBody | null;
+      clearTimeout(bodyTimer);
+      if (body !== null && typeof body === 'object') err.body = body;
+      throw err;
+    }
+    return (await response.json()) as T;
+  } finally {
+    // { once: true } removes the relay only if it FIRES — on a normal
+    // completion it stays attached, so a long-lived caller signal would
+    // accumulate one dead listener per request. Detach when the request
+    // settles either way; removing an already-fired or never-added listener
+    // is a no-op.
+    callerSignal?.removeEventListener('abort', relayAbort);
   }
-  return (await response.json()) as T;
 }
 
 /**
@@ -69,15 +150,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
-/** True iff {@code err} is a {@link TypeError} (network) or an HTTP 502/503/504 Error. */
+/** True iff {@code err} is a {@link TypeError} (network) or a transient HTTP 502/503/504 Error. */
 function isRetryable(err: unknown): boolean {
   if (err instanceof TypeError) return true;
   if (err instanceof Error) {
     // The status code lives at the start of the canonical error message
     // ({@code "503 Service Unavailable"}) — parse the leading integer and check
-    // it against the allow-list. Cheaper than introducing an ApiError subclass.
+    // it against the allow-list.
     const match = /^(\d{3})\s/.exec(err.message);
-    if (match) return RETRYABLE_STATUSES.has(Number(match[1]));
+    if (!match || !RETRYABLE_STATUSES.has(Number(match[1]))) return false;
+    // A 503 carrying GRAPH_TOO_LARGE is deterministic — the graph will be
+    // exactly as large after the backoff, so retrying only re-runs the
+    // expensive path computation for the same failure.
+    return (err as Partial<ApiError>).body?.error !== 'GRAPH_TOO_LARGE';
   }
   return false;
 }

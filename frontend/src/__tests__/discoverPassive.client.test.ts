@@ -61,24 +61,36 @@ describe('api.discoverPassive()', () => {
   // --- AC3 signal cases (RED: these fail until Task 1.1 adds the signal param) ---
 
   it('(signal-passthrough) passes AbortSignal to fetch init', async () => {
-    const mockFetch = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
-      new Response(
+    const controller = new AbortController();
+    // The client owns the signal handed to fetch (so it can abort a wedged
+    // error-body read) and COMPOSES the caller's signal into it: the caller's
+    // abort intent must reach the fetch WHILE the request is in flight. The
+    // relay is detached once the request settles, so the check has to happen
+    // inside the mocked fetch, not after the call returns.
+    let forwardedAbortedBefore: boolean | undefined;
+    let forwardedAbortedAfterCallerAbort: boolean | undefined;
+    const mockFetch = vi.spyOn(global, 'fetch').mockImplementationOnce(async (_url, init) => {
+      const forwarded = (init as RequestInit & { signal?: AbortSignal }).signal;
+      expect(forwarded).toBeInstanceOf(AbortSignal);
+      forwardedAbortedBefore = forwarded?.aborted;
+      controller.abort();
+      forwardedAbortedAfterCallerAbort = forwarded?.aborted;
+      return new Response(
         JSON.stringify({ discovered: 1, deviceIds: [1], perSourceCount: { ARP: 1 }, sweepId: 9 }),
         { status: 200, headers: { 'content-type': 'application/json' } }
-      )
-    );
+      );
+    });
 
-    const controller = new AbortController();
     await api.discoverPassive(
       { iface: 'eth0', durationSeconds: 30, sources: ['ARP'] },
       controller.signal,
     );
 
+    expect(forwardedAbortedBefore).toBe(false);
+    expect(forwardedAbortedAfterCallerAbort).toBe(true);
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/discovery/passive');
     expect(init?.method).toBe('POST');
-    // The signal must be forwarded to fetch — this FAILS until client.ts is updated
-    expect((init as RequestInit & { signal?: AbortSignal }).signal).toBe(controller.signal);
     // Core contract still holds
     const body = JSON.parse(init?.body as string);
     expect(body).toEqual({ iface: 'eth0', durationSeconds: 30, sources: ['ARP'] });
@@ -86,7 +98,7 @@ describe('api.discoverPassive()', () => {
     expect(headers['Authorization']).toBe('Bearer mock-token');
   });
 
-  it('(no-signal back-compat) omitting signal still works and fetch receives signal===undefined', async () => {
+  it('(no-signal back-compat) omitting signal still works and the forwarded signal never aborts spuriously', async () => {
     const mockFetch = vi.spyOn(global, 'fetch').mockResolvedValueOnce(
       new Response(
         JSON.stringify({ discovered: 0, deviceIds: [], perSourceCount: {}, sweepId: 10 }),
@@ -99,9 +111,11 @@ describe('api.discoverPassive()', () => {
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/discovery/passive');
     expect(init?.method).toBe('POST');
-    // When no signal is passed the init must not carry one (undefined or absent)
+    // The client always passes its own owned signal (used to release a wedged
+    // error-body stream); with no caller signal composed in, it must be live.
     const signal = (init as RequestInit & { signal?: AbortSignal }).signal;
-    expect(signal == null).toBe(true);
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
   });
 
   it('(abort-not-retried) AbortError rejects and fetch is called exactly once', async () => {

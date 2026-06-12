@@ -4,7 +4,39 @@ import { TopologyView } from '../components/TopologyView';
 import { type HighlightPath, makeEdgeKey, EDGE_STYLES } from '../components/topologyConstants';
 import { RiskTierKey } from '../components/RiskTierKey';
 import { api } from '../api/client';
+import type { ApiError } from '../api/client';
 import type { Device, DeviceRiskDto, HopDto, ShortestPathResponse } from '../api/types';
+
+/**
+ * Degrade copy for the backend's 503 GRAPH_TOO_LARGE response. Composed here
+ * (rather than passing the backend message through verbatim) so the operator
+ * gets an explanation plus a concrete next step.
+ */
+const GRAPH_TOO_LARGE_MESSAGE =
+  'The attack graph is too large to compute: the fleet exceeds the configured ' +
+  'device limit. Narrow the device scope or raise castellum.graph.max-devices.';
+
+/**
+ * Maps an unknown rejection to operator-facing error copy.
+ *
+ * <p>Total over any rejection value — a nullish or non-object rejection must
+ * still land in the generic branch, not crash the caller. Gates on the body
+ * code alone (not the HTTP status) so this stays in agreement with the
+ * client's no-retry carve-out, which fires on any of 502/503/504 — a
+ * status-rewriting proxy must not yield no-retry plus generic copy. When the
+ * backend supplied actionable detail (actual device count / configured cap)
+ * in {@code body.message}, it is appended to the composed degrade copy.
+ */
+function describeApiError(err: unknown, fallback: string): string {
+  const apiErr = (typeof err === 'object' && err !== null ? err : {}) as Partial<ApiError>;
+  if (apiErr.body?.error === 'GRAPH_TOO_LARGE') {
+    const detail = typeof apiErr.body.message === 'string' && apiErr.body.message.length > 0
+      ? ` (${apiErr.body.message})`
+      : '';
+    return GRAPH_TOO_LARGE_MESSAGE + detail;
+  }
+  return err instanceof Error ? err.message : fallback;
+}
 
 const EDGE_KEY_ENTRIES: ReadonlyArray<{ key: keyof typeof EDGE_STYLES; label: string }> = [
   { key: 'subnet',       label: 'Subnet link' },
@@ -59,7 +91,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
         if (cancelled) return;
         setRisksById(map);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'load failed');
+        if (!cancelled) setError(describeApiError(err, 'load failed'));
       } finally {
         if (!cancelled) setRisksLoading(false);
       }
@@ -93,7 +125,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
       const result = await api.shortestPath({ from: fromId, to: toId });
       setResponse(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'compute failed');
+      setError(describeApiError(err, 'compute failed'));
     } finally {
       setLoading(false);
     }

@@ -69,4 +69,85 @@ describe('api.shortestPath()', () => {
     );
     await expect(api.shortestPath({ from: 1, to: 1 })).rejects.toThrow('400');
   });
+
+  describe('non-OK error surfacing', () => {
+    it('rejects a 4xx with the HTTP status and NO body — client errors throw before the body is read', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: 'VALIDATION_FAILED', message: 'from and to must differ' }),
+          { status: 400, statusText: 'Bad Request', headers: { 'content-type': 'application/json' } }
+        )
+      );
+
+      const err = await api.shortestPath({ from: 1, to: 1 }).then(
+        () => { throw new Error('expected rejection'); },
+        (e: unknown) => e as Error & { status?: number; body?: unknown },
+      );
+      // Canonical `${status} ${statusText}` prefix is preserved — isRetryable()
+      // and the existing string-matching callers depend on it.
+      expect(err.message).toMatch(/^400/);
+      expect(err.status).toBe(400);
+      // Body parsing is reserved for >= 500 responses (machine-readable
+      // degrade codes); a 4xx rejection carries no body even when the
+      // response held parseable JSON.
+      expect(err.body).toBeUndefined();
+    });
+
+    it('rejects a 404 immediately even when the body stream never resolves', async () => {
+      vi.useFakeTimers();
+      try {
+        const wedged = {
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          json: () => new Promise<never>(() => { /* never settles */ }),
+        } as unknown as Response;
+        vi.spyOn(global, 'fetch').mockResolvedValueOnce(wedged);
+
+        // No timer advancement here: if the 4xx path still raced the wedged
+        // body against ERROR_BODY_READ_TIMEOUT_MS, this await would hang to
+        // the test timeout instead of settling immediately.
+        await expect(api.shortestPath({ from: 1, to: 999 })).rejects.toMatchObject({
+          message: expect.stringMatching(/^404/),
+          status: 404,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects with status 503 and the GRAPH_TOO_LARGE code from the backend 503 body', async () => {
+      // Backend contract (GlobalExceptionHandler): HTTP 503 with
+      // { error: "GRAPH_TOO_LARGE", message: "device count N exceeds castellum.graph.max-devices=C" }.
+      vi.spyOn(global, 'fetch').mockImplementation(async () =>
+        new Response(
+          JSON.stringify({
+            error: 'GRAPH_TOO_LARGE',
+            message: 'device count 6200 exceeds castellum.graph.max-devices=5000',
+          }),
+          { status: 503, statusText: 'Service Unavailable', headers: { 'content-type': 'application/json' } }
+        )
+      );
+
+      await expect(api.shortestPath({ from: 1, to: 3 })).rejects.toMatchObject({
+        message: expect.stringMatching(/^503/),
+        status: 503,
+        body: {
+          error: 'GRAPH_TOO_LARGE',
+          message: expect.stringContaining('max-devices'),
+        },
+      });
+    });
+
+    it('still carries the HTTP status when the error body is not JSON', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce(
+        new Response('Not Found', { status: 404, statusText: 'Not Found' })
+      );
+
+      await expect(api.shortestPath({ from: 1, to: 999 })).rejects.toMatchObject({
+        message: expect.stringMatching(/^404/),
+        status: 404,
+      });
+    });
+  });
 });
