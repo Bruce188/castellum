@@ -85,3 +85,84 @@ describe('<DevicePicker />', () => {
     });
   });
 });
+
+/** Builds a device whose hostname (`node-NN`) matches the query "node". */
+function makeDevice(id: number): Device {
+  return {
+    id,
+    ipAddress: `10.0.0.${id}`,
+    hostname: `node-${String(id).padStart(2, '0')}`,
+    macAddress: null,
+    firstSeen: null,
+    lastSeen: null,
+    criticality: 'LOW',
+    discoveryScope: 'HOME',
+    lastSeenIface: null,
+    discoverySource: null,
+    serviceCount: 0,
+    osName: null,
+    osAccuracy: null,
+    osCpe: null,
+    publishesHostPort: false,
+    deviceRole: 'UNKNOWN',
+    originHostIp: 'local',
+    originHostName: null,
+    networkName: null,
+  };
+}
+
+describe('<DevicePicker /> 50-option render cap overflow', () => {
+  it('shows an overflow footer with the hidden-match count when a query matches more than 50 devices', async () => {
+    const fleet = Array.from({ length: 60 }, (_, i) => makeDevice(i + 1));
+    render(
+      <DevicePicker devices={fleet} value={null} onChange={vi.fn()} testId="picker" />
+    );
+    fireEvent.focus(screen.getByTestId('picker-input'));
+    fireEvent.change(screen.getByTestId('picker-input'), { target: { value: 'node' } });
+    await waitFor(() => expect(screen.getByTestId('picker-list')).toBeInTheDocument());
+
+    // Render cap pinned: only 50 of the 60 matches become DOM rows.
+    expect(screen.getAllByTestId(/^picker-option-/)).toHaveLength(50);
+
+    // Overflow affordance: tells the operator how much is hidden (counts, not exact copy).
+    const footer = screen.getByTestId('picker-overflow');
+    expect(footer.textContent).toMatch(/\b50\b/);
+    expect(footer.textContent).toMatch(/\b60\b/);
+  });
+
+  it('shows the overflow footer on focus with an empty query when the fleet exceeds the cap', async () => {
+    const fleet = Array.from({ length: 60 }, (_, i) => makeDevice(i + 1));
+    render(
+      <DevicePicker devices={fleet} value={null} onChange={vi.fn()} testId="picker" />
+    );
+    fireEvent.focus(screen.getByTestId('picker-input'));
+    await waitFor(() => expect(screen.getByTestId('picker-list')).toBeInTheDocument());
+
+    expect(screen.getAllByTestId(/^picker-option-/)).toHaveLength(50);
+    const footer = screen.getByTestId('picker-overflow');
+    expect(footer.textContent).toMatch(/\b50\b/);
+    expect(footer.textContent).toMatch(/\b60\b/);
+  });
+
+  it('renders NO overflow footer when matches exactly fill the cap (boundary: 50 of 50)', async () => {
+    const fleet = Array.from({ length: 50 }, (_, i) => makeDevice(i + 1));
+    render(
+      <DevicePicker devices={fleet} value={null} onChange={vi.fn()} testId="picker" />
+    );
+    fireEvent.focus(screen.getByTestId('picker-input'));
+    await waitFor(() => expect(screen.getByTestId('picker-list')).toBeInTheDocument());
+
+    expect(screen.getAllByTestId(/^picker-option-/)).toHaveLength(50);
+    expect(screen.queryByTestId('picker-overflow')).not.toBeInTheDocument();
+  });
+
+  it('renders NO overflow footer when matches fit comfortably under the cap', async () => {
+    render(
+      <DevicePicker devices={DEVICES} value={null} onChange={vi.fn()} testId="picker" />
+    );
+    fireEvent.focus(screen.getByTestId('picker-input'));
+    await waitFor(() => expect(screen.getByTestId('picker-list')).toBeInTheDocument());
+
+    expect(screen.queryByTestId('picker-overflow')).not.toBeInTheDocument();
+  });
+});

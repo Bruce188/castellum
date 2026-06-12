@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../hooks/useAuth', () => ({
   getToken: () => 'mock-token',
@@ -138,5 +138,96 @@ describe('request() retry wrapper', () => {
 
     await expect(api.deviceRisk(1)).rejects.toThrow('401 Unauthorized');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A 503 carrying the GRAPH_TOO_LARGE error code is DETERMINISTIC — the graph
+ * will be exactly as large 750 ms later, so re-running the expensive path
+ * computation is pure waste. The wrapper must surface it immediately (one
+ * fetch, no backoff). A 503 with any OTHER body keeps the transient
+ * retry-once semantics pinned by the suite above.
+ */
+describe('request() 503 GRAPH_TOO_LARGE handling', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does NOT retry a 503 whose body carries error GRAPH_TOO_LARGE — exactly one fetch, no backoff', async () => {
+    // Fresh Response per call: if a (wrong) retry fires anyway, it must not
+    // crash on an already-consumed body — it should fail the call-count check.
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          error: 'GRAPH_TOO_LARGE',
+          message: 'device count 6200 exceeds castellum.graph.max-devices=5000',
+        }),
+        { status: 503, statusText: 'Service Unavailable', headers: { 'content-type': 'application/json' } }
+      )
+    );
+
+    // Capture the settlement without awaiting, so we can drain any (wrongly)
+    // scheduled backoff timers before asserting.
+    const outcome = api.shortestPath({ from: 1, to: 3 }).then(
+      () => null,
+      (err: unknown) => err
+    );
+    await vi.runAllTimersAsync();
+    const err = await outcome;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(Error);
+    const apiErr = err as Error & { status?: number; body?: { error?: string } };
+    expect(apiErr.message).toMatch(/^503/);
+    expect(apiErr.status).toBe(503);
+    expect(apiErr.body?.error).toBe('GRAPH_TOO_LARGE');
+  });
+
+  it('still retries once on a 503 whose JSON body carries a DIFFERENT error code', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockImplementationOnce(async () =>
+        new Response(
+          JSON.stringify({ error: 'discovery_unavailable', message: 'collector offline' }),
+          { status: 503, statusText: 'Service Unavailable', headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockImplementationOnce(async () =>
+        new Response(
+          JSON.stringify({ deviceId: 7, score: '6.25', topCveIds: [] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+
+    const outcome = api.deviceRisk(7);
+    await vi.runAllTimersAsync();
+    const out = await outcome;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(out.deviceId).toBe(7);
+  });
+
+  it('still retries once on a 503 with a non-JSON body', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch')
+      .mockImplementationOnce(async () =>
+        new Response('boom', { status: 503, statusText: 'Service Unavailable' })
+      )
+      .mockImplementationOnce(async () =>
+        new Response(
+          JSON.stringify({ deviceId: 1, score: '0.00', topCveIds: [] }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+
+    const outcome = api.deviceRisk(1);
+    await vi.runAllTimersAsync();
+    const out = await outcome;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(out.deviceId).toBe(1);
   });
 });

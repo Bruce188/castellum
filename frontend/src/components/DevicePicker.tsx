@@ -12,6 +12,13 @@ interface Props {
 }
 
 /**
+ * Max options rendered in the dropdown so an unfiltered fleet of thousands
+ * does not blow up the DOM. When matches exceed it, an overflow footer tells
+ * the operator how many are hidden.
+ */
+const OPTION_RENDER_CAP = 50;
+
+/**
  * Autocomplete combo box that filters a device list by hostname OR IPv4 address.
  *
  * <p>Usage: pair with a parent component owning the device list and the
@@ -19,8 +26,8 @@ interface Props {
  * dropdown-visible state; it commits a selection upward via {@link Props#onChange}.
  *
  * <p>Filtering is case-insensitive on hostname and substring-match on IP. The
- * dropdown is capped at 50 entries so an unfiltered fleet of thousands does not
- * blow up the DOM.
+ * dropdown is capped at {@link OPTION_RENDER_CAP} entries; an overflow footer
+ * shows how many matches are hidden.
  */
 export function DevicePicker({ devices, value, onChange, placeholder, testId, label }: Props) {
   const reactId = useId();
@@ -43,15 +50,15 @@ export function DevicePicker({ devices, value, onChange, placeholder, testId, la
       : '';
 
   const lowerQuery = query.toLowerCase();
-  const matches = useMemo(() => {
-    if (!open) return [] as Device[];
-    if (query.length === 0) return devices.slice(0, 50);
-    return devices
-      .filter(d =>
-        (d.hostname?.toLowerCase().includes(lowerQuery) ?? false) ||
-        d.ipAddress.toLowerCase().includes(lowerQuery)
-      )
-      .slice(0, 50);
+  const { matches, matchCount } = useMemo(() => {
+    if (!open) return { matches: [] as Device[], matchCount: 0 };
+    const filtered = query.length === 0
+      ? devices
+      : devices.filter(d =>
+          (d.hostname?.toLowerCase().includes(lowerQuery) ?? false) ||
+          d.ipAddress.toLowerCase().includes(lowerQuery)
+        );
+    return { matches: filtered.slice(0, OPTION_RENDER_CAP), matchCount: filtered.length };
   }, [devices, lowerQuery, open, query.length]);
 
   function commit(id: number | null) {
@@ -123,6 +130,14 @@ export function DevicePicker({ devices, value, onChange, placeholder, testId, la
               </button>
             </li>
           ))}
+          {matchCount > matches.length && (
+            <li
+              data-testid={`${idPrefix}-overflow`}
+              className="sticky bottom-0 bg-white px-3 py-1.5 text-xs text-gray-500 border-t border-gray-100"
+            >
+              Showing {matches.length} of {matchCount} matches — refine your search to see the rest
+            </li>
+          )}
         </ul>
       )}
       {open && matches.length === 0 && query.length > 0 && (
