@@ -45,9 +45,8 @@ class PassiveDiscoveryServiceTest {
     @Mock private ArpReader arpReader;
     @Mock private MdnsProbe mdnsProbe;
     @Mock private PcapSniffer pcapSniffer;
-    @Mock private LldpDecoder lldpDecoder;
     @Mock private LldpCapture lldpCapture;
-    @Mock private CdpDecoder cdpDecoder;
+    @Mock private CdpCapture cdpCapture;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
     @Mock private DeviceUpsertService upsertService;
@@ -61,7 +60,7 @@ class PassiveDiscoveryServiceTest {
     void setUp() {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         service = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false /* lldpEnabled */,
@@ -270,7 +269,7 @@ class PassiveDiscoveryServiceTest {
     void sweep_pcapDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
         // Build a service variant with pcapEnabled=false
         PassiveDiscoveryService disabled = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false, false, false, true, clock);
@@ -286,7 +285,7 @@ class PassiveDiscoveryServiceTest {
     void sweep_connTableDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
         // Build a service variant with connTableEnabled=false
         PassiveDiscoveryService disabled = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false, false, true, false, clock);
@@ -468,7 +467,7 @@ class PassiveDiscoveryServiceTest {
     /** Service variant with the LLDP feature flag enabled (mirrors the disabled-flag variants above). */
     private PassiveDiscoveryService lldpEnabledService() {
         return new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             true /* lldpEnabled */, false, true, true, clock);
@@ -650,5 +649,196 @@ class PassiveDiscoveryServiceTest {
             .as("LLDP sysname must backfill onto the surviving real-IP row")
             .isEqualTo("switch01");
         assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:ff");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Slice 6 — CDP capture dispatch + MAC-only neighbor persistence
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** Service variant with the CDP feature flag enabled (mirrors lldpEnabledService above). */
+    private PassiveDiscoveryService cdpEnabledService() {
+        return new PassiveDiscoveryService(
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
+            connTableReader, gatewayProbe,
+            upsertService, auditService, recorder,
+            false /* lldpEnabled */, true /* cdpEnabled */, true, true, clock);
+    }
+
+    /**
+     * CDP enabled + iface given: the sweep must dispatch {@code cdpCapture.capture(iface,
+     * duration)} (NOT the old decoder stub) and flow the captured neighbors into upsertAll.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_cdpEnabledWithIface_dispatchesCaptureAndUpsertsNeighbors() throws Exception {
+        PassiveDiscoveryService cdpService = cdpEnabledService();
+        when(cdpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor("192.168.1.20", "00:1b:54:ab:cd:ef", null, null, "eth0", "switch-cdp-01")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.CDP));
+        PassiveDiscoveryResponse resp = cdpService.sweep(req);
+
+        verify(cdpCapture, times(1)).capture(eq("eth0"), eq(5));
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress()).isEqualTo("192.168.1.20");
+        assertThat(batch.get(0).macAddress()).isEqualTo("00:1b:54:ab:cd:ef");
+        assertThat(batch.get(0).hostname()).isEqualTo("switch-cdp-01");
+        assertThat(resp.perSourceCount().get(DiscoverySource.CDP)).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(1);
+    }
+
+    /**
+     * Intake validation (mirrors the PCAP/LLDP blocks): CDP enabled + CDP requested +
+     * null/blank iface must throw BEFORE recorder.start — invalid input produces no
+     * discovery_sweep row.
+     */
+    @Test
+    void sweep_cdpEnabledRequestedWithBlankIface_throwsBeforeSweepRowOpened() {
+        PassiveDiscoveryService cdpService = cdpEnabledService();
+
+        PassiveDiscoveryRequest nullIface = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.CDP));
+        assertThatThrownBy(() -> cdpService.sweep(nullIface))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("interface");
+
+        PassiveDiscoveryRequest blankIface = new PassiveDiscoveryRequest("   ", 5, List.of(DiscoverySource.CDP));
+        assertThatThrownBy(() -> cdpService.sweep(blankIface))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("interface");
+
+        verify(recorder, never()).start(anyString(), any(), anyString());
+    }
+
+    /**
+     * Disabled-flag soft-skip stays: CDP requested with cdpEnabled=false must complete the
+     * sweep without ever touching the capture collaborator (regression guard over the rewrite
+     * of the CDP dispatch case).
+     */
+    @Test
+    void sweep_cdpDisabledByFlag_captureNeverInvoked() throws Exception {
+        // Default service variant has cdpEnabled=false
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.CDP));
+        PassiveDiscoveryResponse resp = service.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(0);
+        org.mockito.Mockito.verifyNoInteractions(cdpCapture);
+    }
+
+    /**
+     * Drop-site relaxation for CDP: a MAC-only neighbor (ip null, mac set) must NOT be
+     * dropped — it reaches upsertAll keyed by the deterministic placeholder IP. The literal
+     * {@code "mac:aa-bb-cc-dd-ee-ff"} (lowercase, colons → dashes) pins the convention itself.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_cdpMacOnlyNeighbor_upsertedWithPlaceholderIp() throws Exception {
+        PassiveDiscoveryService cdpService = cdpEnabledService();
+        when(cdpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, "aa:bb:cc:dd:ee:ff", null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.CDP));
+        PassiveDiscoveryResponse resp = cdpService.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress())
+            .as("MAC-only neighbor must be keyed by the synthetic placeholder IP")
+            .isEqualTo("mac:aa-bb-cc-dd-ee-ff");
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:ff");
+        assertThat(resp.perSourceCount().get(DiscoverySource.CDP)).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(1);
+    }
+
+    /**
+     * Capability failure: a PcapNativeException from the capture must surface as a
+     * DiscoveryUnavailableException carrying the CDP-specific message, and the sweep row
+     * must finish UNAVAILABLE (mirrors the PCAP/LLDP wrap contract).
+     */
+    @Test
+    void sweep_cdpPcapNativeException_wrappedInDiscoveryUnavailableAndRowUnavailable() throws Exception {
+        PassiveDiscoveryService cdpService = cdpEnabledService();
+        when(cdpCapture.capture(anyString(), anyInt()))
+            .thenThrow(new org.pcap4j.core.PcapNativeException("no pcap"));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.CDP));
+        assertThatThrownBy(() -> cdpService.sweep(req))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("CDP capture failed on interface 'eth0'");
+
+        verify(recorder).finish(eq(42L), eq("UNAVAILABLE"), eq(0), eq(0), isNull(), any());
+    }
+
+    /**
+     * Same sweep, same MAC: ARP supplies the real IP, CDP supplies a MAC-only row with a
+     * Device-ID hostname. ARP collected first — the later placeholder row must NOT overwrite
+     * the real-IP row, but its hostname must backfill onto it (pins mergeOnMac for the CDP
+     * source). Exactly one Discovery reaches upsertAll: real IP + CDP hostname.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_arpRealIpThenCdpMacOnly_singleRowRealIpWithCdpHostname() throws Exception {
+        PassiveDiscoveryService cdpService = cdpEnabledService();
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.0.7", "00:1b:54:ab:cd:ef", "0x1", "0x2", "eth0", null)
+        ));
+        when(cdpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, "00:1b:54:ab:cd:ef", null, null, "eth0", "switch-cdp-01")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(
+            "eth0", 5, List.of(DiscoverySource.ARP, DiscoverySource.CDP));
+        cdpService.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress())
+            .as("real ARP IP must survive a later MAC-only placeholder row")
+            .isEqualTo("10.0.0.7");
+        assertThat(batch.get(0).hostname())
+            .as("CDP Device-ID must backfill onto the surviving real-IP row")
+            .isEqualTo("switch-cdp-01");
+        assertThat(batch.get(0).macAddress()).isEqualTo("00:1b:54:ab:cd:ef");
+    }
+
+    /**
+     * Same collision, reverse collection order: CDP's MAC-only placeholder row lands first,
+     * then ARP's real-IP row arrives. The real IP must replace the placeholder while the CDP
+     * hostname still backfills. Order-independence is the point — same single-row outcome.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_cdpMacOnlyThenArpRealIp_singleRowRealIpWithCdpHostname() throws Exception {
+        PassiveDiscoveryService cdpService = cdpEnabledService();
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.0.7", "00:1b:54:ab:cd:ef", "0x1", "0x2", "eth0", null)
+        ));
+        when(cdpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, "00:1b:54:ab:cd:ef", null, null, "eth0", "switch-cdp-01")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(
+            "eth0", 5, List.of(DiscoverySource.CDP, DiscoverySource.ARP));
+        cdpService.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress())
+            .as("real ARP IP must replace an earlier MAC-only placeholder row")
+            .isEqualTo("10.0.0.7");
+        assertThat(batch.get(0).hostname())
+            .as("CDP Device-ID must backfill onto the surviving real-IP row")
+            .isEqualTo("switch-cdp-01");
+        assertThat(batch.get(0).macAddress()).isEqualTo("00:1b:54:ab:cd:ef");
     }
 }

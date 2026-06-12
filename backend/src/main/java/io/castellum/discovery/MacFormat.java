@@ -6,22 +6,25 @@ package io.castellum.discovery;
  * <p>Produces the lowercase colon-separated {@code %02x} form (e.g.
  * {@code "aa:bb:cc:dd:ee:ff"}) that matches the ARP-reader output, so MAC keys from
  * different sources collide correctly in {@link DeviceUpsertService}. Shared by
- * {@link LldpDecoder} (and the slice-6 CDP decoder).
+ * {@link LldpDecoder} and {@link CdpDecoder}.
  */
 final class MacFormat {
+
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     private MacFormat() {
         throw new UnsupportedOperationException("static utility");
     }
 
-    /** Formats exactly six wire bytes as lowercase colon-separated {@code %02x}. */
-    static String format(byte[] mac) {
+    /** Formats the six wire bytes at {@code from} as lowercase colon-separated {@code %02x}. */
+    static String format(byte[] buf, int from) {
         StringBuilder sb = new StringBuilder(17);
         for (int i = 0; i < 6; i++) {
             if (i > 0) {
                 sb.append(':');
             }
-            sb.append(String.format("%02x", mac[i] & 0xFF));
+            int b = buf[from + i] & 0xFF;
+            sb.append(HEX[b >>> 4]).append(HEX[b & 0x0F]);
         }
         return sb.toString();
     }

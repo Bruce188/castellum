@@ -997,21 +997,27 @@ aborts silently (abort ≠ failure) with the message <code>"managed-switch fixtu
 infrastructure. Once committed, the tests automatically progress from <em>skipped</em> to <em>executed</em> on the
 next <code>mvn test -Pmanaged-switch-lab</code> run.</p>
 <h3 id="per-decoder-contract">Per-decoder contract</h3>
-<p>The two test classes no longer share one contract. <code>LldpDecoder</code> is a functional IEEE 802.1AB
-implementation (see <a href="operations.html#13-lldp-passive-discovery">operations.html §13 — LLDP Passive Discovery</a>),
-while <code>CdpDecoder</code> still ships as a designed-but-untested stub.</p>
+<p>Both decoders are functional implementations: <code>LldpDecoder</code> implements IEEE 802.1AB,
+and <code>CdpDecoder</code> implements the Cisco Discovery Protocol (v1 and v2 — same TLV layout). The
+two acceptance test classes assert the same shape of real-decoder contract (see
+<a href="operations.html#13-lldp-passive-discovery">operations.html §13 — LLDP/CDP Passive Discovery</a>).</p>
 <p><strong>LLDP — real-decoder contract.</strong> <code>LldpProbeAcceptanceTest</code> exercises the live decoder:
 decoding the captured fixture must not throw, and every neighbor it yields must be well-formed —
 MAC address in canonical lowercase-colon form, management address parseable as an IP literal
 (IPv4 or IPv6), and the capture interface name propagated onto the neighbor.</p>
-<p><strong>CDP — stub contract.</strong> <code>CdpProbeAcceptanceTest</code> still pins the stub behaviour:</p>
-<div class="codehilite"><pre><span></span><code><span class="n">assertThatThrownBy</span><span class="p">(()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">decoder</span><span class="p">.</span><span class="na">decode</span><span class="p">(</span><span class="n">frameBytes</span><span class="p">))</span>
-<span class="w">    </span><span class="p">.</span><span class="na">isInstanceOf</span><span class="p">(</span><span class="n">UnsupportedOperationException</span><span class="p">.</span><span class="na">class</span><span class="p">)</span>
-<span class="w">    </span><span class="p">.</span><span class="na">hasMessageContaining</span><span class="p">(</span><span class="s">&quot;designed-but-untested&quot;</span><span class="p">);</span>
-</code></pre></div>
-
-<p>This assertion will need updating when <code>CdpDecoder</code> is replaced with a functional
-implementation, the same transition <code>LldpProbeAcceptanceTest</code> has already made.</p>
+<p><strong>CDP — real-decoder contract.</strong> <code>CdpProbeAcceptanceTest</code> asserts the same contract
+against <code>CdpDecoder</code>: decoding the captured fixture must not throw, and every neighbor it yields
+must have a MAC in canonical lowercase-colon form, an address parseable as an IP literal when
+non-null, and the capture interface name propagated onto the neighbor. The decoder's framing
+contract differs from LLDP's: CDP is not an ethertype protocol — it rides IEEE 802.3 frames
+with LLC/SNAP encapsulation (destination MAC <code>01:00:0c:cc:cc:cc</code>, SNAP OUI <code>00:00:0c</code>),
+plain or behind a single 802.1Q tag (QinQ is rejected). The SNAP protocol ID <code>0x2000</code> is a
+mandatory gate — VTP, DTP, PAgP, and UDLD share the same multicast group and are rejected by it.
+Each TLV's declared length includes its own 4-byte header (unlike LLDP's 9-bit value length); the
+Device-ID TLV maps to the hostname, the Addresses and Management-Address blocks yield the first
+IPv4 in stream order, and the MAC is taken from the Ethernet source address — CDP carries no
+chassis-MAC TLV. The checksum is ignored, and malformed input never throws: a truncated TLV or
+address block ends parsing while keeping the fields collected so far.</p>
 <h2 id="verifying-the-read-only-contract">Verifying the Read-Only Contract</h2>
 <p>The automated test <code>AcceptanceSmokeTest.ac2_surrogateAllProbesEmitOnlyReadFunctionCodes</code>
 asserts byte-by-byte that each probe transmits only read-class function codes against an

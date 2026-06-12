@@ -7,9 +7,10 @@ package io.castellum.discovery;
  *
  * <p>{@link #LLDP} and {@link #CDP} require both the corresponding feature flag
  * (<code>castellum.discovery.lldp.enabled</code> / <code>castellum.discovery.cdp.enabled</code>)
- * AND a managed-switch infrastructure advertising LLDP-MED or CDP frames. The decoders ship as
- * designed-but-untested skeletons that throw {@link UnsupportedOperationException} when invoked —
- * see the corresponding {@code @Service} Javadocs.
+ * AND a managed-switch infrastructure advertising LLDP or CDP frames. Both run a live
+ * promiscuous capture ({@link LldpCapture} / {@link CdpCapture}) feeding a frame-level TLV
+ * decoder ({@link LldpDecoder} / {@link CdpDecoder}); a neighbor without a management
+ * address persists as a MAC-keyed placeholder device — see the {@code @Service} Javadocs.
  */
 public enum DiscoverySource {
     ARP,

@@ -30,9 +30,8 @@ public class PassiveDiscoveryService {
     private final ArpReaderFactory arpFactory;
     private final MdnsProbe mdnsProbe;
     private final PcapSniffer pcapSniffer;
-    private final LldpDecoder lldpDecoder;
     private final LldpCapture lldpCapture;
-    private final CdpDecoder cdpDecoder;
+    private final CdpCapture cdpCapture;
     private final ConnTableReader connTableReader;
     private final GatewayProbe gatewayProbe;
     private final DeviceUpsertService upsertService;
@@ -48,9 +47,8 @@ public class PassiveDiscoveryService {
             ArpReaderFactory arpFactory,
             MdnsProbe mdnsProbe,
             PcapSniffer pcapSniffer,
-            LldpDecoder lldpDecoder,
             LldpCapture lldpCapture,
-            CdpDecoder cdpDecoder,
+            CdpCapture cdpCapture,
             ConnTableReader connTableReader,
             GatewayProbe gatewayProbe,
             DeviceUpsertService upsertService,
@@ -64,9 +62,8 @@ public class PassiveDiscoveryService {
         this.arpFactory = arpFactory;
         this.mdnsProbe = mdnsProbe;
         this.pcapSniffer = pcapSniffer;
-        this.lldpDecoder = lldpDecoder;
         this.lldpCapture = lldpCapture;
-        this.cdpDecoder = cdpDecoder;
+        this.cdpCapture = cdpCapture;
         this.connTableReader = connTableReader;
         this.gatewayProbe = gatewayProbe;
         this.upsertService = upsertService;
@@ -116,6 +113,13 @@ public class PassiveDiscoveryService {
                 && req.sources().contains(DiscoverySource.LLDP)
                 && (req.iface() == null || req.iface().isBlank())) {
             throw new DiscoveryUnavailableException("LLDP source requires interface name");
+        }
+        // Same intake validation for CDP — a live capture cannot open a null/blank interface.
+        // When CDP is disabled by flag the source is soft-skipped inside runSweep.
+        if (cdpEnabled
+                && req.sources().contains(DiscoverySource.CDP)
+                && (req.iface() == null || req.iface().isBlank())) {
+            throw new DiscoveryUnavailableException("CDP source requires interface name");
         }
 
         String joinedSources = req.sources().stream()
@@ -191,15 +195,18 @@ public class PassiveDiscoveryService {
                     }
                     case CDP -> {
                         if (!cdpEnabled) {
-                            log.warn("CDP source requested but disabled by feature flag; skipping");
-                        } else {
-                            log.warn("CDP enabled but untested — dispatching decoder (undefined behavior)");
-                            futures.add(executor.submit(() -> {
-                                cdpDecoder.decode(new byte[0]); // throws UnsupportedOperationException
-                                return List.<DiscoveredNeighbor>of();
-                            }));
-                            submittedSources.add(source);
+                            log.info("CDP source requested but disabled by feature flag; skipping");
+                            break;
                         }
+                        futures.add(executor.submit(() -> {
+                            try {
+                                return cdpCapture.capture(req.iface(), req.durationSeconds());
+                            } catch (PcapNativeException | NotOpenException e) {
+                                throw new DiscoveryUnavailableException(
+                                    "CDP capture failed on interface '" + req.iface() + "': " + e.getMessage(), e);
+                            }
+                        }));
+                        submittedSources.add(source);
                     }
                     case CONN_TABLE -> {
                         if (!connTableEnabled) {

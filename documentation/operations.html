@@ -675,9 +675,10 @@ footer {
       <li class="lvl-3"><a href="#role-values">Role values</a></li>
       <li class="lvl-3"><a href="#confidence-signal">Confidence signal</a></li>
       <li class="lvl-3"><a href="#where-the-role-surfaces">Where the role surfaces</a></li>
-      <li class="lvl-2"><a href="#13-lldp-passive-discovery">13. LLDP Passive Discovery</a></li>
-      <li class="lvl-3"><a href="#enabling-the-lldp-source">Enabling the LLDP source</a></li>
+      <li class="lvl-2"><a href="#13-lldp-passive-discovery">13. LLDP/CDP Passive Discovery</a></li>
+      <li class="lvl-3"><a href="#enabling-the-lldp-source">Enabling the LLDP and CDP sources</a></li>
       <li class="lvl-3"><a href="#what-an-lldp-frame-yields">What an LLDP frame yields</a></li>
+      <li class="lvl-3"><a href="#what-a-cdp-frame-yields">What a CDP frame yields</a></li>
       <li class="lvl-3"><a href="#bounding-the-lldp-capture-window">Bounding the capture window</a></li>
       <li class="lvl-3"><a href="#mac-only-neighbors-and-the-no-ip-placeholder">MAC-only neighbors and the &quot;no IP&quot; placeholder</a></li>
       <li class="lvl-3"><a href="#placeholder-scope-graph-and-export-semantics">Placeholder scope, graph, and export semantics</a></li>
@@ -993,7 +994,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <hr>
 <h2 id="5-runtime-flags-and-jvm-configuration">5. Runtime Flags and JVM Configuration</h2>
 <h3 id="cap-net-raw-for-passive-discovery">CAP_NET_RAW for passive discovery</h3>
-<p>Two passive-discovery sources open a raw libpcap capture handle and therefore require raw packet capture capability: the packet sniffer (<code>discovery/PcapSniffer</code>, PCAP source) and the LLDP capture (<code>discovery/LldpCapture</code>, LLDP source — see <a href="#13-lldp-passive-discovery">§13</a>). The other sources need no capability: <code>ArpCacheReader</code>, <code>ConnTableReader</code>, and <code>GatewayProbe</code> are plain <code>/proc/net</code> file reads, and <code>MdnsProbe</code> uses the JVM's standard multicast socket (see <a href="runtime-flags.html#discovery-variables">runtime-flags.html — DISCOVERY_* tunables</a>). In a Docker deployment, the capability is granted via:</p>
+<p>Three passive-discovery sources open a raw libpcap capture handle and therefore require raw packet capture capability: the packet sniffer (<code>discovery/PcapSniffer</code>, PCAP source) and the two neighbor-protocol captures (<code>discovery/LldpCapture</code>, LLDP source, and <code>discovery/CdpCapture</code>, CDP source — see <a href="#13-lldp-passive-discovery">§13</a>). The other sources need no capability: <code>ArpCacheReader</code>, <code>ConnTableReader</code>, and <code>GatewayProbe</code> are plain <code>/proc/net</code> file reads, and <code>MdnsProbe</code> uses the JVM's standard multicast socket (see <a href="runtime-flags.html#discovery-variables">runtime-flags.html — DISCOVERY_* tunables</a>). In a Docker deployment, the capability is granted via:</p>
 <div class="codehilite"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--cap-drop<span class="o">=</span>ALL<span class="w"> </span>--cap-add<span class="o">=</span>NET_RAW<span class="w"> </span>castellum:latest
 </code></pre></div>
 
@@ -1008,7 +1009,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 </code></pre></div>
 
 <p><strong>Do not use <code>--privileged</code>.</strong> The <code>--privileged</code> flag grants all capabilities including <code>SYS_ADMIN</code>, <code>SYS_PTRACE</code>, and others that are not needed and that expand the container's attack surface significantly. Only <code>NET_RAW</code> is required.</p>
-<p>If packet capture is not used, <code>NET_RAW</code> is not required. The application starts and operates normally without it; a sweep requesting the PCAP or LLDP source will fail with a permission error rather than silently, while the file-read sources (ARP, CONN_TABLE, GATEWAY) and mDNS keep working.</p>
+<p>If packet capture is not used, <code>NET_RAW</code> is not required. The application starts and operates normally without it; a sweep requesting the PCAP, LLDP, or CDP source will fail with a permission error rather than silently, while the file-read sources (ARP, CONN_TABLE, GATEWAY) and mDNS keep working.</p>
 <h3 id="pcap4j-jvm-flags">pcap4j JVM flags</h3>
 <p>pcap4j uses JNA (Java Native Access) to call libpcap. In some environments the following JVM system properties are required:</p>
 <div class="codehilite"><pre><span></span><code><span class="c1"># Specify libpcap shared library path (if not in default library path):</span>
@@ -1018,7 +1019,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 -Dorg.pcap4j.core.pcapDev<span class="o">=</span>eth0
 
 <span class="c1"># Promiscuous mode — no effect on Castellum&#39;s capture paths: the mode is fixed in code</span>
-<span class="c1"># (PcapSniffer opens non-promiscuous; LldpCapture opens promiscuous — see §13):</span>
+<span class="c1"># (PcapSniffer opens non-promiscuous; LldpCapture and CdpCapture open promiscuous — see §13):</span>
 -Dorg.pcap4j.core.pcapPromisc<span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
 
@@ -1535,16 +1536,16 @@ confirm against other signals (open services, OS fingerprint, origin host) befor
 the role as authoritative. An <code>UNKNOWN</code> role simply means the available signals were
 ambiguous; it is not itself a finding.</p>
 <hr>
-<h2 id="13-lldp-passive-discovery">13. LLDP Passive Discovery</h2>
-<p>LLDP (IEEE 802.1AB) is the link-layer protocol that managed switches, routers, and access points use to announce themselves to their directly connected neighbors. The LLDP passive-discovery source (<code>discovery/LldpCapture</code> + <code>discovery/LldpDecoder</code>) listens for those announcements during a sweep and turns each one into a device row. It is the source that surfaces L2 infrastructure: devices that never appear in the ARP cache because the Castellum host exchanges no IP traffic with them, and that an active scan cannot see at all when they advertise no IP address.</p>
-<h3 id="enabling-the-lldp-source">Enabling the LLDP source</h3>
-<p>The source is <strong>off by default</strong>. Three preconditions apply:</p>
+<h2 id="13-lldp-passive-discovery">13. LLDP/CDP Passive Discovery</h2>
+<p>LLDP (IEEE 802.1AB) is the link-layer protocol that managed switches, routers, and access points use to announce themselves to their directly connected neighbors; CDP (Cisco Discovery Protocol) is its proprietary counterpart, spoken by Cisco and Cisco-compatible infrastructure — many of those devices announce CDP only, or carry their management IP only in the CDP announcement. The two passive-discovery sources (<code>discovery/LldpCapture</code> + <code>discovery/LldpDecoder</code> for LLDP, <code>discovery/CdpCapture</code> + <code>discovery/CdpDecoder</code> for CDP) listen for those announcements during a sweep and turn each one into a device row. They are the sources that surface L2 infrastructure: devices that never appear in the ARP cache because the Castellum host exchanges no IP traffic with them, and that an active scan cannot see at all when they advertise no IP address.</p>
+<h3 id="enabling-the-lldp-source">Enabling the LLDP and CDP sources</h3>
+<p>Both sources are <strong>off by default</strong>, with an independent flag each. Three preconditions apply:</p>
 <ol>
-<li><strong>Feature flag</strong> — set <code>DISCOVERY_LLDP_ENABLED=true</code> (property <code>castellum.discovery.lldp.enabled</code>). While the flag is off, a sweep that requests the LLDP source soft-skips it (logged, no error) — the same behaviour as a disabled PCAP source.</li>
-<li><strong>Explicit interface</strong> — a sweep request that includes the LLDP source with a null or blank <code>iface</code> is rejected up front with the message <code>LLDP source requires interface name</code> (HTTP 503 <code>discovery_unavailable</code>; no <code>discovery_sweep</code> row is opened). Pick the interface from <code>GET /api/discovery/interfaces</code> (see <a href="ot-probes.html#passive-discovery-endpoints">ot-probes.html — passive discovery endpoints</a>) or from the discovery panel on the Settings page.</li>
-<li><strong>Privileges</strong> — the same requirement as the PCAP sniffer: <code>CAP_NET_RAW</code> (or root) plus <code>libpcap.so</code> (see <a href="#cap-net-raw-for-passive-discovery">§5</a>). Without the capability, an LLDP sweep fails with an explicit permission error rather than silently.</li>
+<li><strong>Feature flag</strong> — set <code>DISCOVERY_LLDP_ENABLED=true</code> (property <code>castellum.discovery.lldp.enabled</code>) and/or <code>DISCOVERY_CDP_ENABLED=true</code> (property <code>castellum.discovery.cdp.enabled</code>). While a flag is off, a sweep that requests that source soft-skips it (logged, no error) — the same behaviour as a disabled PCAP source.</li>
+<li><strong>Explicit interface</strong> — a sweep request that includes an enabled LLDP or CDP source with a null or blank <code>iface</code> is rejected up front with the message <code>LLDP source requires interface name</code> or <code>CDP source requires interface name</code> (HTTP 503 <code>discovery_unavailable</code>; no <code>discovery_sweep</code> row is opened). Pick the interface from <code>GET /api/discovery/interfaces</code> (see <a href="ot-probes.html#passive-discovery-endpoints">ot-probes.html — passive discovery endpoints</a>) or from the discovery panel on the Settings page.</li>
+<li><strong>Privileges</strong> — the same requirement as the PCAP sniffer: <code>CAP_NET_RAW</code> (or root) plus <code>libpcap.so</code> (see <a href="#cap-net-raw-for-passive-discovery">§5</a>). Without the capability, an LLDP or CDP sweep fails with an explicit permission error rather than silently.</li>
 </ol>
-<p>The capture runs for the sweep's <code>durationSeconds</code> window. The handle is always opened in <strong>promiscuous mode</strong> — LLDP frames are addressed to the multicast group <code>01:80:c2:00:00:0e</code> and may never be delivered to a non-promiscuous handle (the PCAP sniffer, by contrast, opens non-promiscuous). The BPF filter <code>ether proto 0x88cc</code> keeps every non-LLDP frame out of the JVM.</p>
+<p>Each capture runs for the sweep's <code>durationSeconds</code> window on its own handle — a sweep requesting both sources opens two independent libpcap handles on the interface. The handles are always opened in <strong>promiscuous mode</strong> — both protocols address a multicast group (<code>01:80:c2:00:00:0e</code> for LLDP, <code>01:00:0c:cc:cc:cc</code> for CDP) whose frames may never be delivered to a non-promiscuous handle (the PCAP sniffer, by contrast, opens non-promiscuous). The LLDP BPF filter <code>ether proto 0x88cc</code> keeps every non-LLDP frame out of the JVM. CDP has no ethertype to match — it rides 802.3/SNAP frames — so its filter is <code>ether dst 01:00:0c:cc:cc:cc</code>; the sibling Cisco control protocols on the same multicast group (VTP, DTP, PAgP, UDLD) pass that filter but are rejected by the decoder's SNAP protocol-ID gate (below).</p>
 <h3 id="what-an-lldp-frame-yields">What an LLDP frame yields</h3>
 <p><code>LldpDecoder</code> parses the LLDPDU of each captured Ethernet frame (ethertype <code>0x88cc</code>, plain or behind one 802.1Q VLAN tag) into at most one neighbor:</p>
 <table>
@@ -1559,18 +1560,32 @@ ambiguous; it is not itself a finding.</p>
 </tbody>
 </table>
 <p>The TTL TLV is deliberately ignored — even a TTL=0 shutdown announcement proves the device exists. Malformed input never throws: a wrong ethertype or a truncated frame yields nothing, and a TLV whose declared length overruns the captured buffer ends parsing while keeping the fields collected so far.</p>
+<h3 id="what-a-cdp-frame-yields">What a CDP frame yields</h3>
+<p><code>CdpDecoder</code> parses each captured frame into at most one neighbor. CDP framing differs from LLDP's: it is not an ethertype protocol but rides IEEE 802.3 frames with LLC/SNAP encapsulation (LLC <code>AA AA 03</code>, SNAP OUI <code>00:00:0c</code>), plain or behind one 802.1Q VLAN tag (QinQ is rejected). The SNAP protocol ID <code>0x2000</code> is a <strong>mandatory gate</strong>: VTP, DTP, PAgP, and UDLD frames share the <code>01:00:0c:cc:cc:cc</code> destination and reach the decoder through the capture filter, but fail the gate and yield nothing. CDP versions 1 and 2 share the TLV layout and both decode.</p>
+<table>
+<thead>
+<tr><th>Field / TLV</th><th>Device field</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Ethernet source MAC</td><td>MAC address</td><td>CDP carries no chassis-MAC TLV — the only MAC in a CDP frame is the Ethernet source (the announcing port's MAC). Stored in the same canonical lowercase colon-separated form as every other source.</td></tr>
+<tr><td>Device ID (TLV <code>0x0001</code>)</td><td>Hostname</td><td>Trimmed; blank → null.</td></tr>
+<tr><td>Addresses (TLV <code>0x0002</code>) / Management Address (TLV <code>0x0016</code>)</td><td>IP address</td><td>Both TLV types share one address-block format and the first IPv4 across both, in stream order, wins — many devices advertise the management IP only in <code>0x0016</code>. Non-IPv4 entries (IPv6, CLNS) are skipped by their self-describing size, not rejected.</td></tr>
+</tbody>
+</table>
+<p>Unlike LLDP, each CDP TLV's declared length includes its own 4-byte header, and the 802.3 length field bounds TLV parsing — the padding that extends short frames to 60 bytes is never parsed as TLVs. The checksum is deliberately not validated (Cisco's nonstandard odd-length checksum quirk would falsely reject valid frames from real devices, and the Ethernet FCS already caught transit corruption), and the version and TTL bytes are ignored. Malformed input never throws: a wrong length field, LLC header, or SNAP protocol ID yields nothing, and a truncated TLV or malformed address block ends parsing while keeping the fields collected so far.</p>
+<p>One consequence of the source-MAC rule: a switch's CDP port MAC can differ from its LLDP chassis MAC. When both protocols see the same switch and either announcement carries the management IP, the rows collapse onto one device (the IP is the join key); when <em>neither</em> yields an IP, two placeholder rows result — they self-heal into one as soon as either MAC appears with a real IP in a later sighting (typically ARP).</p>
 <h3 id="bounding-the-lldp-capture-window">Bounding the capture window</h3>
-<p><code>DISCOVERY_LLDP_MAX_CAPTURED_FRAMES</code> (property <code>castellum.discovery.lldp.max-captured-frames</code>, default <code>1000</code>) caps the frames decoded per capture window — the LLDP-side counterpart of <code>DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS</code>. Once the cap is reached, a single truncation WARN is logged and all further frames in the window are dropped. Devices typically announce LLDP every 30 seconds, so the default is generous for any reasonable segment; the cap exists to bound memory if something floods the LLDP multicast group.</p>
+<p><code>DISCOVERY_LLDP_MAX_CAPTURED_FRAMES</code> (property <code>castellum.discovery.lldp.max-captured-frames</code>) and <code>DISCOVERY_CDP_MAX_CAPTURED_FRAMES</code> (property <code>castellum.discovery.cdp.max-captured-frames</code>), both defaulting to <code>1000</code>, cap the frames decoded per capture window per source — the neighbor-protocol counterparts of <code>DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS</code>. Once a cap is reached, a single truncation WARN is logged and all further frames in that window are dropped. Devices typically announce LLDP every 30 seconds and CDP every 60 seconds, so the defaults are generous for any reasonable segment; the caps exist to bound memory if something floods the multicast groups. (Non-CDP frames admitted by the CDP capture filter — VTP, DTP, PAgP, UDLD — consume CDP cap slots before the decoder rejects them, which is harmless at those protocols' announcement rates.)</p>
 <h3 id="mac-only-neighbors-and-the-no-ip-placeholder">MAC-only neighbors and the &quot;no IP&quot; placeholder</h3>
-<p>Many L2 switches and access points advertise LLDP without a management address — there is no IP to record. Castellum persists these neighbors anyway, keyed by a deterministic placeholder in the <code>ip_address</code> column:</p>
+<p>Many L2 switches and access points advertise LLDP or CDP without a management address — there is no IP to record. Castellum persists these neighbors anyway, keyed by a deterministic placeholder in the <code>ip_address</code> column:</p>
 <div class="codehilite"><pre><code>mac:aa-bb-cc-dd-ee-ff
 </code></pre></div>
 <p>— the literal <code>mac:</code> prefix plus the dash-separated lowercase MAC (<code>discovery/PlaceholderIp</code>). The same MAC always maps to the same key, so the <code>UNIQUE(ip_address, origin_host_ip)</code> constraint dedupes the device across sweeps.</p>
-<p><strong>The UI never shows the raw key.</strong> A placeholder renders as the literal label <code>no IP</code> everywhere an IP address would appear: the fleet table, the device detail panel, the device picker, the topology view, attack-graph hop labels, and the per-scan snapshot. To find such a device in the picker, search by hostname (the LLDP system name) or type <code>no</code> — the raw <code>mac:</code> key does not match.</p>
-<p><strong>Self-healing.</strong> When a later sighting — typically ARP, once the host starts exchanging traffic with the device — supplies a real IP for the same MAC, the device renumbers to the real IP and its discovery scope is recomputed from it. The reverse never happens: a placeholder never overwrites a real IP, neither within a single sweep (the real-IP observation wins the in-sweep merge regardless of arrival order, with the LLDP system name and interface backfilled onto the winner) nor across sweeps (the MAC-keyed update path refuses to renumber a device <em>to</em> a placeholder).</p>
+<p><strong>The UI never shows the raw key.</strong> A placeholder renders as the literal label <code>no IP</code> everywhere an IP address would appear: the fleet table, the device detail panel, the device picker, the topology view, attack-graph hop labels, and the per-scan snapshot. To find such a device in the picker, search by hostname (the LLDP system name or CDP device ID) or type <code>no</code> — the raw <code>mac:</code> key does not match.</p>
+<p><strong>Self-healing.</strong> When a later sighting — typically ARP, once the host starts exchanging traffic with the device — supplies a real IP for the same MAC, the device renumbers to the real IP and its discovery scope is recomputed from it. The reverse never happens: a placeholder never overwrites a real IP, neither within a single sweep (the real-IP observation wins the in-sweep merge regardless of arrival order, with the advertised name and interface backfilled onto the winner) nor across sweeps (the MAC-keyed update path refuses to renumber a device <em>to</em> a placeholder).</p>
 <h3 id="placeholder-scope-graph-and-export-semantics">Placeholder scope, graph, and export semantics</h3>
 <ul>
-<li><strong>Scope</strong> — placeholder devices classify as <code>HOME</code>: an LLDP frame is heard directly on the wire, so the device is on-link infrastructure by definition. (Classifying it as <code>PUBLIC</code> would expose the row to the PUBLIC-device TTL prune and isolate it in the attack graph.)</li>
+<li><strong>Scope</strong> — placeholder devices classify as <code>HOME</code>: an LLDP or CDP frame is heard directly on the wire, so the device is on-link infrastructure by definition. (Classifying it as <code>PUBLIC</code> would expose the row to the PUBLIC-device TTL prune and isolate it in the attack graph.)</li>
 <li><strong>Attack graph</strong> — a placeholder is not an IP literal, so the device is skipped from subnet bucketing exactly like an unparseable IP: no <code>SAME_SUBNET</code> edges originate from it (see <a href="attack-graph.html#subnet-bucketing--ipv4-and-ipv6">attack-graph.html — subnet bucketing</a>).</li>
 <li><strong>STIX export</strong> — placeholder devices are excluded from STIX bundles exactly like null-IP rows: a synthetic <code>mac:</code> key is not a valid <code>ipv4-addr</code> pattern value and never leaks into any STIX property.</li>
 </ul>
