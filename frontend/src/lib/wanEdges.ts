@@ -2,29 +2,46 @@ import type { Device } from '../api/types';
 import { ipv4Slash24 } from './subnetEdges';
 
 /**
- * Edge produced by {@link buildWanEdges}. Connects the LAN's egress router
- * (the WAN anchor) to a PUBLIC-scope device so external nodes visually hang
- * off the gateway instead of floating isolated inside zone-public.
+ * Edge produced by {@link buildWanEdges}. Two kinds coexist:
+ * <ul>
+ *   <li>{@code wan} — connects the LAN's egress router (the WAN anchor) to a
+ *       PUBLIC-scope device so external nodes visually hang off the gateway
+ *       instead of floating isolated inside zone-public. Carries the
+ *       {@code wan-edge} class for the dedicated stroke style in
+ *       TopologyView's stylesheet.</li>
+ *   <li>{@code isolated} — self-anchor (source === target) emitted for each
+ *       PUBLIC device when no WAN anchor is resolvable or the cap is
+ *       exceeded, so PUBLIC nodes always carry the explicit unrouted
+ *       affordance instead of rendering edge-less. No {@code wan-edge}
+ *       class — these take the same treatment as gatewayEdges' isolated
+ *       self-anchors via {@code edge[kind = ...]} selectors. The
+ *       {@code wan-iso-} id prefix cannot collide with gatewayEdges'
+ *       {@code iso-} ids because gatewayEdges no longer emits anything for
+ *       PUBLIC devices (wanEdges owns their anchoring).</li>
+ * </ul>
  *
  * Mirrors the {@link GatewayEdge} def shape: {@code data.kind} drives any
- * {@code edge[kind = ...]} selector while the {@code wan-edge} class carries
- * the dedicated stroke style in TopologyView's stylesheet.
+ * {@code edge[kind = ...]} selector while the optional {@code wan-edge}
+ * class carries the dedicated stroke style for anchored WAN edges only.
  */
 export interface WanEdge {
   data: {
     id: string;
     source: string;
     target: string;
-    kind: 'wan';
+    kind: 'wan' | 'isolated';
   };
-  classes: 'wan-edge';
+  classes?: 'wan-edge';
 }
 
 /**
  * Ceiling on PUBLIC devices anchored by WAN edges — mirrors GraphBuilder's
  * subnet-cap (64). Past it, the single-anchor fan-in becomes the densest
  * edge cluster in the graph and degrades the cose-bilkent layout, so the
- * whole edge set is dropped and PUBLIC nodes render unanchored instead.
+ * anchored edge set is dropped and PUBLIC devices fall back to isolated
+ * self-anchors instead. Self-loops don't create the dense single-anchor
+ * fan-in the cap exists to prevent, so emitting them over-cap is consistent
+ * with the cap's rationale.
  */
 export const WAN_EDGE_CAP = 64;
 
@@ -63,7 +80,8 @@ function byIpThenId(a: Device, b: Device): number {
  *   <li>Fallback: the HOME device whose IPv4 ends in {@code .1} sharing its
  *       /24 with the largest number of HOME devices (most-populated subnet's
  *       {@code .1} is the likeliest default gateway).</li>
- *   <li>No candidate → {@code null}; PUBLIC nodes stay unanchored.</li>
+ *   <li>No candidate → {@code null}; PUBLIC nodes fall back to isolated
+ *       self-anchors.</li>
  * </ol>
  */
 function pickWanAnchor(devices: Device[]): Device | null {
@@ -99,24 +117,40 @@ function pickWanAnchor(devices: Device[]): Device | null {
   return best?.dot1 ?? null;
 }
 
+/** One isolated self-anchor (source === target) per PUBLIC device. */
+function buildIsolatedSelfAnchors(publicDevices: Device[]): WanEdge[] {
+  return publicDevices.map(d => ({
+    data: {
+      id: `wan-iso-${d.id}`,
+      source: String(d.id),
+      target: String(d.id),
+      kind: 'isolated' as const,
+    },
+  }));
+}
+
 /**
  * Build WAN edges connecting the egress router to every PUBLIC-scope device.
- * Returns {@code []} when no anchor can be identified, or when the PUBLIC
- * count exceeds {@link WAN_EDGE_CAP} (one console.warn) — PUBLIC nodes still
- * render inside zone-public, just unanchored.
+ * When no anchor can be identified, or when the PUBLIC count exceeds
+ * {@link WAN_EDGE_CAP} (one console.warn), returns one {@code kind:
+ * 'isolated'} self-anchor per PUBLIC device instead — PUBLIC nodes always
+ * carry at least the explicit unrouted affordance rather than rendering
+ * edge-less. The {@code wan-iso-} id prefix cannot collide with
+ * gatewayEdges' {@code iso-} ids because gatewayEdges no longer emits
+ * anything for PUBLIC devices.
  */
 export function buildWanEdges(devices: Device[]): WanEdge[] {
   const publicDevices = devices.filter(d => d.discoveryScope === 'PUBLIC');
   if (publicDevices.length === 0) return [];
   if (publicDevices.length > WAN_EDGE_CAP) {
     console.warn(
-      `buildWanEdges: WAN-edge cap (${WAN_EDGE_CAP}) exceeded — leaving ${publicDevices.length} PUBLIC devices unanchored`,
+      `buildWanEdges: WAN-edge cap (${WAN_EDGE_CAP}) exceeded — ${publicDevices.length} PUBLIC devices fall back to isolated self-anchors`,
     );
-    return [];
+    return buildIsolatedSelfAnchors(publicDevices);
   }
 
   const anchor = pickWanAnchor(devices);
-  if (anchor === null) return [];
+  if (anchor === null) return buildIsolatedSelfAnchors(publicDevices);
 
   return publicDevices.map(d => ({
     data: {

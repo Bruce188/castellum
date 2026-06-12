@@ -28,8 +28,10 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,6 +76,12 @@ class GraphBuilderTest {
     private Device homeDeviceWithHostname(long id, String ip, String hostname) {
         Device d = device(id, ip);
         d.setHostname(hostname);
+        return d;
+    }
+
+    private Device publicDevice(long id, String ip) {
+        Device d = device(id, ip);
+        d.setDiscoveryScope(DiscoveryScope.PUBLIC);
         return d;
     }
 
@@ -521,6 +529,249 @@ class GraphBuilderTest {
 
         // Remote partition within cap → emits
         assertThat(g.getEdge(vRemPivot, vRemDocker)).as("under-cap remote partition must emit edges").isNotNull();
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // PUBLIC-scope isolation — PUBLIC devices are vertices but never get edges
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * PUBLIC-scope devices must appear in the graph as vertices but be FULLY isolated:
+     * zero edges of ANY type (SAME_SUBNET, GATEWAY_PIVOT, EXPLOITABLE_VULN), either
+     * direction. The fixture stacks all three edge sources against the PUBLIC device:
+     * <ul>
+     *   <li>it shares a /24 with two HOME devices — would receive SAME_SUBNET edges
+     *       from the scope-blind subnet bucketing;</li>
+     *   <li>it runs a vulnerable service with a matching CVE — would receive inbound
+     *       EXPLOITABLE_VULN edges from its same-subnet peers;</li>
+     *   <li>a HOME peer in the same /24 ALSO runs a vulnerable service — if PUBLIC
+     *       leaked into the bucket, the pass would draw an outbound pub→home edge,
+     *       so the PUBLIC-as-source direction is constructible-if-broken too;</li>
+     *   <li>a DOCKER_BRIDGE member's originHostIp equals its IP — would make it a
+     *       remote GATEWAY_PIVOT pivot if scope were not checked.</li>
+     * </ul>
+     * Isolation must also be surgical: the HOME peers in the same /24 keep their own
+     * SAME_SUBNET edges.
+     *
+     * <p>The PUBLIC device deliberately sits on a private 10.0.0.0/24 address. Real
+     * PUBLIC devices carry public IPs, but parking one inside the HOME /24 is the
+     * adversarial worst case for the v4 bucketing guard — if scope were ignored,
+     * every edge source would fire at once.
+     */
+    @Test
+    void publicStaysFullyIsolated() {
+        Device homeA = device(1L, "10.0.0.10");
+        Device homeB = device(2L, "10.0.0.20");
+        Device pub = publicDevice(7L, "10.0.0.30");
+        Device docker = dockerDevice(8L, "172.18.0.2");
+        docker.setOriginHostIp("10.0.0.30");   // origin resolves to the PUBLIC device's IP
+        when(deviceRepo.findAll()).thenReturn(List.of(homeA, homeB, pub, docker));
+
+        // Exploitable CVE on the PUBLIC device — would draw EXPLOITABLE_VULN edges from peers.
+        NetworkService svc = new NetworkService(10L, 7L, 22, "tcp", "openssh", "8.2", Instant.EPOCH);
+        when(serviceRepo.findByDeviceId(7L)).thenReturn(List.of(svc));
+        // Vulnerable service on a HOME peer too — were PUBLIC bucketed, the pass
+        // would draw pub→homeA, so the outbound direction is constructible-if-broken.
+        NetworkService homeSvc = new NetworkService(11L, 1L, 80, "tcp", "nginx", "1.18", Instant.EPOCH);
+        when(serviceRepo.findByDeviceId(1L)).thenReturn(List.of(homeSvc));
+        Cve cve = new Cve();
+        cve.setCveId("CVE-PUBLIC-1");
+        cve.setCvssV31Score(new BigDecimal("9.0"));
+        cve.setLastModified(Instant.EPOCH);
+        cve.setRawJson("{}");
+        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of(cve));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPublic = new DeviceVertex(7L, "10.0.0.30");
+        assertThat(g.containsVertex(vPublic))
+            .as("PUBLIC device must still appear as a vertex")
+            .isTrue();
+        assertThat(g.edgesOf(vPublic))
+            .as("no edge of ANY type may touch a PUBLIC vertex, in either direction")
+            .isEmpty();
+
+        // Surgical isolation: the HOME peers keep their own SAME_SUBNET adjacency.
+        DeviceVertex vHomeA = new DeviceVertex(1L, "10.0.0.10");
+        DeviceVertex vHomeB = new DeviceVertex(2L, "10.0.0.20");
+        assertThat(g.getEdge(vHomeA, vHomeB))
+            .as("HOME peers in the shared /24 keep their SAME_SUBNET edge")
+            .isNotNull();
+
+        // Sanity: the EXPLOITABLE_VULN machinery actually fired between HOME peers,
+        // so the empty edgesOf(vPublic) above is meaningful, not a dead pass.
+        assertThat(g.getAllEdges(vHomeB, vHomeA).stream()
+            .anyMatch(e -> e.getType() == EdgeType.EXPLOITABLE_VULN))
+            .as("sanity: homeB→homeA EXPLOITABLE_VULN edge must form for the vulnerable HOME peer")
+            .isTrue();
+
+        // The PUBLIC device has no peers after the bucket guard, so the
+        // peers-isEmpty hoist must skip its service fetch entirely — not just
+        // produce zero edges from a fetched-and-matched service list.
+        verify(serviceRepo, never()).findByDeviceId(7L);
+    }
+
+    /**
+     * Pins the EXISTING by-construction exclusion of PUBLIC from the GATEWAY_PIVOT pass:
+     * a PUBLIC device parked at the configured dockerHostIp is never selected as the
+     * local pivot ahead of an eligible HOME device at the same IP, a PUBLIC device whose
+     * IP equals a docker member's originHostIp is never selected as a remote pivot, and
+     * PUBLIC is never a partition member (membership requires DOCKER_BRIDGE scope).
+     *
+     * <p>Both partitions deliberately contain a RESOLVABLE HOME pivot so the pass
+     * actually emits edges — without one, pivot resolution returns null, no
+     * GATEWAY_PIVOT edge can exist for ANY scope, and the no-edges-on-PUBLIC
+     * assertions would pass vacuously.
+     */
+    @Test
+    void publicNeverGatewayPivotSource_andNeverMember() {
+        // PUBLIC squatting on the configured docker-host IP — not an eligible local
+        // pivot. The HOME device at the same IP IS, so the local partition resolves.
+        Device publicAtDockerHostIp = publicDevice(7L, "192.168.68.51");
+        Device homeAtDockerHostIp = device(5L, "192.168.68.51");
+        Device localDocker = dockerDevice(4L, "172.17.0.2");   // originHostIp="local" (entity default)
+
+        // PUBLIC at a remote origin's host IP — not an eligible remote pivot. The HOME
+        // device at the same IP IS, so the remote partition resolves too.
+        Device publicAtRemoteOrigin = publicDevice(8L, "203.0.113.7");
+        Device homeAtRemoteOrigin = device(10L, "203.0.113.7");
+        Device remoteDocker = dockerDevice(9L, "172.18.0.2");
+        remoteDocker.setOriginHostIp("203.0.113.7");
+
+        when(deviceRepo.findAll()).thenReturn(
+            List.of(publicAtDockerHostIp, homeAtDockerHostIp, localDocker,
+                publicAtRemoteOrigin, homeAtRemoteOrigin, remoteDocker));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        // Sanity (de-vacuizes the test): both partitions resolved their HOME pivot
+        // and emitted GATEWAY_PIVOT edges to their docker members.
+        DeviceVertex vHomeLocal = new DeviceVertex(5L, "192.168.68.51");
+        DeviceVertex vLocalDocker = new DeviceVertex(4L, "172.17.0.2");
+        DeviceVertex vHomeRemote = new DeviceVertex(10L, "203.0.113.7");
+        DeviceVertex vRemoteDocker = new DeviceVertex(9L, "172.18.0.2");
+        assertThat(g.getEdge(vHomeLocal, vLocalDocker))
+            .as("local partition resolves the HOME pivot, not the co-located PUBLIC device")
+            .isNotNull();
+        assertThat(g.getEdge(vHomeRemote, vRemoteDocker))
+            .as("remote partition resolves the HOME pivot, not the co-located PUBLIC device")
+            .isNotNull();
+
+        // The actual invariant: with pivots resolving all around, the PUBLIC vertices
+        // still touch no GATEWAY_PIVOT edge — neither as pivot nor as member.
+        DeviceVertex vPubLocal = new DeviceVertex(7L, "192.168.68.51");
+        DeviceVertex vPubRemote = new DeviceVertex(8L, "203.0.113.7");
+        assertThat(g.edgesOf(vPubLocal).stream()
+            .anyMatch(e -> e.getType() == EdgeType.GATEWAY_PIVOT))
+            .as("PUBLIC at the docker-host IP gets no GATEWAY_PIVOT edge in either direction")
+            .isFalse();
+        assertThat(g.edgesOf(vPubRemote).stream()
+            .anyMatch(e -> e.getType() == EdgeType.GATEWAY_PIVOT))
+            .as("PUBLIC at the remote origin IP gets no GATEWAY_PIVOT edge in either direction")
+            .isFalse();
+    }
+
+    /**
+     * The realistic v4 co-bucket case the classifier actually produces: two PUBLIC
+     * internet endpoints sharing a routable /24 (e.g. two peers in the same hosting
+     * provider range). Neither may receive SAME_SUBNET — or, via peer starvation,
+     * EXPLOITABLE_VULN — edges, even though one runs a vulnerable service.
+     */
+    @Test
+    void twoPublicDevicesSharingPublicSlash24StayIsolated() {
+        Device pubA = publicDevice(1L, "203.0.113.7");
+        Device pubB = publicDevice(2L, "203.0.113.9");
+        when(deviceRepo.findAll()).thenReturn(List.of(pubA, pubB));
+
+        NetworkService svc = new NetworkService(10L, 1L, 22, "tcp", "openssh", "8.2", Instant.EPOCH);
+        when(serviceRepo.findByDeviceId(1L)).thenReturn(List.of(svc));
+        Cve cve = new Cve();
+        cve.setCveId("CVE-PUBLIC-2");
+        cve.setCvssV31Score(new BigDecimal("9.0"));
+        cve.setLastModified(Instant.EPOCH);
+        cve.setRawJson("{}");
+        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of(cve));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        assertThat(g.vertexSet()).hasSize(2);
+        assertThat(g.edgeSet())
+            .as("PUBLIC endpoints sharing a routable /24 get no edges of any type")
+            .isEmpty();
+
+        // Neither PUBLIC device has peers after the bucket guard, so the
+        // peers-isEmpty hoist must skip the service fetch for both — no
+        // findByDeviceId call at all.
+        verify(serviceRepo, never()).findByDeviceId(anyLong());
+    }
+
+    /**
+     * IPv6 carve-out from the isolation invariant: DiscoveryScopeClassifier maps every
+     * global-unicast v6 address to PUBLIC — including RA/SLAAC-assigned LAN prefixes —
+     * so two PUBLIC v6 devices sharing a /64 are very likely genuinely on the same
+     * link and MUST keep their SAME_SUBNET adjacency (and the EXPLOITABLE_VULN edges
+     * it feeds). Pins the v4-only scoping of the bucket-fill guard.
+     */
+    @Test
+    void publicV6DevicesSharingSlash64KeepSameSubnetEdges() {
+        Device pubA = publicDevice(1L, "2a02:8071:1:1::a");
+        Device pubB = publicDevice(2L, "2a02:8071:1:1::b");
+        when(deviceRepo.findAll()).thenReturn(List.of(pubA, pubB));
+
+        NetworkService svc = new NetworkService(10L, 2L, 22, "tcp", "openssh", "8.2", Instant.EPOCH);
+        when(serviceRepo.findByDeviceId(2L)).thenReturn(List.of(svc));
+        Cve cve = new Cve();
+        cve.setCveId("CVE-V6-1");
+        cve.setCvssV31Score(new BigDecimal("9.0"));
+        cve.setLastModified(Instant.EPOCH);
+        cve.setRawJson("{}");
+        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of(cve));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex va = new DeviceVertex(1L, "2a02:8071:1:1::a");
+        DeviceVertex vb = new DeviceVertex(2L, "2a02:8071:1:1::b");
+        AttackEdge ab = g.getEdge(va, vb);
+        AttackEdge ba = g.getEdge(vb, va);
+        assertThat(ab)
+            .as("PUBLIC v6 devices in a shared /64 keep SAME_SUBNET adjacency (SLAAC LAN)")
+            .isNotNull();
+        assertThat(ba).isNotNull();
+        assertThat(ab.getType()).isEqualTo(EdgeType.SAME_SUBNET);
+        assertThat(g.getAllEdges(va, vb).stream()
+            .anyMatch(e -> e.getType() == EdgeType.EXPLOITABLE_VULN))
+            .as("the kept v6 adjacency also feeds EXPLOITABLE_VULN toward the vulnerable peer")
+            .isTrue();
+    }
+
+    /**
+     * Pins the deliberate asymmetry with PUBLIC isolation: a LINK_LOCAL device in a
+     * shared /24 DOES get SAME_SUBNET edges. 169.254.0.0/16 adjacency is genuine L2
+     * adjacency — link-local peers really can reach each other on the segment — whereas
+     * a shared /24 across the public internet is meaningless. Verified against current
+     * behavior: the scope-blind subnet bucketing already gives LINK_LOCAL these edges
+     * today, and the PUBLIC-isolation change must NOT take them away.
+     * (linkLocalStaysIsolated covers LINK_LOCAL's other isolation properties.)
+     */
+    @Test
+    void linkLocalKeepsSameSubnetEdges() {
+        Device llA = device(1L, "169.254.73.10");
+        llA.setDiscoveryScope(DiscoveryScope.LINK_LOCAL);
+        Device llB = device(2L, "169.254.73.152");
+        llB.setDiscoveryScope(DiscoveryScope.LINK_LOCAL);
+        when(deviceRepo.findAll()).thenReturn(List.of(llA, llB));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex va = new DeviceVertex(1L, "169.254.73.10");
+        DeviceVertex vb = new DeviceVertex(2L, "169.254.73.152");
+        AttackEdge ab = g.getEdge(va, vb);
+        AttackEdge ba = g.getEdge(vb, va);
+        assertThat(ab)
+            .as("LINK_LOCAL peers in a shared /24 keep SAME_SUBNET adjacency")
+            .isNotNull();
+        assertThat(ba).isNotNull();
+        assertThat(ab.getType()).isEqualTo(EdgeType.SAME_SUBNET);
     }
 
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {

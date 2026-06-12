@@ -159,7 +159,10 @@ function findDockerHosts(devices: Device[]): Map<string, Device> {
  * Build gateway-hub edges that replace the previous flat-star same-subnet
  * topology. Algorithm per docs/plan-v36.md § Task 3.2:
  * <ol>
- *   <li>Group devices by /24 (reuses {@link ipv4Slash24}).</li>
+ *   <li>Group devices by /24 (reuses {@link ipv4Slash24}). PUBLIC-scope devices
+ *       are excluded up front: a shared public /24 is not same-link evidence,
+ *       and their anchoring (including the no-gateway fallback) is owned by
+ *       {@code buildWanEdges}.</li>
  *   <li>For each group with {@code >= 2} devices, pick a gateway and emit
  *       one edge per non-gateway peer → gateway with
  *       {@code kind: 'gateway'}. DOCKER_BRIDGE /24s with no docker-net
@@ -207,6 +210,10 @@ export function buildGatewayEdges(devices: Device[]): GatewayEdge[] {
   // Step 1+2: gateway edges per /24.
   const groups = new Map<string, Device[]>();
   for (const d of devices) {
+    // PUBLIC devices never join LAN /24 wiring — a shared public /24 carries no
+    // same-link evidence (mirrors GraphBuilder's v4 bucketing guard). They are
+    // anchored separately by buildWanEdges, so no iso- self-anchor here either.
+    if (d.discoveryScope === 'PUBLIC') continue;
     const key = ipv4Slash24(d.ipAddress);
     if (key === null) continue;
     const list = groups.get(key) ?? [];
