@@ -28,9 +28,9 @@ import static org.mockito.Mockito.when;
  * the inline defaults {@code :true} / {@code :P14D} silently mask such drift).
  *
  * <p>The {@link ApplicationConversionService} initializer mirrors what
- * {@code SpringApplication} installs at boot — it is what parses {@code P30D} (ISO-8601)
- * and, dangerously, a bare {@code 14} as 14 MILLISECONDS; the latter must fail startup via
- * the service's TTL floor.
+ * {@code SpringApplication} installs at boot. The TTL binds as a raw String and is parsed
+ * strictly as ISO-8601 by the service constructor, so a bare {@code 14} — or any other
+ * non-ISO value — must fail startup outright.
  */
 class DevicePrunePropertiesTest {
 
@@ -93,19 +93,26 @@ class DevicePrunePropertiesTest {
     }
 
     @Test
-    void bareNumberTtl_parsesAsMilliseconds_failsStartupViaFloor() {
+    void bareNumberTtl_failsStartupViaStrictIsoParse() {
         runner.withPropertyValues("castellum.discovery.public-device-prune.ttl=14")
             .run(context -> {
                 assertThat(context).hasFailed();
-                Throwable root = context.getStartupFailure();
-                while (root.getCause() != null) {
-                    root = root.getCause();
+                // The constructor's IllegalArgumentException wraps the DateTimeParseException,
+                // so walk the chain for the service's own exception rather than the root cause.
+                Throwable failure = context.getStartupFailure();
+                while (failure != null
+                        && !(failure instanceof IllegalArgumentException
+                             && failure.getMessage() != null
+                             && failure.getMessage().contains(
+                                 "castellum.discovery.public-device-prune.ttl"))) {
+                    failure = failure.getCause();
                 }
-                assertThat(root)
-                    .as("a bare '14' binds as 14ms and must be rejected by the PT1H floor at boot")
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("castellum.discovery.public-device-prune.ttl")
-                    .hasMessageContaining("MILLISECONDS");
+                assertThat(failure)
+                    .as("a bare '14' is not ISO-8601 and must be rejected by the strict parse at boot")
+                    .isNotNull()
+                    .hasMessageContaining("DISCOVERY_PUBLIC_DEVICE_TTL")
+                    .hasMessageContaining("14")
+                    .hasMessageContaining("ISO-8601");
             });
     }
 }

@@ -93,7 +93,9 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
      * Capped pre-delete identity sample over the SAME predicate as
      * {@link #deleteStaleByScopeAndSources}. Feeds the audit payload only — the delete is
      * gated on its own row count, never on this sample, so a race that empties the stale
-     * set between the two statements stays a no-op.
+     * set between the two statements stays a no-op. Best-effort: the two statements run
+     * under READ_COMMITTED, so a row refreshed between them appears in the sample yet
+     * survives the delete — the DELETE count is the authoritative tally.
      */
     @Query("SELECT d.id AS id, d.ipAddress AS ipAddress, d.originHostIp AS originHostIp,"
         + " d.lastSeen AS lastSeen"

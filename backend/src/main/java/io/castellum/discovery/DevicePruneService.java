@@ -15,6 +15,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 
@@ -43,9 +44,11 @@ import java.util.Map;
  * are likewise exempt — deliberately scanned, probed, or manually created assets are never
  * TTL-pruned.
  *
- * <p><b>TTL floor:</b> the constructor rejects a TTL below {@code PT1H} so a misconfigured
- * value (notably a bare number, which Spring parses as MILLISECONDS) fails the application
- * at boot instead of mass-deleting the PUBLIC inventory at the 03:30 tick.
+ * <p><b>Strict ISO-8601 TTL:</b> the constructor receives the raw property String and parses
+ * it with {@link Duration#parse} — a bare number (e.g. {@code 31536000}) or a Spring
+ * simple-style value (e.g. {@code 30d}) fails the application at boot — then rejects any
+ * parsed duration below {@code PT1H}. Either way a misconfigured window can never
+ * mass-delete the PUBLIC inventory at the 03:30 tick.
  *
  * <p><b>Operator escape hatches:</b>
  * <ul>
@@ -63,8 +66,11 @@ import java.util.Map;
  * a pre-delete identity sample (id, ipAddress, originHostIp, lastSeen — capped at
  * {@link #AUDIT_SAMPLE_CAP}) plus the effective cutoff and TTL, so a forensic reader can
  * answer "which endpoints were removed, and was the window configured correctly?" from the
- * audit row alone. When {@code count} exceeds the cap the sample is partial
- * ({@code sampleSize} &lt; {@code count}).
+ * audit row alone. {@code count} (taken from the DELETE itself) is authoritative; the
+ * sample is a best-effort pre-delete snapshot of the rows eligible at sweep start. The
+ * sample and the DELETE are two separate READ_COMMITTED statements, so a device whose
+ * {@code lastSeen} is refreshed between them is named in the sample yet skipped by the
+ * DELETE — {@code sampleSize} can therefore fall below OR above {@code count}.
  *
  * <p><b>Cache eviction is after-commit:</b> evicting inside the transaction would let a
  * concurrent reader repopulate the risk caches from the pre-delete snapshot (the deletes are
@@ -117,18 +123,30 @@ public class DevicePruneService {
                               AuditService auditService,
                               RiskCacheEvictor riskCacheEvictor,
                               Clock clock,
-                              @Value("${castellum.discovery.public-device-prune.ttl:P14D}") Duration ttl) {
-        if (ttl == null || ttl.compareTo(MIN_TTL) < 0) {
+                              @Value("${castellum.discovery.public-device-prune.ttl:P14D}") String ttlValue) {
+        // The raw String is parsed here, strictly, instead of letting Spring convert: Spring's
+        // lenient Duration conversion accepts a bare number as MILLISECONDS, so a value like
+        // 31536000 (an operator intending seconds) would bind as ~8.76 hours and boot cleanly.
+        Duration parsed;
+        try {
+            parsed = Duration.parse(ttlValue);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException(
+                "castellum.discovery.public-device-prune.ttl (env DISCOVERY_PUBLIC_DEVICE_TTL) is \""
+                + ttlValue + "\", which is not an ISO-8601 duration. Bare numbers and simple-style"
+                + " values (e.g. 30d) are rejected — use ISO-8601 such as P14D or PT12H.", e);
+        }
+        if (parsed.compareTo(MIN_TTL) < 0) {
             throw new IllegalArgumentException(
                 "castellum.discovery.public-device-prune.ttl (env DISCOVERY_PUBLIC_DEVICE_TTL) is "
-                + ttl + ", below the " + MIN_TTL + " minimum. Beware: a bare number is parsed as"
-                + " MILLISECONDS — use an ISO-8601 duration such as P14D.");
+                + parsed + ", below the " + MIN_TTL + " minimum — use an ISO-8601 duration of at"
+                + " least PT1H, such as P14D.");
         }
         this.deviceRepository = deviceRepository;
         this.auditService = auditService;
         this.riskCacheEvictor = riskCacheEvictor;
         this.clock = clock;
-        this.ttl = ttl;
+        this.ttl = parsed;
     }
 
     /**
@@ -136,7 +154,9 @@ public class DevicePruneService {
      * {@code clock.instant().minus(ttl)} (strict {@code <} — a row exactly AT the cutoff is
      * kept). An empty sweep is a true no-op: no audit row, no cache eviction — gated on the
      * DELETE's own row count, so a race that empties the stale set after the identity sample
-     * was taken still no-ops.
+     * was taken still no-ops. The audited {@code count} comes from the DELETE itself and is
+     * authoritative; the identity sample is a best-effort pre-delete snapshot and may name a
+     * row a concurrent {@code lastSeen} refresh caused the DELETE to skip.
      *
      * @return the number of devices pruned
      */

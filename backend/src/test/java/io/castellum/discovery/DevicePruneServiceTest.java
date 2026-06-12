@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
@@ -16,6 +17,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
 import java.time.Clock;
@@ -32,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -52,13 +56,15 @@ import static org.mockito.Mockito.when;
  *       {@code "DEVICE_PRUNE"}, resourceType {@code "device"}, resourceId {@code "-"})
  *       whose payload carries count, cutoff, ttl, sampleSize, and the capped identity
  *       sample; exactly one {@code riskCacheEvictor.onDevicesPruned()};</li>
- *   <li>the constructor enforces the PT1H TTL floor (milliseconds-trap guard).</li>
+ *   <li>the constructor parses the TTL strictly as ISO-8601 (bare numbers and Spring
+ *       simple-style values are rejected outright) and enforces the PT1H floor.</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
 class DevicePruneServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-12T03:30:00Z");
+    private static final String TTL_VALUE = "P14D";
     private static final Duration TTL = Duration.ofDays(14);
     private static final Instant EXPECTED_CUTOFF = Instant.parse("2026-05-29T03:30:00Z");
     private static final Pageable EXPECTED_SAMPLE_PAGE = PageRequest.of(0, 50, Sort.by("lastSeen"));
@@ -76,7 +82,7 @@ class DevicePruneServiceTest {
             auditService,
             riskCacheEvictor,
             Clock.fixed(NOW, ZoneOffset.UTC),
-            TTL);
+            TTL_VALUE);
     }
 
     private static StaleDeviceSample sample(long id, String ip, String originHostIp, Instant lastSeen) {
@@ -204,6 +210,23 @@ class DevicePruneServiceTest {
     }
 
     @Test
+    void prune_samplesIdentityBeforeDelete_orderingIsLoadBearing() {
+        when(deviceRepository.deleteStaleByScopeAndSources(eq(DiscoveryScope.PUBLIC), any(), any()))
+            .thenReturn(1);
+
+        service.pruneStalePublicDevices();
+
+        // Reversed, the sample query would match zero rows post-delete and every audit
+        // event would carry an empty sample — the order is part of the contract.
+        InOrder inOrder = inOrder(deviceRepository);
+        inOrder.verify(deviceRepository).findStaleSamplesByScopeAndSources(
+            eq(DiscoveryScope.PUBLIC), eq(EXPECTED_CUTOFF), eq(DevicePruneService.PRUNABLE_SOURCES),
+            any(Pageable.class));
+        inOrder.verify(deviceRepository).deleteStaleByScopeAndSources(
+            DiscoveryScope.PUBLIC, EXPECTED_CUTOFF, DevicePruneService.PRUNABLE_SOURCES);
+    }
+
+    @Test
     void prune_staleDevices_evictsRiskCachesExactlyOnce() {
         when(deviceRepository.deleteStaleByScopeAndSources(eq(DiscoveryScope.PUBLIC), any(), any()))
             .thenReturn(1);
@@ -214,6 +237,50 @@ class DevicePruneServiceTest {
 
         verify(riskCacheEvictor, times(1)).onDevicesPruned();
         verifyNoMoreInteractions(riskCacheEvictor);
+    }
+
+    @Test
+    void prune_activeSynchronization_defersEvictionToAfterCommit_exactlyOnce() {
+        when(deviceRepository.deleteStaleByScopeAndSources(eq(DiscoveryScope.PUBLIC), any(), any()))
+            .thenReturn(2);
+
+        // Spring's @Transactional proxy always activates synchronization in production, so
+        // the afterCommit registration is the only branch a deployed instance ever takes.
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.pruneStalePublicDevices();
+
+            // Eviction must wait for the commit — an in-transaction eviction lets a
+            // concurrent reader repopulate the caches from the pre-delete snapshot.
+            verify(riskCacheEvictor, never()).onDevicesPruned();
+
+            for (TransactionSynchronization synchronization
+                    : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+
+            verify(riskCacheEvictor, times(1)).onDevicesPruned();
+            verifyNoMoreInteractions(riskCacheEvictor);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void prune_activeSynchronization_noOpRun_registersNoSynchronization() {
+        when(deviceRepository.deleteStaleByScopeAndSources(eq(DiscoveryScope.PUBLIC), any(), any()))
+            .thenReturn(0);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.pruneStalePublicDevices();
+
+            // An empty sweep must not even enqueue a deferred eviction.
+            assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
+            verifyNoInteractions(riskCacheEvictor);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test
@@ -246,39 +313,71 @@ class DevicePruneServiceTest {
             .hasSize(50);
     }
 
+    private DevicePruneService construct(String ttlValue) {
+        return new DevicePruneService(
+            deviceRepository, auditService, riskCacheEvictor,
+            Clock.fixed(NOW, ZoneOffset.UTC), ttlValue);
+    }
+
     @Test
-    void constructor_rejectsTtlBelowOneHour_namingThePropertyAndMillisecondsTrap() {
-        // A bare "14" in DISCOVERY_PUBLIC_DEVICE_TTL binds as 14 MILLISECONDS — the floor
-        // turns that mass-delete misconfiguration into a boot failure.
-        assertThatThrownBy(() -> new DevicePruneService(
-                deviceRepository, auditService, riskCacheEvictor,
-                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMillis(14)))
+    void constructor_rejectsBareNumberTtl_namingPropertyEnvVarValueAndFormat() {
+        // A bare "14" is not ISO-8601 — the strict parse turns the misconfiguration into a
+        // boot failure instead of binding it as 14 milliseconds.
+        assertThatThrownBy(() -> construct("14"))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("castellum.discovery.public-device-prune.ttl")
             .hasMessageContaining("DISCOVERY_PUBLIC_DEVICE_TTL")
-            .hasMessageContaining("PT0.014S")
-            .hasMessageContaining("MILLISECONDS")
+            .hasMessageContaining("14")
+            .hasMessageContaining("ISO-8601")
             .hasMessageContaining("P14D");
     }
 
     @Test
-    void constructor_rejectsZeroAndNegativeTtl() {
-        assertThatThrownBy(() -> new DevicePruneService(
-                deviceRepository, auditService, riskCacheEvictor,
-                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ZERO))
-            .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new DevicePruneService(
-                deviceRepository, auditService, riskCacheEvictor,
-                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofDays(-14)))
-            .isInstanceOf(IllegalArgumentException.class);
+    void constructor_rejectsLargeBareNumberTtl_thePreviouslySilentKiller() {
+        // 31536000 (an operator intending seconds = 365 days) would bind as ~8.76 hours
+        // under lenient millisecond conversion and clear the PT1H floor — the strict parse
+        // must reject it outright.
+        assertThatThrownBy(() -> construct("31536000"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("castellum.discovery.public-device-prune.ttl")
+            .hasMessageContaining("DISCOVERY_PUBLIC_DEVICE_TTL")
+            .hasMessageContaining("31536000")
+            .hasMessageContaining("ISO-8601");
     }
 
     @Test
-    void constructor_acceptsOneHourFloor() {
-        assertThatCode(() -> new DevicePruneService(
-                deviceRepository, auditService, riskCacheEvictor,
-                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofHours(1)))
-            .doesNotThrowAnyException();
+    void constructor_rejectsSpringSimpleStyleTtl() {
+        // "30d" is Spring simple-style, not ISO-8601 — strict parsing rejects it too.
+        assertThatThrownBy(() -> construct("30d"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("castellum.discovery.public-device-prune.ttl")
+            .hasMessageContaining("DISCOVERY_PUBLIC_DEVICE_TTL")
+            .hasMessageContaining("30d")
+            .hasMessageContaining("ISO-8601");
+    }
+
+    @Test
+    void constructor_rejectsValidIsoTtlBelowOneHourFloor() {
+        // PT30M parses fine but sits below the PT1H floor — still a boot failure.
+        assertThatThrownBy(() -> construct("PT30M"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("castellum.discovery.public-device-prune.ttl")
+            .hasMessageContaining("DISCOVERY_PUBLIC_DEVICE_TTL")
+            .hasMessageContaining("PT1H");
+    }
+
+    @Test
+    void constructor_rejectsNegativeTtl() {
+        // A negative duration parses but is below the floor.
+        assertThatThrownBy(() -> construct("-P14D"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("PT1H");
+    }
+
+    @Test
+    void constructor_acceptsOneHourFloorAndDefault() {
+        assertThatCode(() -> construct("PT1H")).doesNotThrowAnyException();
+        assertThatCode(() -> construct("P14D")).doesNotThrowAnyException();
     }
 
     @Test
