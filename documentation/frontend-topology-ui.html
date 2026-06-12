@@ -727,7 +727,7 @@ collapsed.</p>
 <h2 id="architecture">Architecture</h2>
 <ul>
 <li><strong>Risk to colour mapping</strong> — <code>src/lib/riskTier.ts</code> derives a <code>RiskTier</code> (<code>low | med | high | crit | unknown</code>) from the composite score (<code>/api/risk/device/{id}</code>). Unknown when no CVE matches.</li>
-<li><strong>Edges</strong> — derived client-side in <code>src/lib/gatewayEdges.ts</code>. Produces <code>gateway</code>, <code>isolated</code>, and <code>docker-bridge</code> edge kinds; star topology around the lowest-IP device per <code>/24</code>. (See <a href="topology-edge-model.html">Topology Edge Model</a> for full routing rules.)</li>
+<li><strong>Edges</strong> — derived client-side in <code>src/lib/gatewayEdges.ts</code> and <code>src/lib/wanEdges.ts</code>. Produces <code>gateway</code>, <code>isolated</code>, <code>docker-bridge</code>, and <code>wan</code> edge kinds; star topology around the lowest-IP device per <code>/24</code>, plus dashed WAN edges anchoring <code>PUBLIC</code>-scope devices to the egress router (capped at 64). (See <a href="topology-edge-model.html">Topology Edge Model</a> for full routing rules.)</li>
 <li><strong>Polling</strong> — <code>src/hooks/useScanStatus.ts</code> polls <code>/api/scans/{id}</code> every 5s, persists last id in <code>localStorage["castellum.lastScanId"]</code>, stops on terminal status.</li>
 <li><strong>Backend additions</strong> — <code>GET /api/risk/device/{id}</code> returns <code>DeviceRiskDto{deviceId, score, topCveIds[]}</code>. CORS configured via <code>CorsConfig</code> for <code>http://localhost:5173</code>.</li>
 </ul>

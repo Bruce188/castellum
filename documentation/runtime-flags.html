@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Runtime Flags &amp; Native Dependencies — Castellum</title>
-<meta name="description" content="Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.">
+<meta name="description" content="Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, the security-critical environment variables, and the DISCOVERY_* passive-discovery tunables.">
 <style>
 /* === Reset + variables === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -628,6 +628,7 @@ footer {
       <li class="lvl-3"><a href="#castellum-integration-key">CASTELLUM_INTEGRATION_KEY</a></li>
       <li class="lvl-3"><a href="#castellum-security-jwt-secret">CASTELLUM_SECURITY_JWT_SECRET</a></li>
       <li class="lvl-3"><a href="#castellum-admin-credentials">CASTELLUM_ADMIN_USERNAME / CASTELLUM_ADMIN_PASSWORD_HASH</a></li>
+      <li class="lvl-3"><a href="#discovery-variables">DISCOVERY_* (passive discovery)</a></li>
     </ul>
   </aside>
 
@@ -635,7 +636,7 @@ footer {
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
       <h1>Runtime Flags &amp; Native Dependencies</h1>
-      <p class="description">Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, and the security-critical environment variables.</p>
+      <p class="description">Castellum runtime requirements for pcap4j passive discovery: JVM native-access flags, the CAP_NET_RAW Linux capability, the libpcap native library, the resolved Debian-12 distroless base, the Linux-only v1 contract, the setcap alternative, the security-critical environment variables, and the DISCOVERY_* passive-discovery tunables.</p>
       <div class="page-meta"><span class="meta-item"><strong>Section:</strong> operations</span> · <span class="meta-item"><strong>Audience:</strong> operators &amp; sysadmins</span></div>
     </header>
 
@@ -668,7 +669,7 @@ footer {
     drop: ["ALL"]
     add: ["NET_RAW"]
 </code></pre></div>
-<p>The ARP and MDNS sources do NOT require <code>CAP_NET_RAW</code>. ARP reads <code>/proc/net/arp</code> (filesystem only). MDNS uses the JVM's standard multicast socket.</p>
+<p>The ARP, MDNS, CONN_TABLE, and GATEWAY sources do NOT require <code>CAP_NET_RAW</code>. ARP reads <code>/proc/net/arp</code>, CONN_TABLE reads <code>/proc/net/{tcp,tcp6,udp,udp6}</code>, and GATEWAY reads <code>/proc/net/route</code> (filesystem only). MDNS uses the JVM's standard multicast socket.</p>
 <h2 id="3-native-library">3. Native library</h2>
 <p><code>libpcap.so</code> (Linux package: <code>libpcap0.8</code>, version &gt;= 1.0.0). NOT a Maven dependency — provided by the host OS or container layer.</p>
 <p>On Debian/Ubuntu: <code>apt-get install libpcap0.8</code>.</p>
@@ -682,7 +683,7 @@ footer {
 <p>with <code>ARG DISTROLESS_VARIANT=nonroot</code>. Unlike the pure <code>gcr.io/distroless/java21</code> image, the <code>java21-debian12</code> variant is built on Debian 12 (bookworm) and includes the <code>libpcap</code> shared library, so the pcap4j → JNA → <code>libpcap.so</code> path resolves at runtime without an additional package-install layer. No <code>apt-get install libpcap0.8</code> step is required, and the choice does not sacrifice the distroless minimal-attack-surface posture (no shell, no package manager) — the Debian-12 distroless variant retains those properties.</p>
 <p>This is the option originally tracked as "(a) drop pure distroless for the Debian-12 distroless base." It is now the committed decision; there is no separate discovery image and no host-deployment-only degradation. See <a href="supply-chain.html">documentation/supply-chain.html</a>, which cites the same <code>gcr.io/distroless/java21-debian12:nonroot</code> base.</p>
 <h2 id="5-linux-only-contract-for-v1">5. Linux-only contract for v1</h2>
-<p><code>/proc/net/arp</code> does not exist on Windows or macOS. The <code>ArpCacheReader</code> returns an empty list when the file is absent (no exception). Future ports could read:</p>
+<p><code>/proc/net/arp</code> does not exist on Windows or macOS. The <code>ArpCacheReader</code> returns an empty list when the file is absent (no exception). The same contract covers the other proc-backed sources: <code>ConnTableReader</code> (<code>/proc/net/{tcp,tcp6,udp,udp6}</code>) and <code>GatewayProbe</code> (<code>/proc/net/route</code>) also degrade to an empty list when their files are absent — never an exception. Future ports could read:</p>
 <ul>
 <li>Windows: <code>GetIpNetTable</code> via JNA.</li>
 <li>macOS: <code>/Library/Preferences/SystemConfiguration/...</code> plus <code>arp -an</code> parsing (sysctl-based).</li>
@@ -706,6 +707,40 @@ footer {
 <p>Required to seed the admin account. <code>BootstrapAdminInitializer</code> runs at <code>ApplicationReadyEvent</code> and performs an idempotent upsert: if the user does not exist it is created; if it exists and the stored BCrypt hash differs from the env var, the hash is updated and an <code>ADMIN_HASH_ROTATE</code> audit event is emitted. If either variable is absent or blank, the bootstrap step is skipped with a warning. The operator must supply a pre-computed BCrypt strength-12 hash — the application never generates or logs a plaintext password. Equivalent variables exist for the viewer account: <code>CASTELLUM_VIEWER_USERNAME</code> / <code>CASTELLUM_VIEWER_PASSWORD_HASH</code>.</p>
 <p>First-login rotation: <code>mustChangePassword</code> in the login response is <code>true</code> when <code>user.lastLoginAt == null</code> and the username matches a bootstrap principal — computed live in <code>AuthController</code> on each login, not stored as a database column.</p>
 <p>Generate a BCrypt strength-12 hash: <code>htpasswd -bnBC 12 "" "&lt;password&gt;" | tr -d ':\n'</code></p>
+<h3 id="discovery-variables">DISCOVERY_* (passive discovery)</h3>
+<p>Tunables for the passive-discovery sweep. Each variable maps to a property under <code>castellum.discovery</code> in <code>application.yml</code>; the listed default applies when the variable is unset.</p>
+<table>
+<thead>
+<tr><th>Variable</th><th>Default</th><th>Effect</th></tr>
+</thead>
+<tbody>
+<tr><td><code>DISCOVERY_DURATION_SECONDS</code></td><td><code>30</code></td><td>Declared in <code>application.yml</code> (<code>castellum.discovery.default-duration-seconds</code>) but currently not consumed by any code path — the capture-window default for time-bounded sources (mDNS, PCAP) is a fixed 30&nbsp;s in <code>PassiveDiscoveryController</code>. Override the window per request via the <code>durationSeconds</code> field instead.</td></tr>
+<tr><td><code>DISCOVERY_PASSIVE_SWEEP_CRON</code></td><td><code>0 0 */6 * * *</code></td><td>Spring cron expression (UTC) for the scheduled passive sweep — every 6 hours by default. The scheduled sweep runs only the local-read sources: ARP, CONN_TABLE, GATEWAY.</td></tr>
+<tr><td><code>DISCOVERY_ARP_PATH</code></td><td><code>/proc/net/arp</code></td><td>ARP cache file read by <code>ArpCacheReader</code>.</td></tr>
+<tr><td><code>DISCOVERY_MDNS_SERVICE_TYPES</code></td><td>5 service types</td><td>Comma-separated mDNS service types queried by <code>MdnsProbe</code>. Default: <code>_workstation._tcp.local.</code>, <code>_http._tcp.local.</code>, <code>_ssh._tcp.local.</code>, <code>_smb._tcp.local.</code>, <code>_printer._tcp.local.</code></td></tr>
+<tr><td><code>DISCOVERY_PCAP_ENABLED</code></td><td><code>false</code></td><td>Opt-in toggle for the PCAP source. A sweep that requests PCAP while the flag is off soft-skips the source (logged, no error).</td></tr>
+<tr><td><code>DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS</code></td><td><code>50000</code></td><td>Bound on the in-memory capture queue per capture window. Once reached, the sniffer stops offering neighbors, logs a single truncation WARN, and drops all further frames in the window.</td></tr>
+<tr><td><code>DISCOVERY_LLDP_ENABLED</code> / <code>DISCOVERY_CDP_ENABLED</code></td><td><code>false</code></td><td>Feature flags for the LLDP / CDP decoders. The decoders ship as designed-but-untested stubs that throw when invoked — leave disabled.</td></tr>
+<tr><td><code>DISCOVERY_CONN_TABLE_ENABLED</code></td><td><code>true</code></td><td>Opt-out for connection-table discovery (<code>ConnTableReader</code>). Set to <code>false</code> to stop recording the remote peers of the host's own connections.</td></tr>
+<tr><td><code>DISCOVERY_CONN_TABLE_MAX_REMOTES</code></td><td><code>512</code></td><td>Per-read cap on distinct remote peers collected from the connection tables (first-N in file-read order, applied after dedupe). A WARN is logged when the cap truncates.</td></tr>
+<tr><td><code>DISCOVERY_BPF_FILTER</code></td><td><code>ip or ip6 or arp</code></td><td>libpcap BPF filter applied by <code>PcapSniffer</code>. Narrow it to discard irrelevant traffic before it reaches the JVM.</td></tr>
+</tbody>
+</table>
+<p><strong>CONN_TABLE is on by default.</strong> <code>ConnTableReader</code> parses <code>/proc/net/{tcp,tcp6,udp,udp6}</code> and emits one MAC-less neighbor per unique remote endpoint — TCP rows in state ESTABLISHED, UDP rows with a non-zero remote (connected sockets). It is a pure file read: no <code>CAP_NET_RAW</code>, no wire traffic. This is the source that surfaces off-network (PUBLIC-scope) peers on any host with outbound connections. Because remote peers choose to connect, they would otherwise control inventory growth on a busy public-facing host — <code>DISCOVERY_CONN_TABLE_MAX_REMOTES</code> caps each read. Missing proc files (Windows/macOS, locked-down containers) degrade to an empty list, never an exception. Opt out with <code>DISCOVERY_CONN_TABLE_ENABLED=false</code>.</p>
+<p><strong>GATEWAY has no toggle.</strong> <code>GatewayProbe</code> reads the <code>Gateway</code> column of the default-route row in <code>/proc/net/route</code> and emits at most one MAC-less neighbor, so the router itself always lands in the inventory. A missing or malformed route table yields an empty result — never an exception.</p>
+<p><strong>PCAP is off by default — deliberately.</strong> Beyond ARP frames, the sniffer now decodes the IPv4/IPv6 source and destination address of every captured packet into a MAC-less neighbor (filtering non-host addresses: <code>255.255.255.255</code>, subnet-directed <code>.255</code> broadcast, and multicast), so device creation scales with packet rate, not host count. Until device TTL/pruning lands, an always-on capture could grow the inventory without bound — hence opt-in. <code>DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS</code> bounds a single capture window's memory, not cumulative inventory growth across sweeps.</p>
+<p>MAC-less rows from CONN_TABLE, GATEWAY, and PCAP are deduplicated MAC-primary in <code>PassiveDiscoveryService</code>: when a MAC-bearing row (typically ARP) shares the IP, the MAC-less row is dropped and the surviving row backfills hostname/iface from it when those are null. This is why the gateway does not appear twice when it is also in the ARP cache.</p>
+<p>Privilege requirements per source (see also <a href="#2-linux-capability">§2</a>):</p>
+<table>
+<thead>
+<tr><th>Source</th><th>Mechanism</th><th>Privilege</th></tr>
+</thead>
+<tbody>
+<tr><td>PCAP, LLDP, CDP</td><td>Raw sockets via libpcap</td><td><code>CAP_NET_RAW</code></td></tr>
+<tr><td>ARP, CONN_TABLE, GATEWAY</td><td><code>/proc/net</code> file reads</td><td>None (filesystem only)</td></tr>
+<tr><td>MDNS</td><td>JVM standard multicast socket</td><td>None</td></tr>
+</tbody>
+</table>
     </div>
 
     <div class="no-results" id="no-results">

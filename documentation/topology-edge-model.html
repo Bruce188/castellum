@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Topology Edge Model &amp; Docker-Network Zoning — Castellum</title>
-<meta name="description" content="How Castellum's topology renderer models edges between devices: the gateway, isolated, and docker-bridge edge kinds, Docker pivot edge routing, DOCKER_BRIDGE gateway zoning, the publishesHostPort device field across backend, API, and frontend, and unattached Docker group rendering.">
+<meta name="description" content="How Castellum's topology renderer models edges between devices: the gateway, isolated, docker-bridge, and wan edge kinds, Docker pivot edge routing, WAN edge routing for PUBLIC-scope external devices, DOCKER_BRIDGE gateway zoning, the publishesHostPort device field across backend, API, and frontend, and unattached Docker group rendering.">
 <style>
 /* === Reset + variables === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -620,6 +620,7 @@ footer {
       <li class="lvl-2"><a href="#edge-kinds">Edge kinds</a></li>
       <li class="lvl-2"><a href="#docker-pivot-edge-routing">Docker pivot edge routing</a></li>
       <li class="lvl-3"><a href="#visual-summary">Visual summary</a></li>
+      <li class="lvl-2"><a href="#wan-edge-routing">WAN edge routing</a></li>
       <li class="lvl-2"><a href="#docker-bridge-gateway-zoning">DOCKER_BRIDGE gateway zoning</a></li>
       <li class="lvl-2"><a href="#publisheshostport-device-field">publishesHostPort device field</a></li>
       <li class="lvl-3"><a href="#backend">Backend</a></li>
@@ -634,14 +635,14 @@ footer {
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
       <h1>Topology Edge Model &amp; Docker-Network Zoning</h1>
-      <p class="description">How Castellum's topology renderer models edges between devices: the gateway, isolated, and docker-bridge edge kinds, Docker pivot edge routing, DOCKER_BRIDGE gateway zoning, the publishesHostPort device field across backend, API, and frontend, and unattached Docker group rendering.</p>
+      <p class="description">How Castellum's topology renderer models edges between devices: the gateway, isolated, docker-bridge, and wan edge kinds, Docker pivot edge routing, WAN edge routing for PUBLIC-scope external devices, DOCKER_BRIDGE gateway zoning, the publishesHostPort device field across backend, API, and frontend, and unattached Docker group rendering.</p>
       <div class="page-meta"><span class="meta-item"><strong>Section:</strong> architecture</span> · <span class="meta-item"><strong>Audience:</strong> frontend &amp; backend developers</span></div>
     </header>
 
     <div id="page-content">
 <p>This document describes how Castellum's topology renderer models edges between devices, with particular focus on Docker-scoped devices and the pivot (docker-host) edge routing introduced in the <code>feat/topology-edge-model-and-docker-zone</code> feature.</p>
 <h2 id="edge-kinds">Edge kinds</h2>
-<p>The frontend derives edges client-side in <code>src/lib/gatewayEdges.ts</code>. Three edge kinds exist:</p>
+<p>The frontend derives edges client-side in <code>src/lib/gatewayEdges.ts</code> and <code>src/lib/wanEdges.ts</code>. Four edge kinds exist:</p>
 <table>
 <thead>
 <tr><th>Kind</th><th>Description</th></tr>
@@ -650,6 +651,7 @@ footer {
 <tr><td><code>gateway</code></td><td>Default subnet-star edge. Lowest-IP device in a <code>/24</code> becomes the gateway; all other devices in that subnet edge to it.</td></tr>
 <tr><td><code>isolated</code></td><td>Device in a singleton <code>/24</code> (no peers). A self-referencing stub edge so the node is not orphaned in the graph.</td></tr>
 <tr><td><code>docker-bridge</code></td><td>Synthetic cross-zone edge produced for devices with <code>discoveryScope = DOCKER_BRIDGE</code>. Routing depends on <code>publishesHostPort</code> (see below).</td></tr>
+<tr><td><code>wan</code></td><td>Dashed cross-zone edge anchoring a <code>discoveryScope = PUBLIC</code> device to the LAN's egress router, so external nodes hang off the gateway instead of floating isolated inside the External zone. Capped at 64 (see <a href="#wan-edge-routing">WAN edge routing</a>).</td></tr>
 </tbody>
 </table>
 <h2 id="docker-pivot-edge-routing">Docker pivot edge routing</h2>
@@ -670,6 +672,14 @@ footer {
   ├── docker-bridge ──► published-container-A  (DOCKER_BRIDGE, publishesHostPort=true)
   └── docker-bridge ──► published-container-B  (DOCKER_BRIDGE, publishesHostPort=true)
 </code></pre>
+<h2 id="wan-edge-routing">WAN edge routing</h2>
+<p><code>buildWanEdges</code> (<code>src/lib/wanEdges.ts</code>) produces one dashed <code>wan</code> edge from the LAN's egress router (the WAN anchor) to every <code>PUBLIC</code>-scope device. Anchor selection:</p>
+<ol>
+<li><strong>Explicit router role</strong> — a <code>HOME</code>-scope device with <code>deviceRole === 'ROUTER'</code>; if several, the numerically lowest IP wins.</li>
+<li><strong>Fallback heuristic</strong> — the <code>HOME</code> device whose IPv4 ends in <code>.1</code> sharing its <code>/24</code> with the largest number of <code>HOME</code> devices (the most-populated subnet's <code>.1</code> is the likeliest default gateway).</li>
+<li><strong>No candidate</strong> — no WAN edges are built; PUBLIC nodes render unanchored inside the External zone.</li>
+</ol>
+<p>The edge set is capped by <code>WAN_EDGE_CAP = 64</code>, mirroring the backend GraphBuilder's subnet cap. Past 64 PUBLIC devices the single-anchor fan-in becomes the densest edge cluster in the graph and degrades the cose-bilkent layout, so the <em>entire</em> WAN edge set is dropped (one <code>console.warn</code>) and PUBLIC nodes render unanchored instead. WAN edges are rebuilt from the currently visible devices, so hiding the anchor's scope or the PUBLIC scope via the topology filter drops the edges with it.</p>
 <h2 id="docker-bridge-gateway-zoning">DOCKER_BRIDGE gateway zoning</h2>
 <p>Docker-net gateway devices are assigned <code>DiscoveryScope.DOCKER_BRIDGE</code> (not <code>HOME</code>) by <code>DockerDiscoveryService</code>. This ensures <code>scopeToZoneId</code> maps them to <code>zone-docker</code>, placing them visually inside the Docker zone rather than the Home zone. Gateways always have <code>publishesHostPort = false</code>.</p>
 <h2 id="publisheshostport-device-field"><code>publishesHostPort</code> device field</h2>
@@ -718,6 +728,7 @@ publishesHostPort: boolean;
 <tr><td><code>backend/.../discovery/DeviceUpsertService.java</code></td><td>Persists <code>publishesHostPort</code> via <code>upsertWithScope</code></td></tr>
 <tr><td><code>frontend/src/api/types.ts</code></td><td><code>Device.publishesHostPort</code> wire type</td></tr>
 <tr><td><code>frontend/src/lib/gatewayEdges.ts</code></td><td>Docker pivot edge routing logic</td></tr>
+<tr><td><code>frontend/src/lib/wanEdges.ts</code></td><td>WAN anchor selection + <code>wan</code> edge construction (<code>WAN_EDGE_CAP</code>)</td></tr>
 <tr><td><code>frontend/src/lib/dockerNetworkGroups.ts</code></td><td><code>DockerNetworkGroup.muted</code> flag + unattached group</td></tr>
 <tr><td><code>frontend/src/components/TopologyView.tsx</code></td><td>Muted-group stylesheet + class assignment</td></tr>
 </tbody>

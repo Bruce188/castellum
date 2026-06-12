@@ -985,7 +985,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <hr>
 <h2 id="5-runtime-flags-and-jvm-configuration">5. Runtime Flags and JVM Configuration</h2>
 <h3 id="cap-net-raw-for-passive-discovery">CAP_NET_RAW for passive discovery</h3>
-<p>The passive discovery module (<code>discovery/PcapSniffer</code>, <code>ArpCacheReader</code>, <code>MdnsProbe</code>) requires raw packet capture capability. In a Docker deployment, this is granted via:</p>
+<p>Only the packet-capture source of the passive discovery module (<code>discovery/PcapSniffer</code>) requires raw packet capture capability. The other sources need no capability: <code>ArpCacheReader</code>, <code>ConnTableReader</code>, and <code>GatewayProbe</code> are plain <code>/proc/net</code> file reads, and <code>MdnsProbe</code> uses the JVM's standard multicast socket (see <a href="runtime-flags.html#discovery-variables">runtime-flags.html — DISCOVERY_* tunables</a>). In a Docker deployment, the capability is granted via:</p>
 <div class="codehilite"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--cap-drop<span class="o">=</span>ALL<span class="w"> </span>--cap-add<span class="o">=</span>NET_RAW<span class="w"> </span>castellum:latest
 </code></pre></div>
 
@@ -1000,7 +1000,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 </code></pre></div>
 
 <p><strong>Do not use <code>--privileged</code>.</strong> The <code>--privileged</code> flag grants all capabilities including <code>SYS_ADMIN</code>, <code>SYS_PTRACE</code>, and others that are not needed and that expand the container's attack surface significantly. Only <code>NET_RAW</code> is required.</p>
-<p>If passive discovery is not used, <code>NET_RAW</code> is not required. The application starts and operates normally without it; passive discovery endpoints will fail with a permission error rather than silently.</p>
+<p>If packet capture is not used, <code>NET_RAW</code> is not required. The application starts and operates normally without it; a sweep requesting the PCAP source will fail with a permission error rather than silently, while the file-read sources (ARP, CONN_TABLE, GATEWAY) and mDNS keep working.</p>
 <h3 id="pcap4j-jvm-flags">pcap4j JVM flags</h3>
 <p>pcap4j uses JNA (Java Native Access) to call libpcap. In some environments the following JVM system properties are required:</p>
 <div class="codehilite"><pre><span></span><code><span class="c1"># Specify libpcap shared library path (if not in default library path):</span>
