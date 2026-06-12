@@ -1,5 +1,6 @@
 import { useMemo, useState, useId } from 'react';
 import type { Device } from '../api/types';
+import { displayIp } from '../lib/ipDisplay';
 
 interface Props {
   devices: Device[];
@@ -45,8 +46,8 @@ export function DevicePicker({ devices, value, onChange, placeholder, testId, la
     ? query
     : selected
       ? selected.hostname
-        ? `${selected.hostname} (${selected.ipAddress})`
-        : selected.ipAddress
+        ? `${selected.hostname} (${displayIp(selected.ipAddress)})`
+        : displayIp(selected.ipAddress)
       : '';
 
   const lowerQuery = query.toLowerCase();
@@ -56,7 +57,9 @@ export function DevicePicker({ devices, value, onChange, placeholder, testId, la
       ? devices
       : devices.filter(d =>
           (d.hostname?.toLowerCase().includes(lowerQuery) ?? false) ||
-          d.ipAddress.toLowerCase().includes(lowerQuery)
+          // Match what the option row actually shows: placeholder IPs render as
+          // "no IP", so typing "no" finds them while the raw "mac:" key does not.
+          displayIp(d.ipAddress).toLowerCase().includes(lowerQuery)
         );
     return { matches: filtered.slice(0, OPTION_RENDER_CAP), matchCount: filtered.length };
   }, [devices, lowerQuery, open, query.length]);
@@ -125,7 +128,7 @@ export function DevicePicker({ devices, value, onChange, placeholder, testId, la
                   commit(d.id);
                 }}
               >
-                <span className="font-mono">{d.ipAddress}</span>
+                <span className="font-mono">{displayIp(d.ipAddress)}</span>
                 {d.hostname && <span className="text-gray-500"> — {d.hostname}</span>}
               </button>
             </li>

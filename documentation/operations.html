@@ -675,6 +675,12 @@ footer {
       <li class="lvl-3"><a href="#role-values">Role values</a></li>
       <li class="lvl-3"><a href="#confidence-signal">Confidence signal</a></li>
       <li class="lvl-3"><a href="#where-the-role-surfaces">Where the role surfaces</a></li>
+      <li class="lvl-2"><a href="#13-lldp-passive-discovery">13. LLDP Passive Discovery</a></li>
+      <li class="lvl-3"><a href="#enabling-the-lldp-source">Enabling the LLDP source</a></li>
+      <li class="lvl-3"><a href="#what-an-lldp-frame-yields">What an LLDP frame yields</a></li>
+      <li class="lvl-3"><a href="#bounding-the-lldp-capture-window">Bounding the capture window</a></li>
+      <li class="lvl-3"><a href="#mac-only-neighbors-and-the-no-ip-placeholder">MAC-only neighbors and the &quot;no IP&quot; placeholder</a></li>
+      <li class="lvl-3"><a href="#placeholder-scope-graph-and-export-semantics">Placeholder scope, graph, and export semantics</a></li>
       <li class="lvl-2"><a href="#cross-references">Cross-References</a></li>
     </ul>
   </aside>
@@ -987,7 +993,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <hr>
 <h2 id="5-runtime-flags-and-jvm-configuration">5. Runtime Flags and JVM Configuration</h2>
 <h3 id="cap-net-raw-for-passive-discovery">CAP_NET_RAW for passive discovery</h3>
-<p>Only the packet-capture source of the passive discovery module (<code>discovery/PcapSniffer</code>) requires raw packet capture capability. The other sources need no capability: <code>ArpCacheReader</code>, <code>ConnTableReader</code>, and <code>GatewayProbe</code> are plain <code>/proc/net</code> file reads, and <code>MdnsProbe</code> uses the JVM's standard multicast socket (see <a href="runtime-flags.html#discovery-variables">runtime-flags.html — DISCOVERY_* tunables</a>). In a Docker deployment, the capability is granted via:</p>
+<p>Two passive-discovery sources open a raw libpcap capture handle and therefore require raw packet capture capability: the packet sniffer (<code>discovery/PcapSniffer</code>, PCAP source) and the LLDP capture (<code>discovery/LldpCapture</code>, LLDP source — see <a href="#13-lldp-passive-discovery">§13</a>). The other sources need no capability: <code>ArpCacheReader</code>, <code>ConnTableReader</code>, and <code>GatewayProbe</code> are plain <code>/proc/net</code> file reads, and <code>MdnsProbe</code> uses the JVM's standard multicast socket (see <a href="runtime-flags.html#discovery-variables">runtime-flags.html — DISCOVERY_* tunables</a>). In a Docker deployment, the capability is granted via:</p>
 <div class="codehilite"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--cap-drop<span class="o">=</span>ALL<span class="w"> </span>--cap-add<span class="o">=</span>NET_RAW<span class="w"> </span>castellum:latest
 </code></pre></div>
 
@@ -1002,7 +1008,7 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 </code></pre></div>
 
 <p><strong>Do not use <code>--privileged</code>.</strong> The <code>--privileged</code> flag grants all capabilities including <code>SYS_ADMIN</code>, <code>SYS_PTRACE</code>, and others that are not needed and that expand the container's attack surface significantly. Only <code>NET_RAW</code> is required.</p>
-<p>If packet capture is not used, <code>NET_RAW</code> is not required. The application starts and operates normally without it; a sweep requesting the PCAP source will fail with a permission error rather than silently, while the file-read sources (ARP, CONN_TABLE, GATEWAY) and mDNS keep working.</p>
+<p>If packet capture is not used, <code>NET_RAW</code> is not required. The application starts and operates normally without it; a sweep requesting the PCAP or LLDP source will fail with a permission error rather than silently, while the file-read sources (ARP, CONN_TABLE, GATEWAY) and mDNS keep working.</p>
 <h3 id="pcap4j-jvm-flags">pcap4j JVM flags</h3>
 <p>pcap4j uses JNA (Java Native Access) to call libpcap. In some environments the following JVM system properties are required:</p>
 <div class="codehilite"><pre><span></span><code><span class="c1"># Specify libpcap shared library path (if not in default library path):</span>
@@ -1011,7 +1017,8 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <span class="c1"># pcap4j network interface name (if not auto-detected):</span>
 -Dorg.pcap4j.core.pcapDev<span class="o">=</span>eth0
 
-<span class="c1"># Promiscuous mode (default: true for PcapSniffer; set false to disable):</span>
+<span class="c1"># Promiscuous mode — no effect on Castellum&#39;s capture paths: the mode is fixed in code</span>
+<span class="c1"># (PcapSniffer opens non-promiscuous; LldpCapture opens promiscuous — see §13):</span>
 -Dorg.pcap4j.core.pcapPromisc<span class="o">=</span><span class="nb">true</span>
 </code></pre></div>
 
@@ -1528,6 +1535,47 @@ confirm against other signals (open services, OS fingerprint, origin host) befor
 the role as authoritative. An <code>UNKNOWN</code> role simply means the available signals were
 ambiguous; it is not itself a finding.</p>
 <hr>
+<h2 id="13-lldp-passive-discovery">13. LLDP Passive Discovery</h2>
+<p>LLDP (IEEE 802.1AB) is the link-layer protocol that managed switches, routers, and access points use to announce themselves to their directly connected neighbors. The LLDP passive-discovery source (<code>discovery/LldpCapture</code> + <code>discovery/LldpDecoder</code>) listens for those announcements during a sweep and turns each one into a device row. It is the source that surfaces L2 infrastructure: devices that never appear in the ARP cache because the Castellum host exchanges no IP traffic with them, and that an active scan cannot see at all when they advertise no IP address.</p>
+<h3 id="enabling-the-lldp-source">Enabling the LLDP source</h3>
+<p>The source is <strong>off by default</strong>. Three preconditions apply:</p>
+<ol>
+<li><strong>Feature flag</strong> — set <code>DISCOVERY_LLDP_ENABLED=true</code> (property <code>castellum.discovery.lldp.enabled</code>). While the flag is off, a sweep that requests the LLDP source soft-skips it (logged, no error) — the same behaviour as a disabled PCAP source.</li>
+<li><strong>Explicit interface</strong> — a sweep request that includes the LLDP source with a null or blank <code>iface</code> is rejected up front with the message <code>LLDP source requires interface name</code> (HTTP 503 <code>discovery_unavailable</code>; no <code>discovery_sweep</code> row is opened). Pick the interface from <code>GET /api/discovery/interfaces</code> (see <a href="ot-probes.html#passive-discovery-endpoints">ot-probes.html — passive discovery endpoints</a>) or from the discovery panel on the Settings page.</li>
+<li><strong>Privileges</strong> — the same requirement as the PCAP sniffer: <code>CAP_NET_RAW</code> (or root) plus <code>libpcap.so</code> (see <a href="#cap-net-raw-for-passive-discovery">§5</a>). Without the capability, an LLDP sweep fails with an explicit permission error rather than silently.</li>
+</ol>
+<p>The capture runs for the sweep's <code>durationSeconds</code> window. The handle is always opened in <strong>promiscuous mode</strong> — LLDP frames are addressed to the multicast group <code>01:80:c2:00:00:0e</code> and may never be delivered to a non-promiscuous handle (the PCAP sniffer, by contrast, opens non-promiscuous). The BPF filter <code>ether proto 0x88cc</code> keeps every non-LLDP frame out of the JVM.</p>
+<h3 id="what-an-lldp-frame-yields">What an LLDP frame yields</h3>
+<p><code>LldpDecoder</code> parses the LLDPDU of each captured Ethernet frame (ethertype <code>0x88cc</code>, plain or behind one 802.1Q VLAN tag) into at most one neighbor:</p>
+<table>
+<thead>
+<tr><th>TLV</th><th>Device field</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Chassis ID (subtype 4 — MAC)</td><td>MAC address</td><td>Stored lowercase colon-separated — the same canonical form the ARP reader emits, so multi-source observations of the same NIC collapse onto one device.</td></tr>
+<tr><td>Port ID (subtype 3 — MAC)</td><td>MAC address (fallback)</td><td>Used only when the Chassis ID TLV yields no MAC.</td></tr>
+<tr><td>System Name</td><td>Hostname</td><td>Trimmed; blank → null.</td></tr>
+<tr><td>Management Address</td><td>IP address</td><td>The first IPv4 address wins; if no IPv4 TLV is present, the first IPv6 address is used.</td></tr>
+</tbody>
+</table>
+<p>The TTL TLV is deliberately ignored — even a TTL=0 shutdown announcement proves the device exists. Malformed input never throws: a wrong ethertype or a truncated frame yields nothing, and a TLV whose declared length overruns the captured buffer ends parsing while keeping the fields collected so far.</p>
+<h3 id="bounding-the-lldp-capture-window">Bounding the capture window</h3>
+<p><code>DISCOVERY_LLDP_MAX_CAPTURED_FRAMES</code> (property <code>castellum.discovery.lldp.max-captured-frames</code>, default <code>1000</code>) caps the frames decoded per capture window — the LLDP-side counterpart of <code>DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS</code>. Once the cap is reached, a single truncation WARN is logged and all further frames in the window are dropped. Devices typically announce LLDP every 30 seconds, so the default is generous for any reasonable segment; the cap exists to bound memory if something floods the LLDP multicast group.</p>
+<h3 id="mac-only-neighbors-and-the-no-ip-placeholder">MAC-only neighbors and the &quot;no IP&quot; placeholder</h3>
+<p>Many L2 switches and access points advertise LLDP without a management address — there is no IP to record. Castellum persists these neighbors anyway, keyed by a deterministic placeholder in the <code>ip_address</code> column:</p>
+<div class="codehilite"><pre><code>mac:aa-bb-cc-dd-ee-ff
+</code></pre></div>
+<p>— the literal <code>mac:</code> prefix plus the dash-separated lowercase MAC (<code>discovery/PlaceholderIp</code>). The same MAC always maps to the same key, so the <code>UNIQUE(ip_address, origin_host_ip)</code> constraint dedupes the device across sweeps.</p>
+<p><strong>The UI never shows the raw key.</strong> A placeholder renders as the literal label <code>no IP</code> everywhere an IP address would appear: the fleet table, the device detail panel, the device picker, the topology view, attack-graph hop labels, and the per-scan snapshot. To find such a device in the picker, search by hostname (the LLDP system name) or type <code>no</code> — the raw <code>mac:</code> key does not match.</p>
+<p><strong>Self-healing.</strong> When a later sighting — typically ARP, once the host starts exchanging traffic with the device — supplies a real IP for the same MAC, the device renumbers to the real IP and its discovery scope is recomputed from it. The reverse never happens: a placeholder never overwrites a real IP, neither within a single sweep (the real-IP observation wins the in-sweep merge regardless of arrival order, with the LLDP system name and interface backfilled onto the winner) nor across sweeps (the MAC-keyed update path refuses to renumber a device <em>to</em> a placeholder).</p>
+<h3 id="placeholder-scope-graph-and-export-semantics">Placeholder scope, graph, and export semantics</h3>
+<ul>
+<li><strong>Scope</strong> — placeholder devices classify as <code>HOME</code>: an LLDP frame is heard directly on the wire, so the device is on-link infrastructure by definition. (Classifying it as <code>PUBLIC</code> would expose the row to the PUBLIC-device TTL prune and isolate it in the attack graph.)</li>
+<li><strong>Attack graph</strong> — a placeholder is not an IP literal, so the device is skipped from subnet bucketing exactly like an unparseable IP: no <code>SAME_SUBNET</code> edges originate from it (see <a href="attack-graph.html#subnet-bucketing--ipv4-and-ipv6">attack-graph.html — subnet bucketing</a>).</li>
+<li><strong>STIX export</strong> — placeholder devices are excluded from STIX bundles exactly like null-IP rows: a synthetic <code>mac:</code> key is not a valid <code>ipv4-addr</code> pattern value and never leaks into any STIX property.</li>
+</ul>
+<p>Tunables and per-source privilege requirements are summarized in <a href="runtime-flags.html#discovery-variables">runtime-flags.html — DISCOVERY_* tunables</a>.</p>
+<hr>
 <h2 id="cross-references">Cross-References</h2>
 <table>
 <thead>
@@ -1551,7 +1599,7 @@ ambiguous; it is not itself a finding.</p>
 </tr>
 <tr>
 <td><a href="ot-probes.html">documentation/ot-probes.html</a></td>
-<td>OT probe configuration (timeout env vars, max-concurrent), read-only contract</td>
+<td>OT probe configuration (timeout env vars, max-concurrent), read-only contract, passive-discovery endpoint reference</td>
 </tr>
 <tr>
 <td><a href="compliance.html">documentation/compliance.html</a></td>

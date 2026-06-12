@@ -1,5 +1,6 @@
 import type { Criticality, Device, DeviceRiskDto, NetworkService } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
+import { displayIp } from '../lib/ipDisplay';
 import { scopeChipColor } from '../lib/scopeColors';
 import { CveEvidenceTable } from './CveEvidenceTable';
 import { WhyScorePanel } from './WhyScorePanel';
@@ -67,8 +68,8 @@ export function DeviceDetailPanel({ device, risk, services, onClose, isAdmin = f
     >
       <header className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold">{device.hostname ?? device.ipAddress}</h2>
-          <p className="text-sm text-gray-500">{device.ipAddress}</p>
+          <h2 className="text-lg font-semibold">{device.hostname ?? displayIp(device.ipAddress)}</h2>
+          <p className="text-sm text-gray-500">{displayIp(device.ipAddress)}</p>
           <span
             data-testid="scope-chip"
             style={{ backgroundColor: scopeChipColor[device.discoveryScope] }}

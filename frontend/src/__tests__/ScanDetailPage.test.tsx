@@ -222,3 +222,41 @@ describe('<ScanDetailPage /> device-row focus navigation', () => {
     });
   });
 });
+
+describe('<ScanDetailPage /> MAC-placeholder IP rendering', () => {
+  beforeEach(() => {
+    getScanReport.mockReset();
+    exportScanReportJson.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  // Defense-in-depth: scan attribution is IP-keyed on the backend, so a placeholder
+  // device should never enter a scan report — but if one ever does, the snapshot
+  // table must render "no IP", never the raw mac: sentinel.
+  it('renders "no IP" instead of a raw mac: placeholder in the snapshot IP cell', async () => {
+    const reportWithPlaceholder: ScanReport = {
+      ...baseReport,
+      devices: [
+        ...baseReport.devices,
+        {
+          id: 104,
+          ipAddress: 'mac:aa-bb-cc-dd-ee-ff',
+          hostname: 'switch01',
+          delta: 'new',
+          services: [],
+          cveIds: [],
+        },
+      ],
+    };
+    getScanReport.mockResolvedValueOnce(reportWithPlaceholder);
+    renderWith('/scans/7');
+
+    await screen.findByTestId('scan-snapshot-table');
+
+    const link104 = screen.getByTestId('device-focus-link-104');
+    expect(link104.textContent).toBe('no IP');
+    expect(screen.queryByText('mac:aa-bb-cc-dd-ee-ff')).not.toBeInTheDocument();
+    // Real-IP rows are untouched.
+    expect(screen.getByTestId('device-focus-link-101').textContent).toBe('10.0.0.1');
+  });
+});

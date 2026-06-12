@@ -36,6 +36,11 @@ public class DiscoveryScopeClassifier {
     public DiscoveryScope classify(String ip) {
         if (ip == null || ip.isBlank()) return DiscoveryScope.PUBLIC;
         String s = ip.trim();
+        // Synthetic placeholder keys ("mac:...") for MAC-only LLDP/CDP neighbors are on-link
+        // infrastructure heard directly → HOME. Must fire BEFORE the IPv6 colon check —
+        // "mac:" contains a colon and would otherwise fall into the IPv6 chain → PUBLIC,
+        // getting the device TTL-pruned and isolated in the attack graph.
+        if (PlaceholderIp.isPlaceholder(s)) return DiscoveryScope.HOME;
         // A colon means IPv6 — handled by its own prefix chain below.
         if (s.indexOf(':') >= 0) {
             String normalized = normalizeIpv6(s);

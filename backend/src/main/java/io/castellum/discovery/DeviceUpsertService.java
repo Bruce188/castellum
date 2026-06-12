@@ -426,9 +426,17 @@ public class DeviceUpsertService {
             }
             if (existing != null) {
                 existing.setLastSeen(d.observedAt());
-                // MAC-keyed match: refresh IP if it changed (renumber event)
-                if (d.ipAddress() != null && !d.ipAddress().equals(existing.getIpAddress())) {
+                // MAC-keyed match: refresh IP if it changed (renumber event). Never renumber
+                // TO a placeholder — a later LLDP-only sighting must not clobber a real IP
+                // learned from ARP. When the renumber DOES happen, recompute scope from the
+                // new IP: this is the placeholder→real self-heal path (HOME placeholder
+                // becomes whatever the real IP classifies as) and is equally correct for
+                // real→real renumbers.
+                if (d.ipAddress() != null
+                        && !PlaceholderIp.isPlaceholder(d.ipAddress())
+                        && !d.ipAddress().equals(existing.getIpAddress())) {
                     existing.setIpAddress(d.ipAddress());
+                    existing.setDiscoveryScope(scopeClassifier.classify(d.ipAddress()));
                 }
                 if (existing.getMacAddress() == null && d.macAddress() != null) {
                     existing.setMacAddress(d.macAddress());

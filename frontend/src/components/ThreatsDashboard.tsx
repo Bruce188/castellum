@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { Criticality, Device, DeviceRiskDto, FeedsStatusDto, NetworkService, TopRiskDeviceDto } from '../api/types';
 import { freshnessTier, FRESHNESS_BADGE_CLASSES, FRESHNESS_DOT_CLASSES } from '../lib/freshness';
+import { displayIp } from '../lib/ipDisplay';
 import { CveDetailPanel } from './CveDetailPanel';
 import { DeviceDetailPanel } from './DeviceDetailPanel';
 import { RelatedCvesPanel } from './RelatedCvesPanel';
@@ -430,9 +431,9 @@ export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}
                 >
                   <td className="py-1 pr-2 text-gray-500">{i + 1}</td>
                   <td className="py-1 pr-2">
-                    <div className="font-mono">{d.hostname ?? d.ipAddress}</div>
+                    <div className="font-mono">{d.hostname ?? displayIp(d.ipAddress)}</div>
                     {d.hostname && (
-                      <div className="text-xs text-gray-500">{d.ipAddress}</div>
+                      <div className="text-xs text-gray-500">{displayIp(d.ipAddress)}</div>
                     )}
                   </td>
                   <td className="py-1 pr-2">{d.criticality}</td>
@@ -479,7 +480,7 @@ export function ThreatsDashboard({ isAdmin = false }: { isAdmin?: boolean } = {}
                       <RelatedCvesPanel
                         deviceId={d.deviceId}
                         hostname={d.hostname}
-                        ipAddress={d.ipAddress}
+                        ipAddress={displayIp(d.ipAddress)}
                         onCveSelect={setSelectedCveId}
                       />
                     </td>

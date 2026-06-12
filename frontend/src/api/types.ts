@@ -8,6 +8,13 @@ export type DeviceRole = 'LAPTOP' | 'DESKTOP' | 'SERVER' | 'ROUTER' | 'CONTAINER
 
 export interface Device {
   id: number;
+  /**
+   * Device IP address — OR a synthetic MAC-placeholder sentinel of the form
+   * `mac:aa-bb-cc-dd-ee-ff` for MAC-only neighbors (e.g. LLDP-discovered
+   * switches without a management address). Never render this field raw:
+   * route it through {@link displayIp} from `lib/ipDisplay` (placeholders
+   * render as "no IP"); detect with `isMacPlaceholder`.
+   */
   ipAddress: string;
   hostname: string | null;
   macAddress: string | null;

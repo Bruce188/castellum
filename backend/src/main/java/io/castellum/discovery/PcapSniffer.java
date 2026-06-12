@@ -1,10 +1,8 @@
 package io.castellum.discovery;
 
-import org.pcap4j.core.BpfProgram.BpfCompileMode;
 import org.pcap4j.core.NotOpenException;
 import org.pcap4j.core.PcapHandle;
 import org.pcap4j.core.PcapNativeException;
-import org.pcap4j.core.PcapNetworkInterface;
 import org.pcap4j.core.PcapNetworkInterface.PromiscuousMode;
 import org.pcap4j.core.Pcaps;
 import org.pcap4j.packet.ArpPacket;
@@ -19,7 +17,6 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -45,9 +42,6 @@ public class PcapSniffer {
 
     private static final Logger log = LoggerFactory.getLogger(PcapSniffer.class);
 
-    private static final int SNAP_LEN = 65536;
-    private static final int TIMEOUT_MS = 10;
-
     private final String bpfFilter;
     private final int maxCapturedNeighbors;
 
@@ -66,35 +60,11 @@ public class PcapSniffer {
      * @throws NotOpenException    if the handle is closed unexpectedly
      */
     public List<DiscoveredNeighbor> sniff(String iface, int durationSeconds) throws PcapNativeException, NotOpenException, InterruptedException {
-        PcapNetworkInterface nif = Pcaps.getDevByName(iface);
-        if (nif == null) {
-            throw new PcapNativeException("Network interface not found: " + iface);
-        }
-
         var queue = new ConcurrentLinkedQueue<DiscoveredNeighbor>();
         var captured = new AtomicInteger();
 
-        try (PcapHandle handle = nif.openLive(SNAP_LEN, PromiscuousMode.NONPROMISCUOUS, TIMEOUT_MS)) {
-            handle.setFilter(bpfFilter, BpfCompileMode.OPTIMIZE);
-
-            // Virtual thread to enforce the bounded duration
-            Thread breakThread = Thread.ofVirtual().start(() -> {
-                try {
-                    Thread.sleep(Duration.ofSeconds(durationSeconds).toMillis());
-                    try {
-                        handle.breakLoop();
-                    } catch (NotOpenException ignored) {
-                        // Handle already closed — normal during shutdown
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-
-            handle.loop(-1, (Packet packet) -> decode(packet, iface, queue, captured));
-
-            breakThread.interrupt();
-        }
+        CaptureLoop.run(iface, durationSeconds, bpfFilter, PromiscuousMode.NONPROMISCUOUS,
+            packet -> decode(packet, iface, queue, captured));
 
         return new ArrayList<>(queue);
     }
@@ -172,12 +142,8 @@ public class PcapSniffer {
      * offer logs a single WARN and all further neighbors in the window are dropped.
      */
     private boolean reserveCaptureSlot(AtomicInteger captured) {
-        int n = captured.incrementAndGet();
-        if (n <= maxCapturedNeighbors) return true;
-        if (n == maxCapturedNeighbors + 1) {
-            log.warn("capture buffer cap reached — further neighbors in this window dropped (cap={})", maxCapturedNeighbors);
-        }
-        return false;
+        return CaptureLoop.reserveCaptureSlot(captured, maxCapturedNeighbors, log,
+            "capture buffer cap reached — further neighbors in this window dropped (cap={})");
     }
 
     /**

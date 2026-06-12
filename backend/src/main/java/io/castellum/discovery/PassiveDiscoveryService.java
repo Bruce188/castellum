@@ -31,6 +31,7 @@ public class PassiveDiscoveryService {
     private final MdnsProbe mdnsProbe;
     private final PcapSniffer pcapSniffer;
     private final LldpDecoder lldpDecoder;
+    private final LldpCapture lldpCapture;
     private final CdpDecoder cdpDecoder;
     private final ConnTableReader connTableReader;
     private final GatewayProbe gatewayProbe;
@@ -48,6 +49,7 @@ public class PassiveDiscoveryService {
             MdnsProbe mdnsProbe,
             PcapSniffer pcapSniffer,
             LldpDecoder lldpDecoder,
+            LldpCapture lldpCapture,
             CdpDecoder cdpDecoder,
             ConnTableReader connTableReader,
             GatewayProbe gatewayProbe,
@@ -63,6 +65,7 @@ public class PassiveDiscoveryService {
         this.mdnsProbe = mdnsProbe;
         this.pcapSniffer = pcapSniffer;
         this.lldpDecoder = lldpDecoder;
+        this.lldpCapture = lldpCapture;
         this.cdpDecoder = cdpDecoder;
         this.connTableReader = connTableReader;
         this.gatewayProbe = gatewayProbe;
@@ -106,6 +109,13 @@ public class PassiveDiscoveryService {
                 && req.sources().contains(DiscoverySource.PCAP)
                 && (req.iface() == null || req.iface().isBlank())) {
             throw new DiscoveryUnavailableException("PCAP source requires interface name");
+        }
+        // Same intake validation for LLDP — a live capture cannot open a null/blank interface.
+        // When LLDP is disabled by flag the source is soft-skipped inside runSweep.
+        if (lldpEnabled
+                && req.sources().contains(DiscoverySource.LLDP)
+                && (req.iface() == null || req.iface().isBlank())) {
+            throw new DiscoveryUnavailableException("LLDP source requires interface name");
         }
 
         String joinedSources = req.sources().stream()
@@ -166,15 +176,18 @@ public class PassiveDiscoveryService {
                     }
                     case LLDP -> {
                         if (!lldpEnabled) {
-                            log.warn("LLDP source requested but disabled by feature flag; skipping");
-                        } else {
-                            log.warn("LLDP enabled but untested — dispatching decoder (undefined behavior)");
-                            futures.add(executor.submit(() -> {
-                                lldpDecoder.decode(new byte[0]); // throws UnsupportedOperationException
-                                return List.<DiscoveredNeighbor>of();
-                            }));
-                            submittedSources.add(source);
+                            log.info("LLDP source requested but disabled by feature flag; skipping");
+                            break;
                         }
+                        futures.add(executor.submit(() -> {
+                            try {
+                                return lldpCapture.capture(req.iface(), req.durationSeconds());
+                            } catch (PcapNativeException | NotOpenException e) {
+                                throw new DiscoveryUnavailableException(
+                                    "LLDP capture failed on interface '" + req.iface() + "': " + e.getMessage(), e);
+                            }
+                        }));
+                        submittedSources.add(source);
                     }
                     case CDP -> {
                         if (!cdpEnabled) {
@@ -210,17 +223,28 @@ public class PassiveDiscoveryService {
                     List<DiscoveredNeighbor> neighbors = futures.get(i).get();
                     Instant observedAt = clock.instant();
                     for (DiscoveredNeighbor n : neighbors) {
-                        // mDNS hostname-only entries (no IPv4) cannot key the device upsert —
+                        boolean ipBlank = n.ipAddress() == null || n.ipAddress().isBlank();
+                        boolean macBlank = n.macAddress() == null || n.macAddress().isBlank();
+                        // Hostname-only entries (no IP, no MAC) cannot key the device upsert —
                         // skip but still count toward perSourceCount so operators see them in audit.
-                        if (n.ipAddress() == null || n.ipAddress().isBlank()) {
+                        if (ipBlank && macBlank) {
                             perSourceCount.merge(source, 1, Integer::sum);
-                            log.debug("Skipping hostname-only neighbor (no IPv4): hostname={}", n.hostname());
+                            log.debug("Skipping unkeyable neighbor (no IP, no MAC): hostname={}", n.hostname());
                             continue;
                         }
-                        Discovery disc = toDiscovery(n, source, observedAt);
+                        // MAC-only neighbor (LLDP/CDP infrastructure without a management address):
+                        // keep it, keyed by the deterministic synthetic placeholder IP. It carries
+                        // a MAC, so it lands in the withMac map below.
+                        String ip = ipBlank ? PlaceholderIp.forMac(n.macAddress()) : n.ipAddress();
+                        Discovery disc = toDiscovery(n, source, observedAt, ip);
                         perSourceCount.merge(source, 1, Integer::sum);
                         if (disc.macAddress() != null && !disc.macAddress().isBlank()) {
-                            withMac.put(disc.macAddress(), disc); // last-write-wins on MAC
+                            // IP-quality-aware merge on MAC: a placeholder-IP observation must
+                            // never displace a real-IP observation for the same MAC (and a real
+                            // IP replaces a placeholder), with hostname/iface backfilled
+                            // fill-when-null from the losing row. Same-quality collisions keep
+                            // plain last-write-wins.
+                            withMac.merge(disc.macAddress(), disc, PassiveDiscoveryService::mergeOnMac);
                         } else {
                             withoutMac.put(disc.ipAddress(), disc); // fallback IP key
                         }
@@ -320,7 +344,33 @@ public class PassiveDiscoveryService {
         }
     }
 
-    private Discovery toDiscovery(DiscoveredNeighbor n, DiscoverySource source, Instant observedAt) {
-        return new Discovery(n.ipAddress(), n.macAddress(), n.hostname(), source, observedAt, n.iface(), false);
+    /**
+     * Resolves a same-sweep collision between two MAC-keyed discoveries. When exactly one
+     * side carries a synthetic placeholder IP ({@link PlaceholderIp}), the real-IP side wins
+     * regardless of arrival order — an LLDP MAC-only row must never overwrite an ARP row that
+     * knows the device's actual address. Hostname and iface backfill fill-when-null from the
+     * losing row (mirroring {@link #reconcileMacPrimacy}), so e.g. an LLDP sysname survives
+     * onto the ARP entry. When both sides are placeholder or both are real, the incoming row
+     * wins (last-write-wins, unchanged behavior).
+     */
+    private static Discovery mergeOnMac(Discovery existing, Discovery incoming) {
+        boolean existingPlaceholder = PlaceholderIp.isPlaceholder(existing.ipAddress());
+        boolean incomingPlaceholder = PlaceholderIp.isPlaceholder(incoming.ipAddress());
+        if (existingPlaceholder == incomingPlaceholder) {
+            return incoming; // same IP quality — last-write-wins on MAC
+        }
+        Discovery winner = existingPlaceholder ? incoming : existing;
+        Discovery loser = existingPlaceholder ? existing : incoming;
+        String hostname = winner.hostname() != null ? winner.hostname() : loser.hostname();
+        String iface = winner.iface() != null ? winner.iface() : loser.iface();
+        if (Objects.equals(hostname, winner.hostname()) && Objects.equals(iface, winner.iface())) {
+            return winner;
+        }
+        return new Discovery(winner.ipAddress(), winner.macAddress(), hostname,
+            winner.source(), winner.observedAt(), iface, winner.publishesHostPort());
+    }
+
+    private Discovery toDiscovery(DiscoveredNeighbor n, DiscoverySource source, Instant observedAt, String ipAddress) {
+        return new Discovery(ipAddress, n.macAddress(), n.hostname(), source, observedAt, n.iface(), false);
     }
 }

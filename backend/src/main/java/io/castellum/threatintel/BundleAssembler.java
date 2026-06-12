@@ -4,6 +4,7 @@ import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.cve.CveRepository;
 import io.castellum.cve.CveStixView;
+import io.castellum.discovery.PlaceholderIp;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -84,7 +85,7 @@ public class BundleAssembler {
 
         List<Device> devices = deviceRepository.findAll();
         for (Device device : devices) {
-            if (device.getIpAddress() == null) continue;
+            if (!hasExportableIp(device)) continue;
 
             String deviceName = device.getHostname() != null ? device.getHostname() : device.getIpAddress();
             Map<String, Object> castellumExt = new LinkedHashMap<>();
@@ -129,10 +130,10 @@ public class BundleAssembler {
             objects.put(vuln.id(), vuln);
         }
 
-        // Batch services: one query for all devices that have an IP address
+        // Batch services: one query for all devices that have an exportable (real) IP address
         List<Long> deviceIds = new ArrayList<>();
         for (Device device : devices) {
-            if (device.getIpAddress() != null) deviceIds.add(device.getId());
+            if (hasExportableIp(device)) deviceIds.add(device.getId());
         }
         Map<Long, List<NetworkService>> servicesByDevice = new LinkedHashMap<>();
         if (!deviceIds.isEmpty()) {
@@ -174,7 +175,7 @@ public class BundleAssembler {
 
         // Per-device, per-service: match CVEs, emit affects relationships and indicators
         for (Device device : devices) {
-            if (device.getIpAddress() == null) continue;
+            if (!hasExportableIp(device)) continue;
             String infraId = StixIds.forDevice(device.getIpAddress());
 
             List<NetworkService> services = servicesByDevice.getOrDefault(device.getId(), List.of());
@@ -237,6 +238,16 @@ public class BundleAssembler {
 
         // AC5: bundle materialized in-memory (no streaming, no size cap) — see plan-v55 §AC5.
         return StixBundle.of(StixIds.forBundle(), new ArrayList<>(objects.values()));
+    }
+
+    /**
+     * A device enters the STIX bundle only with a real, routable IP. MAC-only placeholder
+     * rows ({@code "mac:..."}, see {@link PlaceholderIp}) are skipped exactly like null-IP
+     * rows: a synthetic sentinel is not a valid {@code ipv4-addr} pattern value and must not
+     * leak into any STIX property.
+     */
+    private static boolean hasExportableIp(Device device) {
+        return device.getIpAddress() != null && !PlaceholderIp.isPlaceholder(device.getIpAddress());
     }
 
     /**
