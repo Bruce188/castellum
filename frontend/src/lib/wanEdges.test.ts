@@ -58,12 +58,15 @@ describe('buildWanEdges', () => {
   });
 
   it('router_role_must_be_home_scope', () => {
-    // A DOCKER_BRIDGE "router" must not anchor; with no HOME .1 either → [].
+    // A DOCKER_BRIDGE "router" must not anchor; with no HOME .1 either the
+    // PUBLIC device falls back to an isolated self-anchor.
     const devices: Device[] = [
       makeDevice(1, '172.17.0.1', 'DOCKER_BRIDGE', 'ROUTER'),
       makeDevice(2, '8.8.8.8', 'PUBLIC'),
     ];
-    expect(buildWanEdges(devices)).toEqual([]);
+    expect(buildWanEdges(devices)).toEqual([
+      { data: { id: 'wan-iso-2', source: '2', target: '2', kind: 'isolated' } },
+    ]);
   });
 
   it('fallback_dot1_of_most_populated_home_slash24', () => {
@@ -82,22 +85,31 @@ describe('buildWanEdges', () => {
     expect(edges[0].data.target).toBe('5');
   });
 
-  it('fallback_requires_dot1_no_anchor_yields_empty', () => {
-    // HOME devices exist but none is a ROUTER and none ends in .1 → no anchor.
+  it('fallback_requires_dot1_no_anchor_yields_isolated_self_anchors', () => {
+    // HOME devices exist but none is a ROUTER and none ends in .1 → no anchor
+    // → the PUBLIC device gets an isolated self-anchor, not zero edges.
     const devices: Device[] = [
       makeDevice(1, '192.168.68.50', 'HOME'),
       makeDevice(2, '192.168.68.51', 'HOME'),
       makeDevice(3, '8.8.8.8', 'PUBLIC'),
     ];
-    expect(buildWanEdges(devices)).toEqual([]);
+    expect(buildWanEdges(devices)).toEqual([
+      { data: { id: 'wan-iso-3', source: '3', target: '3', kind: 'isolated' } },
+    ]);
   });
 
-  it('no_home_devices_yields_empty', () => {
+  it('no_home_devices_yields_isolated_self_anchor_per_public_device', () => {
     const devices: Device[] = [
       makeDevice(1, '8.8.8.8', 'PUBLIC'),
       makeDevice(2, '1.1.1.1', 'PUBLIC'),
     ];
-    expect(buildWanEdges(devices)).toEqual([]);
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(2);
+    expect(edges.map(e => e.data.id).sort()).toEqual(['wan-iso-1', 'wan-iso-2']);
+    expect(edges.every(e => e.data.source === e.data.target)).toBe(true);
+    expect(edges.every(e => e.data.kind === 'isolated')).toBe(true);
+    // Self-anchors must NOT carry the wan-edge stroke class.
+    expect(edges.every(e => e.classes === undefined)).toBe(true);
   });
 
   it('no_public_devices_yields_empty', () => {
@@ -108,7 +120,7 @@ describe('buildWanEdges', () => {
     expect(buildWanEdges(devices)).toEqual([]);
   });
 
-  it('over_cap_public_devices_yields_empty_with_single_warn', () => {
+  it('over_cap_public_devices_yields_isolated_self_anchors_with_single_warn', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const devices: Device[] = [
       makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
@@ -116,7 +128,12 @@ describe('buildWanEdges', () => {
         makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
       ),
     ];
-    expect(buildWanEdges(devices)).toEqual([]);
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(WAN_EDGE_CAP + 1);
+    expect(edges.every(e => e.data.kind === 'isolated')).toBe(true);
+    expect(edges.every(e => e.data.source === e.data.target)).toBe(true);
+    expect(edges.every(e => e.data.id.startsWith('wan-iso-'))).toBe(true);
+    expect(edges.every(e => e.classes === undefined)).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
@@ -178,7 +195,8 @@ describe('buildWanEdges', () => {
 
   it('ipv6_public_devices_receive_wan_edges_and_count_toward_cap', () => {
     // IPv6 PUBLIC devices are included in publicDevices (scope-only filter).
-    // 63 IPv4 + 2 IPv6 PUBLIC = 65 > WAN_EDGE_CAP (64) → cap warning → [].
+    // 63 IPv4 + 2 IPv6 PUBLIC = 65 > WAN_EDGE_CAP (64) → cap warning →
+    // isolated self-anchors for all 65.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ipv4Public = Array.from({ length: 63 }, (_, i) =>
       makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
@@ -192,7 +210,10 @@ describe('buildWanEdges', () => {
       ...ipv4Public,
       ...ipv6Public,
     ];
-    expect(buildWanEdges(devices)).toEqual([]);
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(65);
+    expect(edges.every(e => e.data.kind === 'isolated')).toBe(true);
+    expect(edges.every(e => e.data.source === e.data.target)).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });

@@ -643,3 +643,50 @@ describe('Task 3.4: per-origin pivot + localStorage fallback', () => {
     expect(dbEdges.filter(e => e.data.source === '20' || e.data.target === '20')).toHaveLength(0);
   });
 });
+
+describe('PUBLIC-scope exclusion from LAN /24 wiring', () => {
+  it('PUBLIC device in a shared /24 gets no edges; HOME peers keep theirs', () => {
+    // PUBLIC parked at .1 — would be picked as the /24 gateway if not excluded.
+    const devices: Device[] = [
+      makeDevice(1, '203.0.113.1', 'PUBLIC'),
+      makeDevice(2, '203.0.113.10', 'HOME'),
+      makeDevice(3, '203.0.113.20', 'HOME'),
+    ];
+    const edges = buildGatewayEdges(devices);
+
+    // No edge of any kind touches the PUBLIC device.
+    expect(edges.filter(e => e.data.source === '1' || e.data.target === '1'))
+      .toHaveLength(0);
+
+    // The HOME pair still forms a gateway star among themselves (lowest IP wins).
+    const gatewayEdges = edges.filter(e => e.data.kind === 'gateway');
+    expect(gatewayEdges).toHaveLength(1);
+    expect(gatewayEdges[0].data.source).toBe('3');
+    expect(gatewayEdges[0].data.target).toBe('2');
+  });
+
+  it('singleton PUBLIC device gets no iso- self-anchor (wanEdges owns its anchoring)', () => {
+    const edges = buildGatewayEdges([makeDevice(7, '198.51.100.9', 'PUBLIC')]);
+    expect(edges).toHaveLength(0);
+  });
+
+  it('two PUBLIC devices sharing a public /24 stay fully unwired here', () => {
+    const edges = buildGatewayEdges([
+      makeDevice(7, '203.0.113.7', 'PUBLIC'),
+      makeDevice(8, '203.0.113.9', 'PUBLIC'),
+    ]);
+    expect(edges).toHaveLength(0);
+  });
+
+  it('a HOME singleton left behind by an excluded PUBLIC neighbour still self-anchors', () => {
+    // Excluding PUBLIC turns the /24 into a HOME singleton — the iso- fallback
+    // must still fire for the HOME device.
+    const edges = buildGatewayEdges([
+      makeDevice(1, '203.0.113.1', 'PUBLIC'),
+      makeDevice(2, '203.0.113.10', 'HOME'),
+    ]);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].data.kind).toBe('isolated');
+    expect(edges[0].data.id).toBe('iso-2');
+  });
+});

@@ -48,6 +48,22 @@ import java.util.Map;
  * {@code Map<String, List<Device>>} via the {@code v4:}/{@code v6:} prefix on the bucket key
  * returned by {@link #extractSubnetKey(String)}.
  *
+ * <p>PUBLIC-scope isolation invariant (IPv4): PUBLIC devices appear as vertices but never
+ * receive v4 SAME_SUBNET edges, in either direction — a shared /24 across the internet
+ * implies no L2 adjacency, unlike LINK_LOCAL whose 169.254.0.0/16 adjacency is genuine
+ * segment adjacency and therefore keeps its SAME_SUBNET edges. The exclusion is surgical:
+ * a PUBLIC device is skipped when filling v4 subnet buckets, not the bucket dropped, so
+ * co-bucketed HOME devices keep their own SAME_SUBNET edges. Starving a device of bucket
+ * membership also starves it of EXPLOITABLE_VULN edges (that pass iterates sameSubnetPeers
+ * only), and the GATEWAY_PIVOT pass excludes PUBLIC by construction in both address
+ * families (pivots must be HOME, members must be DOCKER_BRIDGE).
+ *
+ * <p>IPv6 is deliberately exempt from the isolation invariant: {@code DiscoveryScopeClassifier}
+ * maps every global-unicast v6 address to PUBLIC — including RA/SLAAC-assigned LAN prefixes —
+ * so excluding PUBLIC from v6 buckets would sever genuinely L2-adjacent v6 LAN devices.
+ * Sharing a /64 is itself strong same-link evidence, so v6 /64 bucketing remains scope-blind
+ * and PUBLIC v6 devices keep SAME_SUBNET (and consequent EXPLOITABLE_VULN) adjacency.
+ *
  * <p>A third, additive gateway-bridge pass runs after the EXPLOITABLE_VULN pass. DOCKER_BRIDGE
  * devices are partitioned by {@code originHostIp}. For each partition a pivot HOME device is
  * resolved: the {@code "local"} origin matches the configured
@@ -102,10 +118,20 @@ public class GraphBuilder {
         }
 
         // SAME_SUBNET pass — IPv4 /24 and IPv6 /64 share the same bucket map.
+        // PUBLIC-scope devices are excluded from the IPv4 buckets ONLY (and not the
+        // buckets dropped): a shared /24 across the public internet implies no L2
+        // adjacency, so v4 PUBLIC never gets SAME_SUBNET edges — and, because the
+        // EXPLOITABLE_VULN pass draws exclusively on sameSubnetPeers, no
+        // EXPLOITABLE_VULN edges either. IPv6 stays scope-blind: the classifier maps
+        // every global-unicast v6 address to PUBLIC (RA/SLAAC LAN prefixes included),
+        // while a shared /64 is strong same-link evidence — excluding PUBLIC there
+        // would sever genuinely L2-adjacent v6 LAN devices. Remaining devices in the
+        // same bucket keep their adjacency untouched.
         Map<String, List<Device>> bySubnet = new LinkedHashMap<>();
         for (Device d : devices) {
             String prefix = extractSubnetKey(d.getIpAddress());
             if (prefix == null) continue;
+            if (d.getDiscoveryScope() == DiscoveryScope.PUBLIC && prefix.startsWith("v4:")) continue;
             bySubnet.computeIfAbsent(prefix, k -> new ArrayList<>()).add(d);
         }
         Map<Long, List<Long>> sameSubnetPeers = new HashMap<>();
@@ -135,6 +161,12 @@ public class GraphBuilder {
         // EdgeWeights, AttackTechniqueMapper.
         CompositeScoreMemoizer memo = new CompositeScoreMemoizer();
         for (Device d : devices) {
+            // Edges from this pass land only between a device and its same-subnet
+            // peers, so a device with no inbound peers (v4 PUBLIC, singleton subnet,
+            // capped bucket) can skip the service-fetch + CVE-match + scoring work
+            // entirely — it would all be discarded below.
+            List<Long> peers = sameSubnetPeers.getOrDefault(d.getId(), List.of());
+            if (peers.isEmpty()) continue;
             List<NetworkService> services = networkServiceRepository.findByDeviceId(d.getId());
             // Collect all matched (cve, score, service) triples, then take top-N by composite score.
             List<ScoredCve> scored = new ArrayList<>();
@@ -162,7 +194,6 @@ public class GraphBuilder {
             List<ScoredCve> top = scored.subList(0, cap);
 
             DeviceVertex vd = vertexById.get(d.getId());
-            List<Long> peers = sameSubnetPeers.getOrDefault(d.getId(), List.of());
             for (Long peerId : peers) {
                 DeviceVertex vs = vertexById.get(peerId);
                 for (ScoredCve sc : top) {
@@ -196,13 +227,6 @@ public class GraphBuilder {
             if (d.getDiscoveryScope() != DiscoveryScope.DOCKER_BRIDGE) continue;
             String origin = d.getOriginHostIp() != null ? d.getOriginHostIp() : "local";
             dockerByOrigin.computeIfAbsent(origin, k -> new ArrayList<>()).add(d);
-        }
-
-        // Build a lookup of HOME devices by IP for non-local pivot resolution.
-        Map<String, Device> homeByIp = new LinkedHashMap<>();
-        for (Device d : devices) {
-            if (d.getDiscoveryScope() != DiscoveryScope.HOME) continue;
-            homeByIp.putIfAbsent(d.getIpAddress(), d);
         }
 
         String techniqueId = AttackTechniqueMapper.forEdgeType(EdgeType.GATEWAY_PIVOT).id();
