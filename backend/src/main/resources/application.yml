@@ -102,6 +102,14 @@ castellum:
     conn-table:
       enabled: ${DISCOVERY_CONN_TABLE_ENABLED:true}
       max-remotes: ${DISCOVERY_CONN_TABLE_MAX_REMOTES:512}
+    public-device-prune:
+      # TTL retention for stale PUBLIC-scope devices. Only discoveryScope=PUBLIC rows are
+      # ever pruned — HOME/DOCKER_BRIDGE/operator-scoped devices are never touched.
+      # Daily at 03:30 UTC by default.
+      cron: ${DISCOVERY_PUBLIC_DEVICE_PRUNE_CRON:0 30 3 * * *}
+      enabled: ${DISCOVERY_PUBLIC_DEVICE_PRUNE_ENABLED:true}
+      # ISO-8601 duration — a PUBLIC device unseen for this long is hard-deleted.
+      ttl: ${DISCOVERY_PUBLIC_DEVICE_TTL:P14D}
     bpf-filter: ${DISCOVERY_BPF_FILTER:ip or ip6 or arp}
   graph:
     subnet-cap: ${GRAPH_SUBNET_CAP:64}

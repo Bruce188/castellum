@@ -1,9 +1,11 @@
 package io.castellum.domain;
 
+import io.castellum.discovery.DiscoveryScope;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -45,4 +47,13 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
 
     /** Returns full Device rows most recently observed by the given scan. */
     List<Device> findByLastSeenByScanId(Long scanId);
+
+    /**
+     * IDs of devices in the given scope whose {@code lastSeen} is older than the cutoff.
+     * Id-projection (not full rows) — the TTL prune path only needs the keys to feed
+     * {@code deleteAllByIdInBatch}, so loading entities would be wasted work.
+     */
+    @Query("SELECT d.id FROM Device d WHERE d.discoveryScope = :scope AND d.lastSeen < :cutoff")
+    List<Long> findIdsByDiscoveryScopeAndLastSeenBefore(@Param("scope") DiscoveryScope scope,
+                                                        @Param("cutoff") Instant cutoff);
 }
