@@ -774,6 +774,44 @@ class GraphBuilderTest {
         assertThat(ab.getType()).isEqualTo(EdgeType.SAME_SUBNET);
     }
 
+    /**
+     * A MAC-only placeholder IP ({@code "mac:..."}) is not an IP literal —
+     * {@code InetAddress.getByName} would attempt hostname RESOLUTION on the request path.
+     * extractSubnetKey must short-circuit to {@code null}, the same bucket as an
+     * unparseable IP, without touching the resolver.
+     */
+    @Test
+    void extractSubnetKey_placeholderIp_returnsNullLikeUnparseable() {
+        assertThat(GraphBuilder.extractSubnetKey("mac:aa-bb-cc-dd-ee-ff"))
+            .as("placeholder IP must bucket exactly like an unparseable IP")
+            .isEqualTo(GraphBuilder.extractSubnetKey("not-an-ip%%%"));
+        assertThat(GraphBuilder.extractSubnetKey("mac:aa-bb-cc-dd-ee-ff")).isNull();
+    }
+
+    /**
+     * End-to-end through build(): a placeholder-IP device must not throw and must get no
+     * SAME_SUBNET edges — it lands in the skip bucket, exactly like a device whose IP
+     * fails to parse.
+     */
+    @Test
+    void build_placeholderIpDevice_noExceptionNoSubnetEdges() {
+        Device placeholder = device(1L, "mac:aa-bb-cc-dd-ee-ff");
+        Device a = device(2L, "10.0.0.1");
+        Device b = device(3L, "10.0.0.2");
+        when(deviceRepo.findAll()).thenReturn(List.of(placeholder, a, b));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPlaceholder = new DeviceVertex(1L, "mac:aa-bb-cc-dd-ee-ff");
+        assertThat(g.containsVertex(vPlaceholder)).isTrue();
+        assertThat(g.edgesOf(vPlaceholder))
+            .as("placeholder-IP device must get no subnet adjacency")
+            .isEmpty();
+        // Sanity: the real-IP pair still gets SAME_SUBNET edges in the same build.
+        assertThat(g.getEdge(new DeviceVertex(2L, "10.0.0.1"), new DeviceVertex(3L, "10.0.0.2")))
+            .isNotNull();
+    }
+
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
         return org.assertj.core.data.Offset.offset(tolerance);
     }

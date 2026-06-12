@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,6 +46,7 @@ class PassiveDiscoveryServiceTest {
     @Mock private MdnsProbe mdnsProbe;
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpDecoder lldpDecoder;
+    @Mock private LldpCapture lldpCapture;
     @Mock private CdpDecoder cdpDecoder;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
@@ -59,7 +61,7 @@ class PassiveDiscoveryServiceTest {
     void setUp() {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         service = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false /* lldpEnabled */,
@@ -268,7 +270,7 @@ class PassiveDiscoveryServiceTest {
     void sweep_pcapDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
         // Build a service variant with pcapEnabled=false
         PassiveDiscoveryService disabled = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false, false, false, true, clock);
@@ -284,7 +286,7 @@ class PassiveDiscoveryServiceTest {
     void sweep_connTableDisabledByFlag_skippedSilentlyEvenWhenRequested() throws Exception {
         // Build a service variant with connTableEnabled=false
         PassiveDiscoveryService disabled = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, cdpDecoder,
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
             false, false, true, false, clock);
@@ -457,5 +459,196 @@ class PassiveDiscoveryServiceTest {
             .hasMessageContaining("DB constraint");
 
         verify(recorder).finish(eq(42L), eq("FAILED"), eq(0), eq(0), isNull(), any());
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Slice 5 — LLDP capture dispatch + MAC-only neighbor persistence
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** Service variant with the LLDP feature flag enabled (mirrors the disabled-flag variants above). */
+    private PassiveDiscoveryService lldpEnabledService() {
+        return new PassiveDiscoveryService(
+            arpFactory, mdnsProbe, pcapSniffer, lldpDecoder, lldpCapture, cdpDecoder,
+            connTableReader, gatewayProbe,
+            upsertService, auditService, recorder,
+            true /* lldpEnabled */, false, true, true, clock);
+    }
+
+    /**
+     * LLDP enabled + iface given: the sweep must dispatch {@code lldpCapture.capture(iface,
+     * duration)} (NOT the bare decoder stub) and flow the captured neighbors into upsertAll.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_lldpEnabledWithIface_dispatchesCaptureAndUpsertsNeighbors() throws Exception {
+        PassiveDiscoveryService lldpService = lldpEnabledService();
+        when(lldpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor("192.168.1.10", "aa:bb:cc:dd:ee:0e", null, null, "eth0", "switch01")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.LLDP));
+        PassiveDiscoveryResponse resp = lldpService.sweep(req);
+
+        verify(lldpCapture, times(1)).capture(eq("eth0"), eq(5));
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress()).isEqualTo("192.168.1.10");
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:0e");
+        assertThat(batch.get(0).hostname()).isEqualTo("switch01");
+        assertThat(resp.perSourceCount().get(DiscoverySource.LLDP)).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(1);
+    }
+
+    /**
+     * Intake validation (mirrors the PCAP block): LLDP enabled + LLDP requested + null/blank
+     * iface must throw BEFORE recorder.start — invalid input produces no discovery_sweep row.
+     */
+    @Test
+    void sweep_lldpEnabledRequestedWithBlankIface_throwsBeforeSweepRowOpened() {
+        PassiveDiscoveryService lldpService = lldpEnabledService();
+
+        PassiveDiscoveryRequest nullIface = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.LLDP));
+        assertThatThrownBy(() -> lldpService.sweep(nullIface))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("interface");
+
+        PassiveDiscoveryRequest blankIface = new PassiveDiscoveryRequest("   ", 5, List.of(DiscoverySource.LLDP));
+        assertThatThrownBy(() -> lldpService.sweep(blankIface))
+            .isInstanceOf(DiscoveryUnavailableException.class)
+            .hasMessageContaining("interface");
+
+        verify(recorder, never()).start(anyString(), any(), anyString());
+    }
+
+    /**
+     * Disabled-flag soft-skip stays: LLDP requested with lldpEnabled=false must complete the
+     * sweep without ever touching the capture collaborator (regression guard over the rewrite
+     * of the LLDP dispatch case).
+     */
+    @Test
+    void sweep_lldpDisabledByFlag_captureNeverInvoked() throws Exception {
+        // Default service variant has lldpEnabled=false
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.LLDP));
+        PassiveDiscoveryResponse resp = service.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(0);
+        org.mockito.Mockito.verifyNoInteractions(lldpCapture);
+    }
+
+    /**
+     * Drop-site relaxation: a MAC-only neighbor (ip null, mac set) must NOT be dropped —
+     * it reaches upsertAll keyed by the deterministic placeholder IP. The literal
+     * {@code "mac:aa-bb-cc-dd-ee-ff"} (lowercase, colons → dashes) pins the convention itself.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_lldpMacOnlyNeighbor_upsertedWithPlaceholderIp() throws Exception {
+        PassiveDiscoveryService lldpService = lldpEnabledService();
+        when(lldpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, "aa:bb:cc:dd:ee:ff", null, null, "eth0", null)
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.LLDP));
+        PassiveDiscoveryResponse resp = lldpService.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress())
+            .as("MAC-only neighbor must be keyed by the synthetic placeholder IP")
+            .isEqualTo("mac:aa-bb-cc-dd-ee-ff");
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:ff");
+        assertThat(resp.perSourceCount().get(DiscoverySource.LLDP)).isEqualTo(1);
+        assertThat(resp.discovered()).isEqualTo(1);
+    }
+
+    /**
+     * Drop only when BOTH ipAddress and macAddress are null/blank: a hostname-only neighbor
+     * is still dropped (cannot key the upsert) but counts toward perSourceCount as a real
+     * observation.
+     */
+    @Test
+    void sweep_lldpNeighborWithNullIpAndNullMac_droppedButCounted() throws Exception {
+        PassiveDiscoveryService lldpService = lldpEnabledService();
+        when(lldpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, null, null, null, "eth0", "ghost-switch")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.LLDP));
+        PassiveDiscoveryResponse resp = lldpService.sweep(req);
+
+        assertThat(resp.discovered()).isEqualTo(0);
+        assertThat(resp.perSourceCount().get(DiscoverySource.LLDP)).isEqualTo(1);
+        verify(upsertService, never()).upsertAll(anyList());
+    }
+
+    /**
+     * Same sweep, same MAC: ARP supplies the real IP, LLDP supplies a MAC-only row with a
+     * sysname. ARP collected first — the later placeholder row must NOT overwrite the real-IP
+     * row, but its hostname must backfill onto it (fill-when-null, mirroring
+     * reconcileMacPrimacy). Exactly one Discovery reaches upsertAll: real IP + LLDP hostname.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_arpRealIpThenLldpMacOnly_singleRowRealIpWithLldpHostname() throws Exception {
+        PassiveDiscoveryService lldpService = lldpEnabledService();
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.0.5", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null)
+        ));
+        when(lldpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, "aa:bb:cc:dd:ee:ff", null, null, "eth0", "switch01")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(
+            "eth0", 5, List.of(DiscoverySource.ARP, DiscoverySource.LLDP));
+        lldpService.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress())
+            .as("real ARP IP must survive a later MAC-only placeholder row")
+            .isEqualTo("10.0.0.5");
+        assertThat(batch.get(0).hostname())
+            .as("LLDP sysname must backfill onto the surviving real-IP row")
+            .isEqualTo("switch01");
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:ff");
+    }
+
+    /**
+     * Same collision, reverse collection order: LLDP's MAC-only placeholder row lands first,
+     * then ARP's real-IP row arrives. The real IP must replace the placeholder while the LLDP
+     * hostname still backfills. Order-independence is the point — same single-row outcome.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void sweep_lldpMacOnlyThenArpRealIp_singleRowRealIpWithLldpHostname() throws Exception {
+        PassiveDiscoveryService lldpService = lldpEnabledService();
+        when(arpReader.read()).thenReturn(List.of(
+            new DiscoveredNeighbor("10.0.0.5", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null)
+        ));
+        when(lldpCapture.capture(anyString(), anyInt())).thenReturn(List.of(
+            new DiscoveredNeighbor(null, "aa:bb:cc:dd:ee:ff", null, null, "eth0", "switch01")
+        ));
+
+        PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(
+            "eth0", 5, List.of(DiscoverySource.LLDP, DiscoverySource.ARP));
+        lldpService.sweep(req);
+
+        ArgumentCaptor<List<Discovery>> captor = ArgumentCaptor.forClass(List.class);
+        verify(upsertService).upsertAll(captor.capture());
+        List<Discovery> batch = captor.getValue();
+        assertThat(batch).hasSize(1);
+        assertThat(batch.get(0).ipAddress())
+            .as("real ARP IP must replace an earlier MAC-only placeholder row")
+            .isEqualTo("10.0.0.5");
+        assertThat(batch.get(0).hostname())
+            .as("LLDP sysname must backfill onto the surviving real-IP row")
+            .isEqualTo("switch01");
+        assertThat(batch.get(0).macAddress()).isEqualTo("aa:bb:cc:dd:ee:ff");
     }
 }

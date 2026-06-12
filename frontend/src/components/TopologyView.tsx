@@ -4,6 +4,7 @@ import cytoscape from 'cytoscape';
 import coseBilkent from 'cytoscape-cose-bilkent';
 import type { Device, DeviceRiskDto, DeviceRole, DiscoveryScope, DiscoverySource } from '../api/types';
 import { toRiskTier, tierColor } from '../lib/riskTier';
+import { displayIp } from '../lib/ipDisplay';
 import { scopeBorderColor } from '../lib/scopeColors';
 import { buildGatewayEdges } from '../lib/gatewayEdges';
 import { buildWanEdges } from '../lib/wanEdges';
@@ -350,7 +351,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
       // the leaf label reads as the clean network name + "(gw)", not the raw hostname.
       const baseName = isDockerNetGateway(d) && d.hostname !== null
         ? `${dockerNetworkName(d.hostname)} (gw)`
-        : hostname ?? d.ipAddress;
+        : hostname ?? displayIp(d.ipAddress);
       return {
         data: {
           id: String(d.id),
@@ -359,7 +360,7 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
           // data is available); all other devices go directly to their zone.
           parent: deviceToNetworkGroup.get(d.id) ?? scopeToZoneId(d.discoveryScope),
           label: d.serviceCount > 0 ? `${baseName} · ${d.serviceCount} svc` : baseName,
-          ip: d.ipAddress,
+          ip: displayIp(d.ipAddress),
           riskTier: tier,
           // discoverySource threaded into node data for tooltip/legend consumers.
           // null when device predates V19 migration.

@@ -286,6 +286,9 @@ public class GraphBuilder {
      */
     static String extractSubnetKey(String ip) {
         if (ip == null) return null;
+        // MAC-only placeholder ("mac:...") is not an IP literal — InetAddress.getByName would
+        // attempt hostname RESOLUTION on the request path. Skip like any unparseable IP.
+        if (io.castellum.discovery.PlaceholderIp.isPlaceholder(ip)) return null;
         try {
             InetAddress addr = InetAddress.getByName(ip);
             if (addr instanceof Inet4Address v4) {

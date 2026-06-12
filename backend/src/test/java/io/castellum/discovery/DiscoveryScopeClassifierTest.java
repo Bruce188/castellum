@@ -140,4 +140,16 @@ class DiscoveryScopeClassifierTest {
         // IPv6 is bucketed by prefix; ::1 must not pollute the External/Public zone.
         assertThat(classifier.classify("::1")).isEqualTo(DiscoveryScope.LOOPBACK);
     }
+
+    /**
+     * Slice 5: synthetic placeholder keys ({@code "mac:..."}) for MAC-only LLDP/CDP
+     * neighbors classify HOME. The rule must fire BEFORE the IPv6 colon check —
+     * "mac:aa-bb-..." contains a colon and would otherwise fall into the IPv6 chain
+     * and land PUBLIC, getting on-link infrastructure TTL-pruned and isolated in the
+     * attack graph.
+     */
+    @Test
+    void classify_macPlaceholder_returnsHome() {
+        assertThat(classifier.classify("mac:aa-bb-cc-dd-ee-ff")).isEqualTo(DiscoveryScope.HOME);
+    }
 }

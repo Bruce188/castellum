@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { exportScanReportJson } from '../lib/scanReportExport';
+import { displayIp } from '../lib/ipDisplay';
 import type { ScanReport } from '../api/types';
 
 type ErrorKind = 'not-found' | 'other';
@@ -165,7 +166,7 @@ export function ScanDetailPage() {
                       data-testid={`device-focus-link-${d.id}`}
                       className="text-blue-700 hover:underline"
                     >
-                      {d.ipAddress}
+                      {displayIp(d.ipAddress)}
                     </Link>
                   </td>
                   <td className="py-1 pr-4">{d.hostname ?? '—'}</td>

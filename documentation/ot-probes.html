@@ -640,7 +640,7 @@ footer {
       <li class="lvl-3"><a href="#activation">Activation</a></li>
       <li class="lvl-3"><a href="#fixture-absent-skip">Fixture-absent skip</a></li>
       <li class="lvl-3"><a href="#adding-a-fixture">Adding a fixture</a></li>
-      <li class="lvl-3"><a href="#current-stub-contract">Current stub contract</a></li>
+      <li class="lvl-3"><a href="#per-decoder-contract">Per-decoder contract</a></li>
       <li class="lvl-2"><a href="#verifying-the-read-only-contract">Verifying the Read-Only Contract</a></li>
       <li class="lvl-3"><a href="#procedure">Procedure</a></li>
       <li class="lvl-3"><a href="#what-to-confirm-per-protocol">What to Confirm Per Protocol</a></li>
@@ -996,15 +996,22 @@ aborts silently (abort ≠ failure) with the message <code>"managed-switch fixtu
 <p>These paths are deferred — capturing real LLDP-MED / CDP frames requires managed-switch
 infrastructure. Once committed, the tests automatically progress from <em>skipped</em> to <em>executed</em> on the
 next <code>mvn test -Pmanaged-switch-lab</code> run.</p>
-<h3 id="current-stub-contract">Current stub contract</h3>
-<p>Until real decoder implementations replace the skeletons, both test methods assert:</p>
+<h3 id="per-decoder-contract">Per-decoder contract</h3>
+<p>The two test classes no longer share one contract. <code>LldpDecoder</code> is a functional IEEE 802.1AB
+implementation (see <a href="operations.html#13-lldp-passive-discovery">operations.html §13 — LLDP Passive Discovery</a>),
+while <code>CdpDecoder</code> still ships as a designed-but-untested stub.</p>
+<p><strong>LLDP — real-decoder contract.</strong> <code>LldpProbeAcceptanceTest</code> exercises the live decoder:
+decoding the captured fixture must not throw, and every neighbor it yields must be well-formed —
+MAC address in canonical lowercase-colon form, management address parseable as an IP literal
+(IPv4 or IPv6), and the capture interface name propagated onto the neighbor.</p>
+<p><strong>CDP — stub contract.</strong> <code>CdpProbeAcceptanceTest</code> still pins the stub behaviour:</p>
 <div class="codehilite"><pre><span></span><code><span class="n">assertThatThrownBy</span><span class="p">(()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">decoder</span><span class="p">.</span><span class="na">decode</span><span class="p">(</span><span class="n">frameBytes</span><span class="p">))</span>
 <span class="w">    </span><span class="p">.</span><span class="na">isInstanceOf</span><span class="p">(</span><span class="n">UnsupportedOperationException</span><span class="p">.</span><span class="na">class</span><span class="p">)</span>
 <span class="w">    </span><span class="p">.</span><span class="na">hasMessageContaining</span><span class="p">(</span><span class="s">&quot;designed-but-untested&quot;</span><span class="p">);</span>
 </code></pre></div>
 
-<p>This pins the existing <code>LldpDecoder</code> / <code>CdpDecoder</code> stub contract and will need updating when the
-stubs are replaced with functional implementations.</p>
+<p>This assertion will need updating when <code>CdpDecoder</code> is replaced with a functional
+implementation, the same transition <code>LldpProbeAcceptanceTest</code> has already made.</p>
 <h2 id="verifying-the-read-only-contract">Verifying the Read-Only Contract</h2>
 <p>The automated test <code>AcceptanceSmokeTest.ac2_surrogateAllProbesEmitOnlyReadFunctionCodes</code>
 asserts byte-by-byte that each probe transmits only read-class function codes against an

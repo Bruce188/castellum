@@ -675,7 +675,7 @@ the <code>device</code> table:</p>
 </tbody>
 </table>
 <p>Both columns are <code>NULL</code> for devices that existed before V25 and for devices discovered
-by non-scan paths (Docker listener, passive discovery — ARP, mDNS, PCAP, CONN_TABLE, GATEWAY — and OT probes). No foreign-key constraint
+by non-scan paths (Docker listener, passive discovery — ARP, mDNS, PCAP, LLDP, CONN_TABLE, GATEWAY — and OT probes). No foreign-key constraint
 is applied — mirrors the loose scan-id referencing used elsewhere in the schema.</p>
 <h3 id="how-attribution-is-written">How attribution is written</h3>
 <p><code>DeviceUpsertService.upsert(Discovery, Long scanId)</code> is the scan-only overload:</p>

@@ -97,6 +97,7 @@ castellum:
       max-captured-neighbors: ${DISCOVERY_PCAP_MAX_CAPTURED_NEIGHBORS:50000}
     lldp:
       enabled: ${DISCOVERY_LLDP_ENABLED:false}
+      max-captured-frames: ${DISCOVERY_LLDP_MAX_CAPTURED_FRAMES:1000}
     cdp:
       enabled: ${DISCOVERY_CDP_ENABLED:false}
     conn-table:

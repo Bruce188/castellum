@@ -6,6 +6,7 @@ import { RiskTierKey } from '../components/RiskTierKey';
 import { api } from '../api/client';
 import type { ApiError } from '../api/client';
 import type { Device, DeviceRiskDto, HopDto, ShortestPathResponse } from '../api/types';
+import { displayIp } from '../lib/ipDisplay';
 
 /**
  * Degrade copy for the backend's 503 GRAPH_TOO_LARGE response. Composed here
@@ -101,7 +102,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
 
   const hostnameById = useMemo(() => {
     const m = new Map<number, string>();
-    for (const d of devices) m.set(d.id, d.hostname ?? d.ipAddress);
+    for (const d of devices) m.set(d.id, d.hostname ?? displayIp(d.ipAddress));
     return m;
   }, [devices]);
 
@@ -147,7 +148,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
   }
 
   const renderHopRow = (hop: HopDto, idx: number, prevId: number, prevLabel: string) => {
-    const toLabel = hostnameById.get(hop.deviceId) ?? hop.ipAddress;
+    const toLabel = hostnameById.get(hop.deviceId) ?? displayIp(hop.ipAddress);
     const techniqueText = hop.attackTechniqueId
       ? ` (technique: ${hop.attackTechniqueId}${hop.attackTechniqueName ? ` / ${hop.attackTechniqueName}` : ''})`
       : '';
@@ -230,7 +231,7 @@ export function AttackGraphPage({ isAdmin }: Props) {
                   return {
                     rows: [...acc.rows, row],
                     prevId: hop.deviceId,
-                    prevLabel: hostnameById.get(hop.deviceId) ?? hop.ipAddress,
+                    prevLabel: hostnameById.get(hop.deviceId) ?? displayIp(hop.ipAddress),
                   };
                 },
                 {

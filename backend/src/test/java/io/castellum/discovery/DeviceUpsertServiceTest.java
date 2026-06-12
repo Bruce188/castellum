@@ -1375,4 +1375,69 @@ class DeviceUpsertServiceTest {
         assertThat(loaded.getDeviceRole()).isEqualTo(DeviceRole.UNKNOWN);
         assertThat(loaded.getRoleConfidence()).isEqualTo(RoleConfidence.HIGH);
     }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Slice 5 — MAC-only neighbor persistence (placeholder IP + self-heal)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Never renumber TO a placeholder: an existing device with a real IP and MAC m,
+     * re-observed via an LLDP-only sighting carrying the synthetic placeholder IP and
+     * the same MAC, must KEEP its real IP. The MAC-keyed renumber branch must guard
+     * against clobbering a real IP learned from ARP with the "mac:..." key.
+     */
+    @Test
+    void upsertAll_placeholderIpIncoming_doesNotClobberRealIp() {
+        Device seed = new Device(null, "10.0.60.1", null, "aa:bb:cc:dd:ee:60", T1, T1);
+        repo.save(seed);
+
+        service.upsertAll(List.of(new Discovery("mac:aa-bb-cc-dd-ee-60", "aa:bb:cc:dd:ee:60",
+            null, DiscoverySource.LLDP, T2, "eth0", false)));
+
+        assertThat(repo.count()).isEqualTo(1L);
+        var found = repo.findByIpAddress("10.0.60.1").orElseThrow();
+        assertThat(found.getIpAddress())
+            .as("a later LLDP-only sighting must not clobber a real IP with the placeholder")
+            .isEqualTo("10.0.60.1");
+        assertThat(found.getLastSeen()).isEqualTo(T2); // update itself still fires
+    }
+
+    /**
+     * Placeholder → real self-heal: an existing placeholder-keyed device (scope HOME),
+     * re-observed by ARP with a real IP and the same MAC, must renumber to the real IP
+     * AND recompute scope via the classifier (203.0.113.9 → PUBLIC, not the stale HOME).
+     */
+    @Test
+    void upsertAll_realIpIncoming_renumbersPlaceholderAndRecomputesScope() {
+        Device seed = new Device(null, "mac:aa-bb-cc-dd-ee-61", null, "aa:bb:cc:dd:ee:61", T1, T1);
+        seed.setDiscoveryScope(DiscoveryScope.HOME);
+        repo.save(seed);
+
+        service.upsertAll(List.of(new Discovery("203.0.113.9", "aa:bb:cc:dd:ee:61",
+            null, DiscoverySource.ARP, T2, "eth0", false)));
+
+        assertThat(repo.count()).isEqualTo(1L); // renumber in place, no second row
+        var found = repo.findByIpAddress("203.0.113.9").orElseThrow();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:61");
+        assertThat(found.getDiscoveryScope())
+            .as("renumber must recompute scope from the real IP (placeholder HOME → classified PUBLIC)")
+            .isEqualTo(DiscoveryScope.PUBLIC);
+    }
+
+    /**
+     * Fresh MAC-only insert: the placeholder string flows into ip_address verbatim and
+     * the scope classifier buckets the "mac:..." key HOME (on-link infrastructure —
+     * PUBLIC would get it TTL-pruned and isolated in the attack graph).
+     */
+    @Test
+    void upsertAll_freshMacOnlyInsert_persistsPlaceholderIpWithHomeScope() {
+        service.upsertAll(List.of(new Discovery("mac:aa-bb-cc-dd-ee-62", "aa:bb:cc:dd:ee:62",
+            null, DiscoverySource.LLDP, T1, "eth0", false)));
+
+        var found = repo.findByIpAddress("mac:aa-bb-cc-dd-ee-62").orElseThrow();
+        assertThat(found.getMacAddress()).isEqualTo("aa:bb:cc:dd:ee:62");
+        assertThat(found.getDiscoveryScope())
+            .as("placeholder-keyed insert must classify HOME, not fall into the IPv6 chain → PUBLIC")
+            .isEqualTo(DiscoveryScope.HOME);
+    }
 }
