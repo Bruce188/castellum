@@ -74,6 +74,8 @@ castellum:
   discovery:
     default-duration-seconds: 30
     passive-sweep-cron: "-"
+    public-device-prune:
+      cron: "-"
     arp:
       proc-path: /proc/net/arp
     mdns:

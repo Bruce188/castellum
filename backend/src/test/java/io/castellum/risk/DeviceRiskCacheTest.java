@@ -133,6 +133,40 @@ class DeviceRiskCacheTest {
     }
 
     @Test
+    void onDevicesPruned_evictsDeviceRisk_forcesRecompute() {
+        deviceRiskService.computeRisk(1L);
+        riskCacheEvictor.onDevicesPruned();
+        deviceRiskService.computeRisk(1L);
+
+        // Pruned devices invalidate aggregates exactly like a scan completing does.
+        verify(deviceRepo, times(2)).findById(1L);
+        verify(networkServiceRepository, times(2)).findByDeviceId(1L);
+    }
+
+    @Test
+    void onDevicesPruned_evictsSameCacheSetAsScanComplete_leavesFeedsStatusIntact() {
+        List<String> scanEvictedCaches = List.of(
+            CacheNames.DEVICE_RISK, CacheNames.TOP_RISK, CacheNames.CVE_FLEET,
+            CacheNames.CVE_AFFECTED, CacheNames.CVE_FLEET_WINDOW);
+        for (String name : scanEvictedCaches) {
+            cacheManager.getCache(name).put("k", "stale");
+        }
+        cacheManager.getCache(CacheNames.FEEDS_STATUS).put("k", "fresh");
+
+        riskCacheEvictor.onDevicesPruned();
+
+        for (String name : scanEvictedCaches) {
+            assertThat(cacheManager.getCache(name).get("k"))
+                .as("onDevicesPruned must evict ALL entries of '%s' (mirror of onScanComplete)", name)
+                .isNull();
+        }
+        // Pruning devices does not change NVD/EPSS/KEV corpus counts — feedsStatus stays.
+        assertThat(cacheManager.getCache(CacheNames.FEEDS_STATUS).get("k"))
+            .as("feedsStatus must NOT be evicted by onDevicesPruned")
+            .isNotNull();
+    }
+
+    @Test
     void onFeedSyncComplete_evictsFeedsStatusCache() {
         Cache feeds = cacheManager.getCache(CacheNames.FEEDS_STATUS);
         assertThat(feeds).isNotNull();

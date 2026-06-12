@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
  *   <tr><td>scan complete</td><td>all</td><td>all</td><td>all</td><td>all</td><td>all</td><td>—</td></tr>
  *   <tr><td>criticality change</td><td>device</td><td>all</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
  *   <tr><td>feed-sync complete</td><td>all</td><td>all</td><td>all</td><td>all</td><td>all</td><td>all</td></tr>
+ *   <tr><td>devices pruned</td><td>all</td><td>all</td><td>all</td><td>all</td><td>all</td><td>—</td></tr>
  * </table>
  */
 @Component
@@ -73,6 +74,24 @@ public class RiskCacheEvictor {
         @CacheEvict(cacheNames = CacheNames.FEEDS_STATUS, allEntries = true)
     })
     public void onFeedSyncComplete() {
+        // No body — annotations perform the eviction.
+    }
+
+    /**
+     * Stale PUBLIC-scope devices were hard-deleted by the TTL prune job — every aggregate that
+     * summed over those rows is now wrong. Invalidates exactly the same cache set as
+     * {@link #onScanComplete()}: per-device scores, the top-N ranking, the fleet CVE listing,
+     * the affected-device lists, and the fleet-sort window. {@code feedsStatus} is left intact:
+     * pruning devices does not change NVD/EPSS/KEV corpus counts.
+     */
+    @Caching(evict = {
+        @CacheEvict(cacheNames = CacheNames.DEVICE_RISK, allEntries = true),
+        @CacheEvict(cacheNames = CacheNames.TOP_RISK, allEntries = true),
+        @CacheEvict(cacheNames = CacheNames.CVE_FLEET, allEntries = true),
+        @CacheEvict(cacheNames = CacheNames.CVE_AFFECTED, allEntries = true),
+        @CacheEvict(cacheNames = CacheNames.CVE_FLEET_WINDOW, allEntries = true)
+    })
+    public void onDevicesPruned() {
         // No body — annotations perform the eviction.
     }
 }
