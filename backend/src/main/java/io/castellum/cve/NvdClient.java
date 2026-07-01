@@ -10,6 +10,8 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.net.http.HttpClient;
@@ -51,7 +53,19 @@ public class NvdClient {
         this.intervalMillis = intervalMillis;
     }
 
-    public NvdCveResponse fetchPage(Instant startMod, Instant endMod, int startIndex, int resultsPerPage) throws IOException {
+    public NvdCveResponse fetchPage(Instant start, Instant end, int startIndex, int resultsPerPage) throws IOException {
+        return fetchPage(start, end, startIndex, resultsPerPage, false);
+    }
+
+    /**
+     * @param byPublished when {@code true}, windows by publish date ({@code pubStartDate}/{@code pubEndDate})
+     *                    instead of last-modified — used by the full backfill so modern CVEs aren't buried on
+     *                    the last pages of NVD's single mass-re-modified lastModified window. NVD caps both
+     *                    ranges at 120 days, same {@code yyyy-MM-dd'T'HH:mm:ss.SSS} format either way.
+     */
+    public NvdCveResponse fetchPage(Instant start, Instant end, int startIndex, int resultsPerPage, boolean byPublished) throws IOException {
+        String startParam = byPublished ? "pubStartDate" : "lastModStartDate";
+        String endParam = byPublished ? "pubEndDate" : "lastModEndDate";
         IOException lastError = null;
         long backoff = intervalMillis;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -59,8 +73,8 @@ public class NvdClient {
             try {
                 return client.get()
                     .uri(uriBuilder -> uriBuilder
-                        .queryParam("lastModStartDate", NVD_TS.format(startMod))
-                        .queryParam("lastModEndDate", NVD_TS.format(endMod))
+                        .queryParam(startParam, NVD_TS.format(start))
+                        .queryParam(endParam, NVD_TS.format(end))
                         .queryParam("startIndex", startIndex)
                         .queryParam("resultsPerPage", resultsPerPage)
                         .build())
@@ -72,6 +86,16 @@ public class NvdClient {
             } catch (ResourceAccessException e) {
                 log.warn("NVD I/O error on attempt {}/{}: {}", attempt, MAX_ATTEMPTS, e.getMessage());
                 lastError = new IOException("NVD I/O error", e);
+            } catch (RestClientException e) {
+                // NVD truncates large HTTP/2 responses mid-stream (RST_STREAM), surfaced by .body()
+                // as a base RestClientException ("Error while extracting response..."). Retry those;
+                // let real HTTP-status errors (4xx/5xx) propagate unchanged.
+                // ponytail: if mid-stream resets ever exceed MAX_ATTEMPTS, pin the RestClient to HTTP/1.1.
+                if (e instanceof RestClientResponseException) {
+                    throw e;
+                }
+                log.warn("NVD response truncated on attempt {}/{}: {}", attempt, MAX_ATTEMPTS, e.getMessage());
+                lastError = new IOException("NVD response truncated", e);
             }
             if (attempt < MAX_ATTEMPTS) {
                 try {

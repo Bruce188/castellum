@@ -95,6 +95,27 @@ class CveUpsertServiceTransactionalTest {
     }
 
     @Test
+    void upsertCve_rejectedStatus_isSkippedAndNotPersisted() {
+        // A withdrawn/rejected CVE must be dropped at ingestion: no CVE row, no CPE-match
+        // writes, and a 0 match count. Matches case-insensitively ("Rejected").
+        NvdCveItem rejected = new NvdCveItem(
+            "CVE-REJECTED-001",
+            "2026-01-01T00:00:00.000",
+            "2026-04-01T00:00:00.000",
+            "Rejected",
+            List.of(new NvdDescription("en", "** REJECT ** withdrawn")),
+            null,
+            List.of());
+
+        int matchCount = service.upsertCve(rejected);
+
+        assertEquals(0, matchCount, "rejected CVE should produce zero matches");
+        assertFalse(cveRepository.findByCveId("CVE-REJECTED-001").isPresent(),
+            "rejected CVE row must not be persisted");
+        org.mockito.Mockito.verifyNoInteractions(cveCpeMatchRepository);
+    }
+
+    @Test
     void upsertCve_happyPath_persistsCveAndMatchesAtomically() {
         NvdCveItem item = buildItemWithThreeMatches("CVE-TXN-002");
 

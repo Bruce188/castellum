@@ -10,7 +10,6 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -104,10 +103,11 @@ public class FleetCveWindowService {
             return new SortedWindow(List.of(), Map.of());
         }
 
-        // 3. Fixed, page-independent window pageable (always page 0, capped size).
-        Sort sortSpec = Sort.by(Sort.Direction.DESC, "cvssV31Score")
-                .and(Sort.by(Sort.Direction.ASC, "cveId"));
-        Pageable windowPageable = PageRequest.of(0, ENRICHMENT_WINDOW_CAP, sortSpec);
+        // 3. Fixed, page-independent window pageable (always page 0, capped size). Ordering
+        //    (coalesced v3.1→v3.0→v2 score DESC, cveId ASC) is baked into the fleet @Query,
+        //    so the candidate window is the top-N by best-available score — v2-only / v3.0-only
+        //    CVEs are included, not dropped. The requested key (composite/epss/kev) re-sorts below.
+        Pageable windowPageable = PageRequest.of(0, ENRICHMENT_WINDOW_CAP);
         Page<Cve> window = (minScore == null)
                 ? cveRepository.findByIdInAndCvssV31ScoreIsNotNull(fks, windowPageable)
                 : cveRepository.findByIdInAndCvssV31ScoreGreaterThanEqual(fks, minScore, windowPageable);

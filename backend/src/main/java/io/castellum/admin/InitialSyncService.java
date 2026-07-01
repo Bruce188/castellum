@@ -179,8 +179,9 @@ public class InitialSyncService {
      *
      * <p>When {@code req.isFullBackfill()} is {@code true} the
      * {@link io.castellum.cve.NvdSyncService#fullBackfillPull()} path is taken,
-     * which issues an unconditional EPOCH→now window regardless of existing rows —
-     * the incremental {@code findMaxLastModified} shortcut is never consulted.
+     * which issues unconditional publish-date windows from the configured backfill start
+     * year to now regardless of existing rows — the incremental {@code findMaxLastModified}
+     * shortcut is never consulted.
      */
     private String runNvd(InitialSyncRequest req) {
         try {
