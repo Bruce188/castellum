@@ -3,3 +3,7 @@ target/
 *.iml
 .idea/
 .vscode/
+node_modules/
+**/lancedb/
+test-results/
+.repomap.tags.cache.v1/
