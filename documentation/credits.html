@@ -668,7 +668,7 @@ footer {
 <tbody>
 <tr><td>nmap</td><td>(external binary)</td><td>Active host and port scanning, invoked as an external process by <code>NmapRunner</code>.</td></tr>
 <tr><td>pcap4j</td><td>1.8.2</td><td>Passive packet capture. Uses JNA to call the native <code>libpcap</code> library — see <a href="runtime-flags.html">Runtime Flags &amp; Native Dependencies</a> §1. Provided by <code>pcap4j-core</code> and <code>pcap4j-packetfactory-static</code>.</td></tr>
-<tr><td>libpcap</td><td>(host / container native)</td><td>The native packet-capture library reached through pcap4j → JNA; supplied by the OS or the Debian-12 distroless base, not a Maven dependency.</td></tr>
+<tr><td>libpcap</td><td>(host / container native)</td><td>The native packet-capture library reached through pcap4j → JNA; supplied by the host OS or apt-installed into the runtime image (<code>libpcap0.8</code>), not a Maven dependency.</td></tr>
 <tr><td>jmDNS</td><td>3.6.3</td><td>Multicast-DNS (mDNS) service discovery on the passive-discovery path.</td></tr>
 <tr><td>snmp4j</td><td>3.9.5</td><td>Read-only SNMP walk (GET / GETBULK) for network-bridge discovery.</td></tr>
 <tr><td>Apache PLC4X (S7 driver)</td><td>0.12.0</td><td>S7comm OT/ICS fingerprinting (<code>plc4j-driver-s7</code>).</td></tr>
@@ -706,7 +706,7 @@ footer {
 </thead>
 <tbody>
 <tr><td>Apache Maven</td><td>3.9 (build image)</td><td>Backend build, via the <code>maven:3.9-eclipse-temurin-21</code> first-stage image.</td></tr>
-<tr><td>distroless (Debian 12)</td><td><code>gcr.io/distroless/java21-debian12</code></td><td>Final runtime image base; ships <code>libpcap</code>. See <a href="supply-chain.html">Supply Chain</a>.</td></tr>
+<tr><td>eclipse-temurin (JRE)</td><td><code>eclipse-temurin:21-jre-noble</code></td><td>Final runtime image base (digest-pinned); apt-installs <code>nmap</code> + <code>libpcap0.8</code>. See <a href="supply-chain.html">Supply Chain</a>.</td></tr>
 <tr><td>CycloneDX Maven plugin</td><td>2.8.0</td><td>SBOM generation at the <code>package</code> phase (<code>makeAggregateBom</code>, schema 1.5).</td></tr>
 <tr><td>Playwright</td><td>1.60.0</td><td>End-to-end browser smoke tests (<code>@playwright/test</code>). See <a href="e2e-testing.html">E2E Testing</a>.</td></tr>
 <tr><td>Vitest</td><td>2.1.9</td><td>Frontend unit tests.</td></tr>

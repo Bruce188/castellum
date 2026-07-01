@@ -23,9 +23,25 @@ spring:
   threads:
     virtual:
       enabled: true
+  task:
+    scheduling:
+      pool:
+        size: 8
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+  # Global client timeouts (Boot 3.4+ spring.http.client.*) applied to the auto-configured
+  # RestClient.Builder. Bounds NVD HTTP/2 reads that otherwise park forever in NioSocketImpl.read;
+  # a tripped read aborts as ResourceAccessException and falls into NvdClient's retry loop.
+  http:
+    client:
+      connect-timeout: ${HTTP_CLIENT_CONNECT_TIMEOUT:10s}
+      read-timeout: ${HTTP_CLIENT_READ_TIMEOUT:120s}
 
 server:
   port: ${SERVER_PORT:8080}
+  shutdown: graceful
 
 management:
   endpoint:
@@ -51,12 +67,17 @@ castellum:
     username: ${CASTELLUM_VIEWER_USERNAME:}
     password-hash: ${CASTELLUM_VIEWER_PASSWORD_HASH:}
   cors:
+    # Dev default is the Vite origin. In prod (SPRING_PROFILES_ACTIVE=prod) the SPA is served
+    # same-origin, so CORS is moot; corsProdOriginGuard fails startup if this is still the
+    # localhost dev default or empty — set CORS_ALLOWED_ORIGINS to your https operator origin.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
   nvd:
     base-url: ${NVD_API_BASE_URL:https://services.nvd.nist.gov/rest/json/cves/2.0}
     api-key: ${NVD_API_KEY:}
-    request-interval-millis: 6000
+    request-interval-millis: ${CASTELLUM_NVD_REQUEST_INTERVAL_MILLIS:6000}
     results-per-page: 2000
+    # Full backfill windows by publish date from this year to now (incremental pull is unaffected).
+    backfill-start-year: ${NVD_BACKFILL_START_YEAR:1999}
   epss:
     feed-url: ${EPSS_FEED_URL:https://epss.cyentia.com/epss_scores-current.csv.gz}
     timeout-seconds: 30

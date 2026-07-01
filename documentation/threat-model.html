@@ -639,7 +639,7 @@ footer {
       <li class="lvl-3"><a href="#m2-ssrf-guard">2. SSRF guard</a></li>
       <li class="lvl-3"><a href="#m3-jwt-hs256-bcrypt-12">3. JWT HS256 + BCrypt-12</a></li>
       <li class="lvl-3"><a href="#m4-append-only-audit-log">4. Append-only audit log</a></li>
-      <li class="lvl-3"><a href="#m5-distroless-cap-net-raw-only">5. Distroless + CAP_NET_RAW only</a></li>
+      <li class="lvl-3"><a href="#m5-distroless-cap-net-raw-only">5. Minimal JRE base + CAP_NET_RAW only</a></li>
       <li class="lvl-2"><a href="#out-of-scope-adversaries">Out-of-Scope Adversaries</a></li>
       <li class="lvl-3"><a href="#nation-state-supply-chain-compromise">Nation-state supply-chain compromise</a></li>
       <li class="lvl-3"><a href="#insider-with-root-access">Insider with root access</a></li>
@@ -678,7 +678,7 @@ footer {
 <p>Full mitigations are listed in the <a href="#top-5-mitigations">Top-5 mitigations</a> section. See also:</p>
 <ul>
 <li><a href="auth.html">documentation/auth.html</a> — RBAC matrix, JWT contract, bootstrap admin</li>
-<li><a href="supply-chain.html">documentation/supply-chain.html</a> — distroless, Trivy gate, SBOM</li>
+<li><a href="supply-chain.html">documentation/supply-chain.html</a> — runtime base, Trivy gate, SBOM</li>
 <li><a href="ot-probes.html">documentation/ot-probes.html</a> — read-only OT contract</li>
 <li><a href="runtime-flags.html">documentation/runtime-flags.html</a> — CAP_NET_RAW, pcap4j JVM flags</li>
 <li><a href="threat-intel-integrations.html">documentation/threat-intel-integrations.html</a> — export audit trail</li>
@@ -1053,18 +1053,18 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 <p>See <a href="auth.html">documentation/auth.html</a> for the full JWT contract.</p>
 <h3 id="m4-append-only-audit-log">4. Append-only audit log (<code>audit/AuditLogRepository</code>)</h3>
 <p>The <code>AuditLogRepository</code> interface exposes only <code>save</code> and read methods — no <code>delete*</code> or <code>update*</code> methods. This design ensures that once an audit record is written, the application cannot modify or delete it through normal code paths. Database-level protection (restricting the application DB user's privileges on the <code>audit_log</code> table to <code>INSERT</code> and <code>SELECT</code> only) completes the control. See Module 9 Tampering note.</p>
-<h3 id="m5-distroless-cap-net-raw-only">5. Distroless + CAP_NET_RAW only (<code>supply-chain/Dockerfile</code>)</h3>
-<p>The final container image uses <code>gcr.io/distroless/java21-debian12:nonroot</code> — no shell, no package manager, no debugging tools. The container is started with <code>--cap-drop=ALL --cap-add=NET_RAW</code> (or equivalently, <code>cap_add: [NET_RAW]</code> in Compose), granting only the capability required for passive packet capture. A shell-based container breakout is not possible when there is no shell. CAP_NET_RAW is the only elevated capability in the container.</p>
+<h3 id="m5-distroless-cap-net-raw-only">5. Minimal JRE base + CAP_NET_RAW only (<code>Dockerfile</code>)</h3>
+<p>The final container image uses a minimal JRE base, <code>eclipse-temurin:21-jre-noble</code> (digest-pinned). Unlike the distroless base it replaced, this image <em>does</em> include a shell — a deliberate trade-off. Distroless has no shell and no package manager, so it could neither ship nor install the <code>nmap</code> binary and <code>libpcap</code> library that active scanning and pcap4j passive discovery depend on; those core features were dead in the packaged image. The mitigation therefore does <strong>not</strong> rest on shell-absence. It rests instead on: running as a non-root user (uid 65532); starting the container with <code>--cap-drop=ALL --cap-add=NET_RAW</code> (or equivalently <code>cap_add: [NET_RAW]</code> in Compose), so CAP_NET_RAW is the only elevated capability; raw-socket file capabilities scoped to the <code>nmap</code> binary alone (<code>setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap</code>) rather than granted process-wide; and a deliberately minimal package set (<code>apt-get install --no-install-recommends</code>, apt lists removed). The shell and <code>apt</code> do enlarge the attack surface relative to distroless; that cost is accepted to make the scanner functional in-container and is contained by the controls above.</p>
 <p>See <a href="supply-chain.html">documentation/supply-chain.html</a> for the full supply-chain posture.</p>
 <hr>
 <h2 id="out-of-scope-adversaries">Out-of-Scope Adversaries</h2>
 <p>The following adversary classes are explicitly out of scope for Castellum v1. Claiming protection against them would be dishonest given the current implementation.</p>
 <h3 id="nation-state-supply-chain-compromise">Nation-state supply-chain compromise</h3>
-<p>Castellum does not implement SLSA level 3 provenance. The Maven build is not hermetically reproducible — builds depend on Maven Central at compile time. The cosign signing step is operator-driven (not automated in CI). An attacker who can inject a malicious dependency into Maven Central, the Eclipse Temurin JDK base image, or the distroless base image would compromise Castellum silently. The SBOM and Trivy gate provide visibility into known CVEs in dependencies but do not prevent novel supply-chain attacks. See <a href="supply-chain.html">documentation/supply-chain.html</a> §Known limitations.</p>
+<p>Castellum does not implement SLSA level 3 provenance. The Maven build is not hermetically reproducible — builds depend on Maven Central at compile time. The cosign signing step is operator-driven (not automated in CI). An attacker who can inject a malicious dependency into Maven Central, the Eclipse Temurin JDK builder image, or the JRE runtime base image would compromise Castellum silently. The SBOM and Trivy gate provide visibility into known CVEs in dependencies but do not prevent novel supply-chain attacks. See <a href="supply-chain.html">documentation/supply-chain.html</a> §Known limitations.</p>
 <h3 id="insider-with-root-access">Insider with root access</h3>
 <p>An operator who has <code>root</code> on the Castellum host or a DBA connection to the Postgres instance can bypass every application-level control. The audit log can be deleted, the JWT secret read from the environment, and all data exfiltrated. Castellum provides no protection against a malicious insider with OS-level access. This is a deployment context responsibility, not an application responsibility.</p>
 <h3 id="physical-access">Physical access</h3>
-<p>Physical access to the host hardware (memory cold-boot, hardware debugger, storage extraction) is out of scope. The distroless image does not provide cryptographic attestation of RAM contents. FDE on the Postgres storage volume is an operator responsibility.</p>
+<p>Physical access to the host hardware (memory cold-boot, hardware debugger, storage extraction) is out of scope. The runtime image does not provide cryptographic attestation of RAM contents. FDE on the Postgres storage volume is an operator responsibility.</p>
 <h3 id="side-channel-attacks">Side-channel attacks</h3>
 <p>Timing side-channels in BCrypt comparison, cryptographic key material in processor caches, and power/EM analysis of the JWT signing operation are not addressed. Standard JVM and OS mitigations (spectre/meltdown patches, ASLR, stack canaries) are assumed to be present in the deployment environment.</p>
 <hr>
@@ -1083,7 +1083,7 @@ The read-only invariant is the EoP control. Even though an exposed <code>:2375</
 </tr>
 <tr>
 <td><a href="supply-chain.html">documentation/supply-chain.html</a></td>
-<td>Distroless image, Trivy gate, SBOM, cosign signing, known limitations</td>
+<td>JRE runtime image, Trivy gate, SBOM, cosign signing, known limitations</td>
 </tr>
 <tr>
 <td><a href="ot-probes.html">documentation/ot-probes.html</a></td>

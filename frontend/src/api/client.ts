@@ -17,8 +17,9 @@ import type {
   UserDto, UserRole,
 } from './types';
 import { clearAuth, getToken } from '../hooks/useAuth';
+import { API_BASE } from './apiBase';
 
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080') as string;
+const BASE = API_BASE;
 
 /** HTTP statuses that warrant a single bounded retry. 5xx-transient only. */
 const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
