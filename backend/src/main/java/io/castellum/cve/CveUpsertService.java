@@ -42,6 +42,14 @@ public class CveUpsertService {
     public int upsertCve(NvdCveItem item) {
         if (item == null || item.id() == null) return 0;
 
+        // Skip withdrawn/rejected CVEs: NVD strips their CVSS metrics and CPE matches and
+        // leaves a stub record, so persisting them only inflates the corpus with rows that
+        // can never match the fleet or carry a score. Drop at ingestion.
+        if ("Rejected".equalsIgnoreCase(item.vulnStatus())) {
+            log.debug("Skipping rejected CVE {}", item.id());
+            return 0;
+        }
+
         String rawJson;
         try {
             rawJson = objectMapper.writeValueAsString(item);
@@ -60,10 +68,13 @@ public class CveUpsertService {
         applyMetrics(cve, item.metrics());
         cve.setRawJson(rawJson);
         cve.setFetchedAt(Instant.now());
+        boolean isNew = cve.getId() == null;
         Cve saved = cveRepository.save(cve);
 
-        // Delete existing CPE matches and re-insert from current payload
-        if (saved.getId() != null) {
+        // Delete existing CPE matches and re-insert from current payload. The id is
+        // IDENTITY-generated, so saved.getId() is always non-null post-save; gate on the
+        // pre-save isNew flag instead, otherwise every brand-new CVE issues a no-op DELETE.
+        if (!isNew) {
             cveCpeMatchRepository.deleteByCveFk(saved.getId());
         }
 

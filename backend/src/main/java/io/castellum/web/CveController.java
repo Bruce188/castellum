@@ -25,7 +25,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -189,9 +188,9 @@ public class CveController {
             @RequestParam(required = false) String sort) {
         int clampedSize = Math.min(Math.max(size, 1), 100);
         int clampedPage = Math.max(page, 0);
-        Sort sortSpec = Sort.by(Sort.Direction.DESC, "cvssV31Score")
-                .and(Sort.by(Sort.Direction.ASC, "cveId"));
-        Pageable pageable = PageRequest.of(clampedPage, clampedSize, sortSpec);
+        // Ordering (coalesced v3.1→v3.0→v2 score DESC, cveId ASC) is baked into the fleet
+        // repository @Query, so the Pageable carries page+size only — no Sort to append.
+        Pageable pageable = PageRequest.of(clampedPage, clampedSize);
 
         Criticality criticality = (deviceId != null)
                 ? deviceRepository.findById(deviceId).map(Device::getCriticality).orElse(Criticality.MEDIUM)

@@ -200,10 +200,22 @@ describe('<CvesPage />', () => {
     expect(await screen.findByText(/boom/)).toBeInTheDocument();
   });
 
-  it('renders the empty placeholder when the API returns no rows', async () => {
+  it('renders the fleet-scoped empty placeholder on a no-filter load', async () => {
     listFleetCves.mockResolvedValueOnce(emptyPage);
 
     renderWith();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("No synced CVEs apply to your fleet's detected software versions."),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('renders the filter-specific empty placeholder when a filter is active', async () => {
+    listFleetCves.mockResolvedValueOnce(emptyPage);
+
+    renderWith('/cves?severity=high');
 
     await waitFor(() => {
       expect(screen.getByText('No CVEs match this filter.')).toBeInTheDocument();

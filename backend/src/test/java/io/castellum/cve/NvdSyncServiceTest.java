@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,7 +31,8 @@ import static org.mockito.Mockito.*;
     "spring.flyway.enabled=true",
     "spring.flyway.locations=classpath:db/migration/h2",
     "spring.jpa.hibernate.ddl-auto=validate",
-    "castellum.nvd.results-per-page=10"
+    "castellum.nvd.results-per-page=10",
+    "castellum.nvd.backfill-start-year=2000"
 })
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class NvdSyncServiceTest {
@@ -43,6 +45,9 @@ class NvdSyncServiceTest {
 
     @Autowired
     CveCpeMatchRepository cveCpeMatchRepository;
+
+    @Autowired
+    NvdBackfillCursorRepository backfillCursorRepository;
 
     @Autowired
     AuditLogRepository auditLogRepository;
@@ -231,7 +236,7 @@ class NvdSyncServiceTest {
 
     /**
      * Core regression test (AC5): when the CVE table already has rows, calling
-     * {@code fullBackfillPull()} must issue EPOCH-based slices, NOT
+     * {@code fullBackfillPull()} must issue configured-start-year slices, NOT
      * since-max-last-modified slices.  This is the exact footgun being fixed.
      */
     @Test
@@ -245,19 +250,19 @@ class NvdSyncServiceTest {
         existing.setFetchedAt(Instant.now());
         cveRepository.save(existing);
 
-        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt(), anyBoolean())).thenReturn(emptyPage());
 
         // Call the force path — must NOT use findMaxLastModified
         syncService.fullBackfillPull();
 
         ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt());
+        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt(), anyBoolean());
         Instant firstSliceStart = startCaptor.getAllValues().get(0);
 
-        // The first slice must start at EPOCH, not at the seeded cursor
+        // The first slice must start at the configured backfill year, not the seeded 2026 cursor
         assertTrue(
             firstSliceStart.isBefore(Instant.parse("2002-01-01T00:00:00Z")),
-            "Full backfill must start at EPOCH, not at findMaxLastModified cursor. Got: " + firstSliceStart
+            "Full backfill must start at the configured backfill year, not findMaxLastModified cursor. Got: " + firstSliceStart
         );
     }
 
@@ -289,8 +294,8 @@ class NvdSyncServiceTest {
     @Test
     void fullBackfillPull_isIdempotent_reRunDoesNotDuplicate() throws Exception {
         NvdCveResponse fixture = loadFixture();
-        when(nvdClient.fetchPage(any(), any(), eq(0), anyInt())).thenReturn(fixture);
-        when(nvdClient.fetchPage(any(), any(), eq(10), anyInt())).thenReturn(emptyPage());
+        when(nvdClient.fetchPage(any(), any(), eq(0), anyInt(), anyBoolean())).thenReturn(fixture);
+        when(nvdClient.fetchPage(any(), any(), eq(10), anyInt(), anyBoolean())).thenReturn(emptyPage());
 
         // First run
         NvdSyncService.SyncSummary first = syncService.fullBackfillPull();
@@ -312,17 +317,133 @@ class NvdSyncServiceTest {
      */
     @Test
     void fullBackfillPull_doesNotCallFindMaxLastModified() throws Exception {
-        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt(), anyBoolean())).thenReturn(emptyPage());
 
         syncService.fullBackfillPull();
 
         // findMaxLastModified is a repository method; we can verify no DB call reached
-        // the incremental path by asserting the fetch started at EPOCH (< 2002), not
-        // at any value derived from MAX(last_modified).
+        // the incremental path by asserting the fetch started at the configured backfill
+        // year (< 2002), not at any value derived from MAX(last_modified).
         ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt());
+        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt(), anyBoolean());
         Instant firstStart = startCaptor.getAllValues().get(0);
         assertTrue(firstStart.isBefore(Instant.parse("2002-01-01T00:00:00Z")),
-            "fullBackfillPull must begin at EPOCH, not at a derived cursor. Got: " + firstStart);
+            "fullBackfillPull must begin at the configured backfill year, not a derived cursor. Got: " + firstStart);
+    }
+
+    /**
+     * The full backfill must window by PUBLISH date (pubStartDate/pubEndDate) starting at the
+     * configured {@code castellum.nvd.backfill-start-year} (2000 in this test) — not lastModified.
+     */
+    @Test
+    void fullBackfillPull_windowsByPublishedDate_fromConfiguredStartYear() throws Exception {
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt(), anyBoolean())).thenReturn(emptyPage());
+
+        syncService.fullBackfillPull();
+
+        ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Boolean> publishedCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(nvdClient, atLeastOnce())
+            .fetchPage(startCaptor.capture(), any(), anyInt(), anyInt(), publishedCaptor.capture());
+
+        // Every fetch must window by published date, not lastModified
+        assertTrue(publishedCaptor.getAllValues().stream().allMatch(Boolean::booleanValue),
+            "Full backfill must window by published date (byPublished=true)");
+        // First slice must start at the configured backfill-start-year (2000), Jan 1 UTC
+        assertEquals(Instant.parse("2000-01-01T00:00:00Z"), startCaptor.getAllValues().get(0),
+            "Full backfill must start at castellum.nvd.backfill-start-year");
+    }
+
+    // ── Resumable backfill: per-window high-water cursor ────────────────────────
+
+    /**
+     * Resume: when a prior backfill persisted a window cursor, {@code fullBackfillPull()} must
+     * resume from that cursor instead of the configured start year.
+     */
+    @Test
+    void fullBackfillPull_resumesFromPersistedCursor() throws Exception {
+        Instant resumePoint = Instant.parse("2015-01-01T00:00:00Z");
+        NvdBackfillCursor cursor = new NvdBackfillCursor();
+        cursor.setId(NvdBackfillCursor.SINGLETON_ID);
+        cursor.setWindowEnd(resumePoint);
+        backfillCursorRepository.save(cursor);
+
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt(), anyBoolean())).thenReturn(emptyPage());
+
+        syncService.fullBackfillPull();
+
+        ArgumentCaptor<Instant> startCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt(), anyBoolean());
+        assertEquals(resumePoint, startCaptor.getAllValues().get(0),
+            "Full backfill must resume from the persisted cursor, not the configured start year");
+    }
+
+    /**
+     * Persist + durability: the cursor advances to the end of each committed window, and an
+     * interruption on a later window leaves the cursor at the last successfully-completed window.
+     */
+    @Test
+    void fullBackfillPull_persistsCursorPerWindow_andRetainsItOnInterruption() throws Exception {
+        Instant startYear = Instant.parse("2000-01-01T00:00:00Z");
+        Instant firstWindowEnd = startYear.plus(Duration.ofDays(120));
+
+        // First window succeeds and commits its cursor; the second window's fetch throws.
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt(), anyBoolean()))
+            .thenAnswer(inv -> {
+                Instant windowStart = inv.getArgument(0);
+                if (windowStart.equals(startYear)) {
+                    return emptyPage();
+                }
+                throw new IOException("simulated interruption");
+            });
+
+        assertThrows(IOException.class, () -> syncService.fullBackfillPull());
+
+        Instant persisted = backfillCursorRepository.findById(NvdBackfillCursor.SINGLETON_ID)
+            .orElseThrow().getWindowEnd();
+        assertEquals(firstWindowEnd, persisted,
+            "Cursor must hold the end of the last committed window after an interruption");
+    }
+
+    /**
+     * Completion resets the cursor so a later re-trigger (e.g. re-seeding a wiped corpus) starts
+     * fresh from the configured start year rather than silently skipping the whole corpus.
+     */
+    @Test
+    void fullBackfillPull_clearsCursorOnCompletion() throws Exception {
+        NvdBackfillCursor seed = new NvdBackfillCursor();
+        seed.setId(NvdBackfillCursor.SINGLETON_ID);
+        seed.setWindowEnd(Instant.parse("2010-01-01T00:00:00Z"));
+        backfillCursorRepository.save(seed);
+
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt(), anyBoolean())).thenReturn(emptyPage());
+
+        syncService.fullBackfillPull();
+
+        Instant persisted = backfillCursorRepository.findById(NvdBackfillCursor.SINGLETON_ID)
+            .orElseThrow().getWindowEnd();
+        assertNull(persisted,
+            "A fully-completed backfill must clear the resume cursor");
+    }
+
+    /**
+     * The INCREMENTAL path must not read or write the full-backfill cursor.
+     */
+    @Test
+    void incrementalPull_leavesBackfillCursorUntouched() throws Exception {
+        Instant seeded = Instant.parse("2012-06-01T00:00:00Z");
+        NvdBackfillCursor seed = new NvdBackfillCursor();
+        seed.setId(NvdBackfillCursor.SINGLETON_ID);
+        seed.setWindowEnd(seeded);
+        backfillCursorRepository.save(seed);
+
+        when(nvdClient.fetchPage(any(), any(), anyInt(), anyInt())).thenReturn(emptyPage());
+
+        syncService.incrementalPull();
+
+        Instant persisted = backfillCursorRepository.findById(NvdBackfillCursor.SINGLETON_ID)
+            .orElseThrow().getWindowEnd();
+        assertEquals(seeded, persisted,
+            "Incremental sync must not touch the full-backfill cursor");
     }
 }

@@ -431,7 +431,9 @@ export function CvesPage() {
           {!loading && page && visibleRows.length === 0 && (
             <tr>
               <td colSpan={7} className="px-2 py-4 text-center text-gray-500 italic">
-                No CVEs match this filter.
+                {severity !== 'all' || kevOnly || searchQuery !== '' || deviceId !== null
+                  ? 'No CVEs match this filter.'
+                  : "No synced CVEs apply to your fleet's detected software versions."}
               </td>
             </tr>
           )}
