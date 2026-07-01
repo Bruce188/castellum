@@ -358,7 +358,7 @@ describe('<TopologyView /> role badge (Task 3.2)', () => {
   });
 });
 
-// WAN edges — PUBLIC-scope devices must hang off the LAN's egress router
+// WAN edges — PUBLIC-scope devices must hang off their originating host
 // instead of floating isolated inside zone-public.
 describe('<TopologyView /> WAN edges', () => {
   beforeEach(() => {
@@ -369,10 +369,10 @@ describe('<TopologyView /> WAN edges', () => {
     mocks.layoutRun.mockClear();
   });
 
-  it('topologyView_addsWanEdgePerPublicDevice_anchoredToRouter', () => {
+  it('topologyView_addsWanEdgePerPublicDevice_anchoredToOriginHost', () => {
     const devices: Device[] = [
-      { ...makeDevice(1, '192.168.68.1', 'HOME'), deviceRole: 'ROUTER' },
-      makeDevice(2, '192.168.68.50', 'HOME'),
+      { ...makeDevice(1, '192.168.68.1', 'HOME'), deviceRole: 'ROUTER' }, // gateway — must NOT anchor
+      makeDevice(2, '192.168.68.51', 'HOME'), // the local originating host (docker-host IP)
       makeDevice(3, '8.8.8.8', 'PUBLIC'),
       makeDevice(4, '1.1.1.1', 'PUBLIC'),
     ];
@@ -383,7 +383,8 @@ describe('<TopologyView /> WAN edges', () => {
     const addArgs = mocks.add.mock.calls.at(-1)![0] as Array<{ data: { id: string; source?: string; target?: string; kind?: string }; classes?: string }>;
     const wanEdges = addArgs.filter(e => e.data.id.startsWith('wan:'));
     expect(wanEdges).toHaveLength(2);
-    expect(wanEdges.every(e => e.data.source === '1')).toBe(true);
+    expect(wanEdges.every(e => e.data.source === '2')).toBe(true); // originating host
+    expect(wanEdges.every(e => e.data.source !== '1')).toBe(true); // NOT the gateway/router
     expect(wanEdges.every(e => e.data.kind === 'wan')).toBe(true);
     expect(wanEdges.every(e => e.classes === 'wan-edge')).toBe(true);
     expect(wanEdges.map(e => e.data.target).sort()).toEqual(['3', '4']);

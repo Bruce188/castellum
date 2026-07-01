@@ -70,4 +70,24 @@ class AttackTechniqueMapperTest {
     void nameForResolvesT1090() {
         assertThat(AttackTechniqueMapper.nameFor("T1090", EdgeType.GATEWAY_PIVOT)).isEqualTo("Proxy");
     }
+
+    @Test
+    void egressConnectionMapsToT1071ApplicationLayerProtocol() {
+        AttackTechnique t = AttackTechniqueMapper.forEdgeType(EdgeType.EGRESS_CONNECTION);
+        assertThat(t.id()).isEqualTo("T1071");
+        assertThat(t.name()).isEqualTo("Application Layer Protocol");
+    }
+
+    /**
+     * forEdgeType throws for any EdgeType absent from MAPPING, so every enum constant MUST be
+     * registered — otherwise a build pass using it fails at runtime.
+     */
+    @Test
+    void mappingCoversEveryEdgeType() {
+        for (EdgeType type : EdgeType.values()) {
+            assertThat(AttackTechniqueMapper.forEdgeType(type))
+                .as("MAPPING must contain a technique for %s", type)
+                .isNotNull();
+        }
+    }
 }

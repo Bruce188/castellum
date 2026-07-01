@@ -548,7 +548,7 @@ export interface ChangePasswordRequest {
 // ----- Attack graph -----
 
 /** Discriminator mirroring backend {@code io.castellum.graph.EdgeType}. */
-export type EdgeType = 'SAME_SUBNET' | 'EXPLOITABLE_VULN' | 'WEAK_CRED_PATH';
+export type EdgeType = 'SAME_SUBNET' | 'EXPLOITABLE_VULN' | 'WEAK_CRED_PATH' | 'GATEWAY_PIVOT' | 'EGRESS_CONNECTION';
 
 /**
  * One hop on a shortest-path response. Each hop represents arrival at
