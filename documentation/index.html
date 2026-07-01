@@ -649,7 +649,7 @@ footer {
 <p>Who can call which endpoint, how tokens are issued, and the runtime configuration that secures the backend.</p>
 <ul>
 <li><a href="auth.html">Authentication</a> — The RBAC matrix, JWT contract, bootstrap-admin and viewer procedures, login flow, token revocation, login rate-limiting, password change and forced first-login rotation, security headers, and the CORS origin validator.</li>
-<li><a href="runtime-flags.html">Runtime Flags &amp; Native Dependencies</a> — Runtime requirements for pcap4j passive discovery: the JVM native-access flags, the <code>CAP_NET_RAW</code> Linux capability, the libpcap native library, the distroless base, the <code>setcap</code> alternative, and the security-critical environment variables.</li>
+<li><a href="runtime-flags.html">Runtime Flags &amp; Native Dependencies</a> — Runtime requirements for pcap4j passive discovery: the JVM native-access flags, the <code>CAP_NET_RAW</code> Linux capability, the libpcap native library, the runtime base, the <code>setcap</code> alternative, and the security-critical environment variables.</li>
 </ul>
 
 <h2 id="scanning-discovery-ot-ics-probes">Scanning, Discovery &amp; OT/ICS Probes</h2>
@@ -677,7 +677,7 @@ footer {
 <p>Deploying, running, building, and demonstrating Castellum.</p>
 <ul>
 <li><a href="operations.html">Operations Runbook</a> — The operator runbook: NVD API-key registration, Suricata wiring, TLS termination, the bootstrap-admin checklist, runtime flags, scan-policy lifecycle, integration-credential rotation, the unified network scan, and the durable feed-sync scheduler.</li>
-<li><a href="supply-chain.html">Supply Chain</a> — The supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction, operator-driven cosign signing, the distroless Dockerfile rationale, the recommended runtime, and the explicit non-claims.</li>
+<li><a href="supply-chain.html">Supply Chain</a> — The supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction, operator-driven cosign signing, the runtime base rationale, the recommended runtime, and the explicit non-claims.</li>
 <li><a href="demo-script.html">Demo Script — 3-Minute Walkthrough</a> — A seven-beat, roughly three-minute walkthrough covering sign-in, the topology landing, device detail with inline edits, the audit trail, the threats dashboard, the fleet CVE table, the attack graph, and the settings integrations with STIX export.</li>
 </ul>
 

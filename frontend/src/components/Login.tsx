@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { setAuth } from '../hooks/useAuth';
+import { API_BASE } from '../api/apiBase';
 
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080') as string;
+const BASE = API_BASE;
 
 export function Login() {
   const [username, setUsername] = useState('admin');

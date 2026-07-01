@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Supply Chain — Castellum</title>
-<meta name="description" content="Castellum supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction via cyclonedx-maven-plugin and syft, operator-driven cosign signing, the distroless Dockerfile rationale, recommended docker run and Kubernetes runtime, the Trivy gating policy, and the explicit non-claims and known limitations.">
+<meta name="description" content="Castellum supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction via cyclonedx-maven-plugin and syft, operator-driven cosign signing, the JRE-base Dockerfile rationale, recommended docker run and Kubernetes runtime, the Trivy gating policy, and the explicit non-claims and known limitations.">
 <style>
 /* === Reset + variables === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -623,8 +623,8 @@ footer {
       <li class="lvl-3"><a href="#running-the-pipeline">Running the pipeline</a></li>
       <li class="lvl-2"><a href="#dockerfile-rationale">Dockerfile rationale</a></li>
       <li class="lvl-3"><a href="#multi-stage-layout">Multi-stage layout</a></li>
-      <li class="lvl-3"><a href="#distroless-choice">Distroless choice</a></li>
-      <li class="lvl-3"><a href="#nonroot-vs-debug-nonroot"><code>:nonroot</code> vs <code>:debug-nonroot</code></a></li>
+      <li class="lvl-3"><a href="#distroless-choice">Runtime base choice</a></li>
+      <li class="lvl-3"><a href="#nonroot-vs-debug-nonroot">Non-root runtime &amp; triage</a></li>
       <li class="lvl-2"><a href="#operator-runtime">Operator runtime</a></li>
       <li class="lvl-3"><a href="#recommended-docker-run-invocation">Recommended <code>docker run</code> invocation</a></li>
       <li class="lvl-3"><a href="#kubernetes-example">Kubernetes example</a></li>
@@ -646,7 +646,7 @@ footer {
     <header class="page-header">
       <span class="diataxis-chip diataxis-reference">reference</span>
       <h1>Supply Chain</h1>
-      <p class="description">Castellum supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction via cyclonedx-maven-plugin and syft, operator-driven cosign signing, the distroless Dockerfile rationale, recommended docker run and Kubernetes runtime, the Trivy gating policy, and the explicit non-claims and known limitations.</p>
+      <p class="description">Castellum supply-chain pipeline: the multi-stage Docker build, the Trivy HIGH/CRITICAL CVE gate, CycloneDX SBOM extraction via cyclonedx-maven-plugin and syft, operator-driven cosign signing, the JRE-base Dockerfile rationale, recommended docker run and Kubernetes runtime, the Trivy gating policy, and the explicit non-claims and known limitations.</p>
       <div class="page-meta"><span class="meta-item"><strong>Section:</strong> operations</span> · <span class="meta-item"><strong>Audience:</strong> operators &amp; sysadmins</span></div>
     </header>
 
@@ -661,7 +661,7 @@ footer {
 [3/4] syft SBOM extraction
 [4/4] cosign signing/verification (operator-driven)
 </code></pre>
-<p><strong>Step 1 — Docker build.</strong> Builds the multi-stage image from <code>Dockerfile</code> at repo root. The builder stage uses <code>maven:3.9-eclipse-temurin-21</code> to compile and package the application. The final stage copies the JAR into <code>gcr.io/distroless/java21-debian12:${DISTROLESS_VARIANT}</code> (default: <code>nonroot</code>).</p>
+<p><strong>Step 1 — Docker build.</strong> Builds the multi-stage image from <code>Dockerfile</code> at repo root. The builder stage uses <code>maven:3.9-eclipse-temurin-21</code> to compile and package the application. The final stage is <code>eclipse-temurin:21-jre-noble</code> (digest-pinned); it <code>apt-get install</code>s <code>nmap</code>, <code>libpcap0.8</code>, and <code>libcap2-bin</code>, copies the JAR in, grants raw-socket file capabilities to the <code>nmap</code> binary, and runs as a non-root user (uid 65532).</p>
 <p><strong>Step 2 — Trivy scan.</strong> Runs <code>trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed &lt;tag&gt;</code>. The <code>--exit-code 1</code> flag causes the script (and CI) to fail immediately if any HIGH or CRITICAL vulnerability has a known fix available. Unfixed CVEs are excluded from the gate to prevent false blocks on OS packages awaiting upstream patches.</p>
 <p><strong>Step 3 — SBOM extraction.</strong> Uses <code>syft</code> to produce an image-level CycloneDX SBOM at <code>sbom-image.cdx.json</code>. This complements the Maven-plugin SBOM (<code>target/bom.xml</code>, <code>target/bom.json</code>) which captures JVM dependencies resolved at build time.</p>
 <p><strong>Step 4 — Cosign operator guidance.</strong> The script emits the commands an operator needs to sign and verify the image. The script itself does not sign; signing requires the operator's private key. This deliberate separation keeps secret material out of automated build agents.</p>
@@ -678,40 +678,39 @@ bash scripts/build-and-scan.sh castellum:v1.2.3
 
 <h3 id="multi-stage-layout">Multi-stage layout</h3>
 <pre><code class="language-dockerfile"># syntax=docker/dockerfile:1.7
-ARG DISTROLESS_VARIANT=nonroot
+# Base images are digest-pinned (FROM …@sha256:…) for reproducible builds.
 
 FROM maven:3.9-eclipse-temurin-21 AS build
 # ... compile + package
-FROM gcr.io/distroless/java21-debian12:${DISTROLESS_VARIANT}
+
+FROM eclipse-temurin:21-jre-noble
+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+        nmap libpcap0.8 libcap2-bin ca-certificates \
+    &amp;&amp; rm -rf /var/lib/apt/lists/*
+# Non-root runtime user.
+RUN useradd --system --uid 65532 --no-create-home --shell /usr/sbin/nologin app
 COPY --from=build /castellum.jar /app/castellum.jar
-USER nonroot
+# Raw-socket caps on the nmap binary only; --cap-add=NET_RAW alone is not enough.
+RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+USER app
 EXPOSE 8080
 ENTRYPOINT ["java","-jar","/app/castellum.jar"]
 </code></pre>
-<p>The builder stage includes Maven, the JDK, and all build tooling. None of these tools appear in the final image. The final stage contains only the JRE runtime provided by the distroless image and the application JAR.</p>
+<p>The builder stage includes Maven, the JDK, and all build tooling. None of these tools appear in the final image. The final stage contains the JRE runtime (<code>eclipse-temurin:21-jre-noble</code>), the <code>nmap</code> binary and <code>libpcap</code> library that active scanning and passive capture require, and the application JAR.</p>
 
-<h3 id="distroless-choice">Distroless choice</h3>
-<p><code>gcr.io/distroless/java21-debian12</code> is a Google-maintained minimal Java 21 image with no shell, no package manager, and no OS utilities. This significantly reduces the attack surface compared to <code>eclipse-temurin:21-jre</code> or <code>amazoncorretto:21</code>. Known tradeoffs:</p>
+<h3 id="distroless-choice">Runtime base choice</h3>
+<p>The runtime base is <code>eclipse-temurin:21-jre-noble</code> (digest-pinned), a minimal JRE on Ubuntu Noble. It replaced <code>gcr.io/distroless/java21-debian12</code>, which is a smaller, shell-free, package-manager-free image with a correspondingly smaller attack surface. Distroless was nonetheless dropped for one decisive reason: with no shell and no <code>apt</code>, it could neither ship nor install the <code>nmap</code> binary and <code>libpcap</code> library, so active scanning and pcap4j passive discovery — the product's core features — were dead in the packaged image. The JRE base makes them functional in-container. The tradeoffs of that choice:</p>
 <ul>
-<li>No shell → <code>docker exec</code> interactive debugging requires the <code>:debug-nonroot</code> variant.</li>
-<li>Smaller CVE surface → Trivy scans produce fewer findings.</li>
-<li>Faster cold start is not guaranteed; JVM startup is dominant.</li>
+<li>Larger attack surface → a shell and <code>apt</code> are now present, so Trivy scans produce more OS-package findings than distroless did.</li>
+<li>Kept deliberately minimal → <code>apt-get install --no-install-recommends</code> with apt lists removed, a non-root user (uid 65532), and file capabilities scoped to the <code>nmap</code> binary alone.</li>
+<li>Interactive debugging → a shell is available directly via <code>docker exec</code>; no separate debug image variant is needed.</li>
 </ul>
 
-<h3 id="nonroot-vs-debug-nonroot"><code>:nonroot</code> vs <code>:debug-nonroot</code></h3>
-<table>
-<thead>
-<tr><th>Variant</th><th>Shell</th><th>Use case</th></tr>
-</thead>
-<tbody>
-<tr><td><code>nonroot</code> (default)</td><td>No</td><td>Production</td></tr>
-<tr><td><code>debug-nonroot</code></td><td>BusyBox sh</td><td>Incident triage inside a running container</td></tr>
-</tbody>
-</table>
-<p>To build the debug variant for triage:</p>
-<pre><code class="language-bash">docker build --build-arg DISTROLESS_VARIANT=debug-nonroot -t castellum:debug .
-docker run --rm -it --entrypoint /busybox/sh castellum:debug
+<h3 id="nonroot-vs-debug-nonroot">Non-root runtime &amp; in-container triage</h3>
+<p>The image runs as the non-root <code>app</code> user (uid 65532); nothing runs as root at runtime. Because the JRE base ships a full Ubuntu userland, a shell is already present, so incident triage needs no separate debug image variant — attach directly:</p>
+<pre><code class="language-bash">docker exec -it &lt;container&gt; bash
 </code></pre>
+<p>That built-in shell is exactly the attack-surface cost the runtime base choice accepts (see above); it is offset by the non-root user, dropped capabilities, and <code>nmap</code>-scoped file capabilities.</p>
 
 <h2 id="operator-runtime">Operator runtime</h2>
 
@@ -790,7 +789,7 @@ cosign verify --key gcpkms://projects/&lt;project&gt;/locations/&lt;location&gt;
 
 <h3 id="upgrade-path">Upgrade path</h3>
 <ol>
-<li>Once the distroless base image is updated faster than findings accumulate, remove <code>--ignore-unfixed</code> to enforce a stricter posture.</li>
+<li>Once the runtime base image (<code>eclipse-temurin:21-jre-noble</code>) is updated faster than findings accumulate, remove <code>--ignore-unfixed</code> to enforce a stricter posture.</li>
 <li>After achieving a clean HIGH/CRITICAL gate, add <code>MEDIUM</code> to the severity list.</li>
 <li>Consider adding <code>--db-repository ghcr.io/aquasecurity/trivy-db</code> for reproducible CI scans.</li>
 </ol>

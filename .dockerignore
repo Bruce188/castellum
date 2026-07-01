@@ -13,10 +13,13 @@ backend/target/
 backend/.mvn/wrapper/maven-wrapper.jar.bak
 target/
 
-# Frontend (excluded entirely; backend is the only thing the image needs)
+# Frontend: the `web` build stage compiles frontend/ into the SPA, so source must stay
+# visible. Never ship build outputs, deps, or developer env files — the latter would let a
+# local VITE_API_BASE_URL leak into the image, breaking the same-origin relative API base.
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.env*
 
 # OS
 .DS_Store
