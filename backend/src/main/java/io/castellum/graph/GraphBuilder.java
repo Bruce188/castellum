@@ -3,6 +3,7 @@ package io.castellum.graph;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.discovery.DiscoveryScope;
+import io.castellum.discovery.DiscoverySource;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -234,23 +235,8 @@ public class GraphBuilder {
             String originHostIp = entry.getKey();
             List<Device> dockerMembers = entry.getValue();
 
-            // Resolve the pivot HOME device for this partition.
-            Device pivot;
-            if ("local".equals(originHostIp)) {
-                // Local origin: match by configured dockerHostIp.
-                pivot = devices.stream()
-                    .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
-                    .filter(d -> properties.getDockerHostIp().equals(d.getIpAddress()))
-                    .min(Comparator.comparingLong(Device::getId))
-                    .orElse(null);
-            } else {
-                // Remote origin: HOME device whose IP equals the origin host IP.
-                pivot = devices.stream()
-                    .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
-                    .filter(d -> originHostIp.equals(d.getIpAddress()))
-                    .min(Comparator.comparingLong(Device::getId))
-                    .orElse(null);
-            }
+            // Resolve the pivot HOME device for this partition (see resolveOriginHost).
+            Device pivot = resolveOriginHost(devices, originHostIp);
 
             if (pivot == null) continue;
 
@@ -276,7 +262,45 @@ public class GraphBuilder {
             }
         }
 
+        // EGRESS_CONNECTION pass — additive, runs after GATEWAY_PIVOT. CONN_TABLE surfaces the
+        // remote endpoints of the originating host's own outbound sockets; a PUBLIC such peer is
+        // off-network and gets no SAME_SUBNET/EXPLOITABLE_VULN edge (#97/#98), so it would
+        // otherwise float unconnected. Draw a single DIRECTED edge from the originating HOME host
+        // (resolved exactly as GATEWAY_PIVOT resolves its pivot) to the peer. Self-edges are
+        // guarded; the peer is never added to sameSubnetPeers, preserving the v4 PUBLIC invariant.
+        String egressTechniqueId = AttackTechniqueMapper.forEdgeType(EdgeType.EGRESS_CONNECTION).id();
+        for (Device d : devices) {
+            if (d.getDiscoverySource() != DiscoverySource.CONN_TABLE) continue;
+            if (d.getDiscoveryScope() != DiscoveryScope.PUBLIC) continue;
+            Device origin = resolveOriginHost(devices, d.getOriginHostIp());
+            if (origin == null || origin.getId().equals(d.getId())) continue;
+            DeviceVertex vOrigin = vertexById.get(origin.getId());
+            DeviceVertex vPeer = vertexById.get(d.getId());
+            AttackEdge edge = new AttackEdge(EdgeType.EGRESS_CONNECTION,
+                EdgeWeights.egressConnectionRisk(), null, egressTechniqueId);
+            if (graph.addEdge(vOrigin, vPeer, edge)) {
+                graph.setEdgeWeight(edge, EdgeWeights.egressConnectionWeight());
+            }
+        }
+
         return new BuiltGraph(graph, Map.copyOf(vertexById));
+    }
+
+    /**
+     * Resolve the originating HOME host for a discovery origin, exactly as the GATEWAY_PIVOT pass
+     * resolves its pivot: an origin of {@code "local"} (or null) matches the HOME device whose IP
+     * equals the configured {@link GraphProperties#getDockerHostIp()}; any other origin matches the
+     * HOME device whose {@code ipAddress} equals that origin host IP. Deterministic min-by-id on
+     * ties; returns {@code null} when no HOME device matches.
+     */
+    private Device resolveOriginHost(List<Device> devices, String originHostIp) {
+        String origin = originHostIp != null ? originHostIp : "local";
+        String targetIp = "local".equals(origin) ? properties.getDockerHostIp() : origin;
+        return devices.stream()
+            .filter(d -> d.getDiscoveryScope() == DiscoveryScope.HOME)
+            .filter(d -> targetIp.equals(d.getIpAddress()))
+            .min(Comparator.comparingLong(Device::getId))
+            .orElse(null);
     }
 
     /**

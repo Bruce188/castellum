@@ -2,6 +2,10 @@ package io.castellum.scan;
 
 import io.castellum.audit.AuditService;
 import io.castellum.discovery.DeviceUpsertService;
+import io.castellum.discovery.DiscoverySource;
+import io.castellum.discovery.DiscoveryUnavailableException;
+import io.castellum.discovery.PassiveDiscoveryRequest;
+import io.castellum.discovery.PassiveDiscoveryService;
 import io.castellum.discovery.probe.DockerHostProbeService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
@@ -43,6 +47,7 @@ class ScanExecutionServiceTest {
     @Mock DeviceRepository deviceRepository;
     @Mock AliveHostResolver aliveHostResolver;
     @Mock DockerHostProbeService dockerHostProbeService;
+    @Mock PassiveDiscoveryService passiveDiscoveryService;
 
     ScanExecutionService service;
 
@@ -52,7 +57,7 @@ class ScanExecutionServiceTest {
             nmapRunner, scanRepository, nmapOutputParser,
             deviceUpsertService, networkServiceRepository, auditService,
             scanRetryService, riskCacheEvictor, deviceRepository, aliveHostResolver,
-            dockerHostProbeService);
+            dockerHostProbeService, passiveDiscoveryService);
     }
 
     // -----------------------------------------------------------------------
@@ -642,6 +647,85 @@ class ScanExecutionServiceTest {
                 && "8.0.46-1.el9".equals(ns.getVersion())
                 && "MySQL".equals(ns.getName())
                 && "cpe:2.3:a:oracle:mysql:8.0.46:*:*:*:*:*:*:*".equals(ns.getCpe())));
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (n) PING_SWEEP triggers a passive sweep (ARP + CONN_TABLE + GATEWAY) before COMPLETE.
+    //     CONN_TABLE is the only source that surfaces external/WAN peers, so the host-discovery
+    //     phase must always run it — active nmap of the scanned CIDR can never see them.
+    // -----------------------------------------------------------------------
+
+    @Test
+    void pingSweep_triggersPassiveSweepWithConnTableBeforeComplete() throws Exception {
+        Scan scan = stubScan(200L, "10.0.20.0/24", "PING_SWEEP");
+        when(scanRepository.findById(200L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(List.of(), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        service.executeAsync(200L);
+
+        ArgumentCaptor<PassiveDiscoveryRequest> reqCaptor =
+            ArgumentCaptor.forClass(PassiveDiscoveryRequest.class);
+        verify(passiveDiscoveryService).sweep(reqCaptor.capture());
+        assertEquals(
+            List.of(DiscoverySource.ARP, DiscoverySource.CONN_TABLE, DiscoverySource.GATEWAY),
+            reqCaptor.getValue().sources(),
+            "host-discovery scan must sweep ARP + CONN_TABLE + GATEWAY");
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus());
+    }
+
+    // -----------------------------------------------------------------------
+    // (o) Passive sweep failure is isolated — a non-Linux host (no /proc) or absent capability
+    //     must not fail the scan, mirroring the docker-probe isolation (test 4.2.b).
+    // -----------------------------------------------------------------------
+
+    @Test
+    void pingSweep_passiveSweepThrows_scanStillCompletes() throws Exception {
+        Scan scan = stubScan(201L, "10.0.21.0/24", "PING_SWEEP");
+        when(scanRepository.findById(201L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyString(), any(ScanType.class))).thenReturn(result);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(List.of(), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        when(passiveDiscoveryService.sweep(any()))
+            .thenThrow(new DiscoveryUnavailableException("no /proc on this host"));
+
+        service.executeAsync(201L);
+
+        assertEquals(ScanStatus.COMPLETE, scan.getStatus(),
+            "passive sweep failure must be isolated — scan still completes");
+        verify(auditService).recordEvent(eq("system"), eq("SCAN_COMPLETE"), eq("scan"), eq("201"), any());
+        verify(auditService, never()).recordEvent(eq("system"), eq("SCAN_FAILED"), any(), any(), any());
+    }
+
+    // -----------------------------------------------------------------------
+    // (p) SERVICE_DETECT (enrichment of already-known hosts) must NOT trigger a passive sweep —
+    //     gating on PING_SWEEP keeps a unified ping+service+os flow to a single sweep.
+    // -----------------------------------------------------------------------
+
+    @Test
+    void serviceDetect_doesNotTriggerPassiveSweep() throws Exception {
+        Scan scan = stubScan(202L, "10.0.22.0/24", "SERVICE_DETECT");
+        when(scanRepository.findById(202L)).thenReturn(Optional.of(scan));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aliveHostResolver.aliveHostsIn("10.0.22.0/24")).thenReturn(List.of("10.0.22.5"));
+
+        NmapResult result = new NmapResult(0, "stdout", "");
+        when(nmapRunner.run(anyList(), any(ScanType.class))).thenReturn(result);
+        NmapOutputParser.ParsedScan parsed = new NmapOutputParser.ParsedScan(List.of(), List.of());
+        when(nmapOutputParser.parse(anyString(), any(ScanType.class))).thenReturn(parsed);
+
+        service.executeAsync(202L);
+
+        verify(passiveDiscoveryService, never()).sweep(any());
         assertEquals(ScanStatus.COMPLETE, scan.getStatus());
     }
 }

@@ -5,6 +5,8 @@ import io.castellum.discovery.DockerImageCpe;
 import io.castellum.discovery.Discovery;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.discovery.DeviceUpsertService;
+import io.castellum.discovery.PassiveDiscoveryRequest;
+import io.castellum.discovery.PassiveDiscoveryService;
 import io.castellum.discovery.probe.DockerHostProbeService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
@@ -67,6 +69,7 @@ public class ScanExecutionService {
     private final DeviceRepository deviceRepository;
     private final AliveHostResolver aliveHostResolver;
     private final DockerHostProbeService dockerHostProbeService;
+    private final PassiveDiscoveryService passiveDiscoveryService;
 
     public ScanExecutionService(
             NmapRunner nmapRunner,
@@ -79,7 +82,8 @@ public class ScanExecutionService {
             RiskCacheEvictor riskCacheEvictor,
             DeviceRepository deviceRepository,
             AliveHostResolver aliveHostResolver,
-            DockerHostProbeService dockerHostProbeService) {
+            DockerHostProbeService dockerHostProbeService,
+            PassiveDiscoveryService passiveDiscoveryService) {
         this.nmapRunner = nmapRunner;
         this.scanRepository = scanRepository;
         this.nmapOutputParser = nmapOutputParser;
@@ -91,6 +95,7 @@ public class ScanExecutionService {
         this.deviceRepository = deviceRepository;
         this.aliveHostResolver = aliveHostResolver;
         this.dockerHostProbeService = dockerHostProbeService;
+        this.passiveDiscoveryService = passiveDiscoveryService;
     }
 
     /** Prefix length of each execution chunk. /22 = 1024 hosts per nmap run. */
@@ -238,6 +243,26 @@ public class ScanExecutionService {
             } catch (Exception selfCheckEx) {
                 log.warn("execute: docker self-check failed for scan {} — scan continues: {}",
                     scanId, selfCheckEx.getMessage());
+            }
+
+            // 7.6. Passive discovery sweep — gated to the PING_SWEEP host-discovery phase, which
+            // the "Scan this network" flow always runs first (SERVICE_DETECT/OS_FINGERPRINT only
+            // enrich already-known hosts). Surfaces the local ARP neighbours, the default gateway,
+            // and — via CONN_TABLE — the external/WAN peers this host is actually talking to, which
+            // active nmap of the scanned CIDR can never see. Gating on PING_SWEEP keeps a unified
+            // ping+service+os flow to a single sweep instead of three. Failures are isolated like
+            // the docker probe: a non-Linux host (no /proc) or absent capability must not fail the
+            // scan.
+            // ponytail: records triggered_by=MANUAL via sweep(); add a SCAN trigger label on
+            // PassiveDiscoveryService if forensics need to distinguish scan-driven sweeps.
+            if (type == ScanType.PING_SWEEP) {
+                try {
+                    passiveDiscoveryService.sweep(new PassiveDiscoveryRequest(null, 30,
+                        List.of(DiscoverySource.ARP, DiscoverySource.CONN_TABLE, DiscoverySource.GATEWAY)));
+                } catch (Exception sweepEx) {
+                    log.warn("execute: passive sweep failed for scan {} — scan continues: {}",
+                        scanId, sweepEx.getMessage());
+                }
             }
 
             // 8. COMPLETE

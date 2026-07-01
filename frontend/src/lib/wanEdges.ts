@@ -1,17 +1,18 @@
 import type { Device } from '../api/types';
-import { ipv4Slash24 } from './subnetEdges';
+import { findDockerHost } from './gatewayEdges';
 
 /**
  * Edge produced by {@link buildWanEdges}. Two kinds coexist:
  * <ul>
- *   <li>{@code wan} — connects the LAN's egress router (the WAN anchor) to a
- *       PUBLIC-scope device so external nodes visually hang off the gateway
- *       instead of floating isolated inside zone-public. Carries the
- *       {@code wan-edge} class for the dedicated stroke style in
- *       TopologyView's stylesheet.</li>
+ *   <li>{@code wan} — connects a PUBLIC-scope peer's originating host (the
+ *       HOME device from whose connection table the external peer was
+ *       observed) to the peer, so external nodes visually hang off the host
+ *       that actually reached them instead of floating isolated inside
+ *       zone-public. Carries the {@code wan-edge} class for the dedicated
+ *       stroke style in TopologyView's stylesheet.</li>
  *   <li>{@code isolated} — self-anchor (source === target) emitted for each
- *       PUBLIC device when no WAN anchor is resolvable or the cap is
- *       exceeded, so PUBLIC nodes always carry the explicit unrouted
+ *       PUBLIC device whose originating host is unresolvable, or when the cap
+ *       is exceeded, so PUBLIC nodes always carry the explicit unrouted
  *       affordance instead of rendering edge-less. No {@code wan-edge}
  *       class — these take the same treatment as gatewayEdges' isolated
  *       self-anchors via {@code edge[kind = ...]} selectors. The
@@ -36,108 +37,86 @@ export interface WanEdge {
 
 /**
  * Ceiling on PUBLIC devices anchored by WAN edges — mirrors GraphBuilder's
- * subnet-cap (64). Past it, the single-anchor fan-in becomes the densest
- * edge cluster in the graph and degrades the cose-bilkent layout, so the
- * anchored edge set is dropped and PUBLIC devices fall back to isolated
- * self-anchors instead. Self-loops don't create the dense single-anchor
- * fan-in the cap exists to prevent, so emitting them over-cap is consistent
- * with the cap's rationale.
+ * subnet-cap (64). Past it, the per-origin fan-in becomes the densest edge
+ * cluster in the graph and degrades the cose-bilkent layout, so the anchored
+ * edge set is dropped and PUBLIC devices fall back to isolated self-anchors
+ * instead. Self-loops don't create the dense fan-in the cap exists to prevent,
+ * so emitting them over-cap is consistent with the cap's rationale.
  */
 export const WAN_EDGE_CAP = 64;
 
-function lastOctet(ip: string): number | null {
-  const parts = ip.split('.');
-  if (parts.length !== 4) return null;
-  const n = Number(parts[3]);
-  return Number.isInteger(n) ? n : null;
-}
-
-function ipToInt(ip: string): number | null {
-  const parts = ip.split('.');
-  if (parts.length !== 4) return null;
-  let v = 0;
-  for (const p of parts) {
-    const n = Number(p);
-    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
-    v = v * 256 + n;
-  }
-  return v;
-}
-
-/** Sort comparator: numerically lowest IP first; tie-break (defensive) on lowest id. */
-function byIpThenId(a: Device, b: Device): number {
-  const ai = ipToInt(a.ipAddress);
-  const bi = ipToInt(b.ipAddress);
-  if (ai !== null && bi !== null && ai !== bi) return ai - bi;
-  return a.id - b.id;
-}
-
-/**
- * Pick the LAN's egress router — the anchor that WAN edges fan out from:
- * <ol>
- *   <li>HOME-scope device with {@code deviceRole === 'ROUTER'}; if several,
- *       the numerically lowest IP wins.</li>
- *   <li>Fallback: the HOME device whose IPv4 ends in {@code .1} sharing its
- *       /24 with the largest number of HOME devices (most-populated subnet's
- *       {@code .1} is the likeliest default gateway).</li>
- *   <li>No candidate → {@code null}; PUBLIC nodes fall back to isolated
- *       self-anchors.</li>
- * </ol>
- */
-function pickWanAnchor(devices: Device[]): Device | null {
-  const home = devices.filter(d => d.discoveryScope === 'HOME');
-
-  // (a) Explicit ROUTER role wins outright.
-  const routers = home.filter(d => d.deviceRole === 'ROUTER');
-  if (routers.length > 0) {
-    return [...routers].sort(byIpThenId)[0];
-  }
-
-  // (b) .1-per-/24 heuristic, weighted by HOME population of the /24.
-  const groups = new Map<string, Device[]>();
-  for (const d of home) {
-    const key = ipv4Slash24(d.ipAddress);
-    if (key === null) continue;
-    const list = groups.get(key) ?? [];
-    list.push(d);
-    groups.set(key, list);
-  }
-  let best: { dot1: Device; size: number } | null = null;
-  for (const group of groups.values()) {
-    const dot1 = group.find(d => lastOctet(d.ipAddress) === 1);
-    if (!dot1) continue;
-    if (
-      best === null ||
-      group.length > best.size ||
-      (group.length === best.size && byIpThenId(dot1, best.dot1) < 0)
-    ) {
-      best = { dot1, size: group.length };
-    }
-  }
-  return best?.dot1 ?? null;
-}
-
-/** One isolated self-anchor (source === target) per PUBLIC device. */
-function buildIsolatedSelfAnchors(publicDevices: Device[]): WanEdge[] {
-  return publicDevices.map(d => ({
+/** One isolated self-anchor (source === target) for a PUBLIC device. */
+function isolatedSelfAnchor(d: Device): WanEdge {
+  return {
     data: {
       id: `wan-iso-${d.id}`,
       source: String(d.id),
       target: String(d.id),
-      kind: 'isolated' as const,
+      kind: 'isolated',
     },
-  }));
+  };
 }
 
 /**
- * Build WAN edges connecting the egress router to every PUBLIC-scope device.
- * When no anchor can be identified, or when the PUBLIC count exceeds
- * {@link WAN_EDGE_CAP} (one console.warn), returns one {@code kind:
- * 'isolated'} self-anchor per PUBLIC device instead — PUBLIC nodes always
- * carry at least the explicit unrouted affordance rather than rendering
- * edge-less. The {@code wan-iso-} id prefix cannot collide with
- * gatewayEdges' {@code iso-} ids because gatewayEdges no longer emits
- * anything for PUBLIC devices.
+ * Resolve the originating host for the PUBLIC peers, keyed by their
+ * {@code originHostIp}. Mirrors gatewayEdges' {@code findDockerHosts}:
+ * <ul>
+ *   <li>{@code "local"} → the SAME resolver gatewayEdges uses for the local
+ *       docker-bridge origin ({@link findDockerHost}: the HOME device matching
+ *       {@code localStorage[castellum.topology.docker-host-ip]}, default
+ *       192.168.68.51).</li>
+ *   <li>any other {@code originHostIp} → the HOME-scope device whose
+ *       {@code ipAddress} equals it (min by id when several qualify).</li>
+ * </ul>
+ * Origins with no matching host are omitted — their peers fall back to an
+ * isolated self-anchor (never the gateway).
+ */
+function resolveOriginHosts(devices: Device[], publicDevices: Device[]): Map<string, Device> {
+  const hostByOrigin = new Map<string, Device>();
+
+  // Distinct origins among the PUBLIC peers.
+  const origins = new Set<string>();
+  for (const d of publicDevices) origins.add(d.originHostIp);
+
+  // HOME-by-IP lookup for non-local resolution.
+  const homeByIp = new Map<string, Device[]>();
+  for (const d of devices) {
+    if (d.discoveryScope !== 'HOME') continue;
+    const list = homeByIp.get(d.ipAddress) ?? [];
+    list.push(d);
+    homeByIp.set(d.ipAddress, list);
+  }
+
+  for (const origin of origins) {
+    if (origin === 'local') {
+      // Reuse gatewayEdges' docker-host resolver for the local origin.
+      const host = findDockerHost(devices);
+      if (host !== null) hostByOrigin.set('local', host);
+    } else {
+      // Non-local: HOME device whose IP matches the origin host IP, min-by-id.
+      const candidates = homeByIp.get(origin) ?? [];
+      if (candidates.length > 0) {
+        hostByOrigin.set(origin, candidates.reduce((a, b) => (a.id <= b.id ? a : b)));
+      }
+      // No match → origin omitted; its peers become isolated self-anchors.
+    }
+  }
+
+  return hostByOrigin;
+}
+
+/**
+ * Build WAN edges connecting each PUBLIC-scope device to its originating host —
+ * the HOME device from whose connection table the external peer was observed,
+ * resolved per-peer via {@code originHostIp} (reusing gatewayEdges' docker-host
+ * resolver for the {@code "local"} origin). When a peer's originating host is
+ * unresolvable it gets a {@code kind: 'isolated'} self-anchor instead — never a
+ * gateway fallback — so PUBLIC nodes always carry at least the explicit
+ * unrouted affordance rather than rendering edge-less. When the PUBLIC count
+ * exceeds {@link WAN_EDGE_CAP} (one console.warn) every PUBLIC device falls
+ * back to an isolated self-anchor. The {@code wan-iso-} id prefix cannot
+ * collide with gatewayEdges' {@code iso-} ids because gatewayEdges no longer
+ * emits anything for PUBLIC devices.
  */
 export function buildWanEdges(devices: Device[]): WanEdge[] {
   const publicDevices = devices.filter(d => d.discoveryScope === 'PUBLIC');
@@ -146,19 +125,22 @@ export function buildWanEdges(devices: Device[]): WanEdge[] {
     console.warn(
       `buildWanEdges: WAN-edge cap (${WAN_EDGE_CAP}) exceeded — ${publicDevices.length} PUBLIC devices fall back to isolated self-anchors`,
     );
-    return buildIsolatedSelfAnchors(publicDevices);
+    return publicDevices.map(isolatedSelfAnchor);
   }
 
-  const anchor = pickWanAnchor(devices);
-  if (anchor === null) return buildIsolatedSelfAnchors(publicDevices);
+  const hostByOrigin = resolveOriginHosts(devices, publicDevices);
 
-  return publicDevices.map(d => ({
-    data: {
-      id: `wan:${anchor.id}-${d.id}`,
-      source: String(anchor.id),
-      target: String(d.id),
-      kind: 'wan' as const,
-    },
-    classes: 'wan-edge' as const,
-  }));
+  return publicDevices.map(peer => {
+    const host = hostByOrigin.get(peer.originHostIp);
+    if (host === undefined) return isolatedSelfAnchor(peer);
+    return {
+      data: {
+        id: `wan:${host.id}-${peer.id}`,
+        source: String(host.id),
+        target: String(peer.id),
+        kind: 'wan' as const,
+      },
+      classes: 'wan-edge' as const,
+    };
+  });
 }

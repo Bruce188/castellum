@@ -91,9 +91,11 @@ function pickGateway(group: Device[]): Device {
  * Returns {@code null} if no candidate exists, in which case
  * DOCKER_BRIDGE devices remain orphans (no synthetic edges).
  *
- * Retained as the {@code "local"}/no-origin fallback for {@link findDockerHosts}.
+ * Retained as the {@code "local"}/no-origin fallback for {@link findDockerHosts},
+ * and reused by {@code buildWanEdges} to anchor local-origin PUBLIC peers to the
+ * same host.
  */
-function findDockerHost(devices: Device[]): Device | null {
+export function findDockerHost(devices: Device[]): Device | null {
   const override = (typeof localStorage !== 'undefined'
     ? localStorage.getItem(DOCKER_HOST_IP_LS_KEY)
     : null) ?? DEFAULT_DOCKER_HOST_IP;

@@ -73,4 +73,19 @@ class EdgeWeightsTest {
     void gatewayPivotWeightIsHeavierThanSameSubnet() {
         assertThat(EdgeWeights.gatewayPivotWeight()).isGreaterThan(EdgeWeights.sameSubnetWeight());
     }
+
+    @Test
+    void egressConnectionWeightIsConstant3() {
+        assertThat(EdgeWeights.egressConnectionWeight()).isEqualTo(3.0);
+    }
+
+    @Test
+    void egressConnectionRiskIsConstant1() {
+        assertThat(EdgeWeights.egressConnectionRisk()).isEqualTo(1.0);
+    }
+
+    @Test
+    void egressConnectionWeightIsHeavierThanSameSubnet() {
+        assertThat(EdgeWeights.egressConnectionWeight()).isGreaterThan(EdgeWeights.sameSubnetWeight());
+    }
 }

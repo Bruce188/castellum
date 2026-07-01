@@ -2,11 +2,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildWanEdges, WAN_EDGE_CAP } from './wanEdges';
 import type { Device, DeviceRole, DiscoveryScope } from '../api/types';
 
+// Default docker-host IP (DEFAULT_DOCKER_HOST_IP in gatewayEdges) — the HOME
+// device a "local"-origin PUBLIC peer resolves to. No localStorage override is
+// set in this suite, so the resolver falls back to this address.
+const LOCAL_HOST_IP = '192.168.68.51';
+
 function makeDevice(
   id: number,
   ipAddress: string,
   scope: DiscoveryScope,
   deviceRole: DeviceRole = 'UNKNOWN',
+  originHostIp = 'local',
 ): Device {
   return {
     id,
@@ -25,43 +31,74 @@ function makeDevice(
     osCpe: null,
     publishesHostPort: false,
     deviceRole,
-    originHostIp: 'local',
+    originHostIp,
     originHostName: null,
     networkName: null,
   };
 }
 
 describe('buildWanEdges', () => {
-  it('anchors_public_devices_to_home_router', () => {
+  it('local_origin_public_anchors_to_originating_host_not_gateway', () => {
+    // PUBLIC peers with originHostIp 'local' anchor to the docker-host
+    // (192.168.68.51), NOT the LAN gateway/router at .1.
     const devices: Device[] = [
-      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
-      makeDevice(2, '192.168.68.50', 'HOME'),
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'), // gateway — must NOT anchor
+      makeDevice(2, LOCAL_HOST_IP, 'HOME'),            // the originating (local) host
       makeDevice(3, '8.8.8.8', 'PUBLIC'),
       makeDevice(4, '1.1.1.1', 'PUBLIC'),
     ];
     const edges = buildWanEdges(devices);
     expect(edges).toHaveLength(2);
-    expect(edges.every(e => e.data.source === '1')).toBe(true);
+    expect(edges.every(e => e.data.kind === 'wan')).toBe(true);
+    expect(edges.every(e => e.data.source === '2')).toBe(true); // origin host
+    expect(edges.every(e => e.data.source !== '1')).toBe(true); // NOT the gateway/router
+    expect(edges.every(e => e.classes === 'wan-edge')).toBe(true);
     expect(edges.map(e => e.data.target).sort()).toEqual(['3', '4']);
   });
 
-  it('multiple_routers_lowest_ip_wins', () => {
+  it('remote_origin_public_anchors_to_matching_home_host_not_gateway', () => {
+    // A PUBLIC peer whose originHostIp names a remote HOME host resolves to
+    // that host (by ipAddress), not the gateway.
     const devices: Device[] = [
-      makeDevice(1, '192.168.68.254', 'HOME', 'ROUTER'),
-      makeDevice(2, '192.168.68.2', 'HOME', 'ROUTER'),
-      makeDevice(3, '8.8.8.8', 'PUBLIC'),
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),               // gateway present
+      makeDevice(5, '10.0.0.20', 'HOME'),                           // the originating host
+      makeDevice(6, '203.0.113.7', 'PUBLIC', 'UNKNOWN', '10.0.0.20'),
     ];
     const edges = buildWanEdges(devices);
     expect(edges).toHaveLength(1);
-    // 192.168.68.2 < 192.168.68.254 numerically → device 2 anchors.
-    expect(edges[0].data.source).toBe('2');
+    expect(edges[0].data).toEqual({ id: 'wan:5-6', source: '5', target: '6', kind: 'wan' });
+    expect(edges[0].data.source).not.toBe('1'); // not the gateway
+    expect(edges[0].classes).toBe('wan-edge');
   });
 
-  it('router_role_must_be_home_scope', () => {
-    // A DOCKER_BRIDGE "router" must not anchor; with no HOME .1 either the
-    // PUBLIC device falls back to an isolated self-anchor.
+  it('remote_origin_multiple_home_matches_lowest_id_wins', () => {
     const devices: Device[] = [
-      makeDevice(1, '172.17.0.1', 'DOCKER_BRIDGE', 'ROUTER'),
+      makeDevice(9, '10.0.0.20', 'HOME'),
+      makeDevice(4, '10.0.0.20', 'HOME'), // same IP, lower id → wins
+      makeDevice(6, '203.0.113.7', 'PUBLIC', 'UNKNOWN', '10.0.0.20'),
+    ];
+    const edges = buildWanEdges(devices);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].data.source).toBe('4');
+  });
+
+  it('unresolvable_origin_yields_isolated_self_anchor_not_gateway', () => {
+    // originHostIp names a host with no matching HOME device — the peer must
+    // self-anchor, NOT fall back to the gateway that is present.
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'), // gateway exists...
+      makeDevice(2, '8.8.8.8', 'PUBLIC', 'UNKNOWN', '10.9.9.9'), // ...origin 10.9.9.9 absent
+    ];
+    expect(buildWanEdges(devices)).toEqual([
+      { data: { id: 'wan-iso-2', source: '2', target: '2', kind: 'isolated' } },
+    ]);
+  });
+
+  it('local_origin_without_docker_host_yields_isolated_self_anchor', () => {
+    // origin 'local' but no HOME device at the docker-host IP → unresolvable →
+    // isolated self-anchor (not the .1 gateway).
+    const devices: Device[] = [
+      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'), // gateway at .1; docker-host (.51) absent
       makeDevice(2, '8.8.8.8', 'PUBLIC'),
     ];
     expect(buildWanEdges(devices)).toEqual([
@@ -69,33 +106,21 @@ describe('buildWanEdges', () => {
     ]);
   });
 
-  it('fallback_dot1_of_most_populated_home_slash24', () => {
-    // No ROUTER role. Two .1 candidates: 10.0.0.1 (lone) vs 192.168.68.1
-    // (shares its /24 with two more HOME devices) → 192.168.68.1 anchors.
+  it('mixed_origins_resolve_per_device', () => {
+    // One peer's origin resolves (→ wan edge), another's does not (→ isolated).
     const devices: Device[] = [
-      makeDevice(1, '10.0.0.1', 'HOME'),
-      makeDevice(2, '192.168.68.1', 'HOME'),
-      makeDevice(3, '192.168.68.50', 'HOME'),
-      makeDevice(4, '192.168.68.51', 'HOME'),
-      makeDevice(5, '8.8.8.8', 'PUBLIC'),
+      makeDevice(2, LOCAL_HOST_IP, 'HOME'),                       // local origin host
+      makeDevice(3, '8.8.8.8', 'PUBLIC'),                         // origin 'local' → host 2
+      makeDevice(4, '1.1.1.1', 'PUBLIC', 'UNKNOWN', '10.9.9.9'),  // origin absent → isolated
     ];
     const edges = buildWanEdges(devices);
-    expect(edges).toHaveLength(1);
-    expect(edges[0].data.source).toBe('2');
-    expect(edges[0].data.target).toBe('5');
-  });
-
-  it('fallback_requires_dot1_no_anchor_yields_isolated_self_anchors', () => {
-    // HOME devices exist but none is a ROUTER and none ends in .1 → no anchor
-    // → the PUBLIC device gets an isolated self-anchor, not zero edges.
-    const devices: Device[] = [
-      makeDevice(1, '192.168.68.50', 'HOME'),
-      makeDevice(2, '192.168.68.51', 'HOME'),
-      makeDevice(3, '8.8.8.8', 'PUBLIC'),
-    ];
-    expect(buildWanEdges(devices)).toEqual([
-      { data: { id: 'wan-iso-3', source: '3', target: '3', kind: 'isolated' } },
-    ]);
+    expect(edges).toHaveLength(2);
+    const wan = edges.find(e => e.data.target === '3')!;
+    const iso = edges.find(e => e.data.target === '4')!;
+    expect(wan.data).toEqual({ id: 'wan:2-3', source: '2', target: '3', kind: 'wan' });
+    expect(wan.classes).toBe('wan-edge');
+    expect(iso.data).toEqual({ id: 'wan-iso-4', source: '4', target: '4', kind: 'isolated' });
+    expect(iso.classes).toBeUndefined();
   });
 
   it('no_home_devices_yields_isolated_self_anchor_per_public_device', () => {
@@ -115,7 +140,7 @@ describe('buildWanEdges', () => {
   it('no_public_devices_yields_empty', () => {
     const devices: Device[] = [
       makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
-      makeDevice(2, '192.168.68.50', 'HOME'),
+      makeDevice(2, LOCAL_HOST_IP, 'HOME'),
     ];
     expect(buildWanEdges(devices)).toEqual([]);
   });
@@ -123,7 +148,7 @@ describe('buildWanEdges', () => {
   it('over_cap_public_devices_yields_isolated_self_anchors_with_single_warn', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const devices: Device[] = [
-      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      makeDevice(1, LOCAL_HOST_IP, 'HOME'),
       ...Array.from({ length: WAN_EDGE_CAP + 1 }, (_, i) =>
         makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
       ),
@@ -140,7 +165,7 @@ describe('buildWanEdges', () => {
 
   it('exactly_cap_public_devices_builds_all_edges', () => {
     const devices: Device[] = [
-      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      makeDevice(1, LOCAL_HOST_IP, 'HOME'),
       ...Array.from({ length: WAN_EDGE_CAP }, (_, i) =>
         makeDevice(100 + i, `8.8.${Math.floor(i / 256)}.${i % 256}`, 'PUBLIC'),
       ),
@@ -148,11 +173,12 @@ describe('buildWanEdges', () => {
     const edges = buildWanEdges(devices);
     expect(edges).toHaveLength(WAN_EDGE_CAP);
     expect(edges.every(e => e.data.source === '1')).toBe(true);
+    expect(edges.every(e => e.data.kind === 'wan')).toBe(true);
   });
 
   it('edge_def_shape_id_kind_and_class', () => {
     const devices: Device[] = [
-      makeDevice(7, '192.168.68.1', 'HOME', 'ROUTER'),
+      makeDevice(7, LOCAL_HOST_IP, 'HOME'),
       makeDevice(9, '8.8.8.8', 'PUBLIC'),
     ];
     const edges = buildWanEdges(devices);
@@ -163,37 +189,7 @@ describe('buildWanEdges', () => {
     });
   });
 
-  it('fallback_equal_population_slash24_tiebreak_lower_dot1_wins', () => {
-    // Two /24 groups with identical HOME population (2 each), both having a .1 device.
-    // 10.0.0.1 (numerically lower) should beat 192.168.1.1 as the anchor.
-    const devices: Device[] = [
-      makeDevice(1, '10.0.0.1', 'HOME'),
-      makeDevice(2, '10.0.0.50', 'HOME'),
-      makeDevice(3, '192.168.1.1', 'HOME'),
-      makeDevice(4, '192.168.1.50', 'HOME'),
-      makeDevice(5, '8.8.8.8', 'PUBLIC'),
-    ];
-    const edges = buildWanEdges(devices);
-    expect(edges).toHaveLength(1);
-    // 10.0.0.1 < 192.168.1.1 numerically → device 1 anchors.
-    expect(edges[0].data.source).toBe('1');
-    expect(edges[0].data.target).toBe('5');
-  });
-
-  it('router_non_ipv4_address_id_fallback_lowest_id_wins', () => {
-    // Two HOME ROUTERs with IPv6 addresses — ipToInt returns null for both
-    // so byIpThenId falls back to a.id - b.id; the lowest id (10) anchors.
-    const devices: Device[] = [
-      makeDevice(20, '2001:db8::2', 'HOME', 'ROUTER'),
-      makeDevice(10, '2001:db8::1', 'HOME', 'ROUTER'),
-      makeDevice(99, '8.8.8.8', 'PUBLIC'),
-    ];
-    const edges = buildWanEdges(devices);
-    expect(edges).toHaveLength(1);
-    expect(edges[0].data.source).toBe('10');
-  });
-
-  it('ipv6_public_devices_receive_wan_edges_and_count_toward_cap', () => {
+  it('ipv6_public_devices_count_toward_cap', () => {
     // IPv6 PUBLIC devices are included in publicDevices (scope-only filter).
     // 63 IPv4 + 2 IPv6 PUBLIC = 65 > WAN_EDGE_CAP (64) → cap warning →
     // isolated self-anchors for all 65.
@@ -206,7 +202,7 @@ describe('buildWanEdges', () => {
       makeDevice(201, '2001:db8::2', 'PUBLIC'),
     ];
     const devices: Device[] = [
-      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      makeDevice(1, LOCAL_HOST_IP, 'HOME'),
       ...ipv4Public,
       ...ipv6Public,
     ];
@@ -218,10 +214,11 @@ describe('buildWanEdges', () => {
     warn.mockRestore();
   });
 
-  it('ipv6_public_devices_below_cap_receive_wan_edges', () => {
-    // A mix of IPv4 and IPv6 PUBLIC devices within cap → all get edges.
+  it('ipv6_public_devices_below_cap_anchor_to_origin_host', () => {
+    // A mix of IPv4 and IPv6 PUBLIC devices within cap → all anchor to their
+    // local originating host.
     const devices: Device[] = [
-      makeDevice(1, '192.168.68.1', 'HOME', 'ROUTER'),
+      makeDevice(1, LOCAL_HOST_IP, 'HOME'),
       makeDevice(2, '8.8.8.8', 'PUBLIC'),
       makeDevice(3, '2001:db8::1', 'PUBLIC'),
     ];

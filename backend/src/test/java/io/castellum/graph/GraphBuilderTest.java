@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender;
 import io.castellum.cve.Cve;
 import io.castellum.cve.CveMatcher;
 import io.castellum.discovery.DiscoveryScope;
+import io.castellum.discovery.DiscoverySource;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
 import io.castellum.domain.NetworkService;
@@ -82,6 +83,13 @@ class GraphBuilderTest {
     private Device publicDevice(long id, String ip) {
         Device d = device(id, ip);
         d.setDiscoveryScope(DiscoveryScope.PUBLIC);
+        return d;
+    }
+
+    /** PUBLIC peer surfaced from a host's connection table — the egress-edge subject. */
+    private Device connTablePublicDevice(long id, String ip) {
+        Device d = publicDevice(id, ip);
+        d.setDiscoverySource(DiscoverySource.CONN_TABLE);
         return d;
     }
 
@@ -772,6 +780,144 @@ class GraphBuilderTest {
             .isNotNull();
         assertThat(ba).isNotNull();
         assertThat(ab.getType()).isEqualTo(EdgeType.SAME_SUBNET);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // EGRESS_CONNECTION — directed edge from the originating host to a
+    // CONN_TABLE + PUBLIC egress peer (resolves origin like GATEWAY_PIVOT)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * (a) A CONN_TABLE + PUBLIC peer with a "local" origin and a HOME device at the configured
+     * dockerHostIp yields exactly one directed EGRESS_CONNECTION edge origin→peer, carrying the
+     * egress weight/risk/technique and no reverse edge.
+     */
+    @Test
+    void egressConnection_localOriginAtDockerHostIp_drawsSingleDirectedEdge() {
+        Device origin = device(5L, "192.168.68.51");                 // HOME at dockerHostIp
+        Device peer = connTablePublicDevice(7L, "203.0.113.50");     // CONN_TABLE + PUBLIC, origin "local"
+        when(deviceRepo.findAll()).thenReturn(List.of(origin, peer));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vOrigin = new DeviceVertex(5L, "192.168.68.51");
+        DeviceVertex vPeer = new DeviceVertex(7L, "203.0.113.50");
+
+        AttackEdge edge = g.getEdge(vOrigin, vPeer);
+        assertThat(edge).as("directed egress edge origin→peer").isNotNull();
+        assertThat(edge.getType()).isEqualTo(EdgeType.EGRESS_CONNECTION);
+        assertThat(g.getEdgeWeight(edge)).isEqualTo(EdgeWeights.egressConnectionWeight());
+        assertThat(edge.getRiskContribution()).isEqualTo(EdgeWeights.egressConnectionRisk());
+        assertThat(edge.getTechniqueId())
+            .isEqualTo(AttackTechniqueMapper.forEdgeType(EdgeType.EGRESS_CONNECTION).id());
+        assertThat(edge.getCveId()).isNull();
+
+        // Directed: no reverse edge, and exactly one egress edge in the whole graph.
+        assertThat(g.getEdge(vPeer, vOrigin)).as("egress is one-way").isNull();
+        assertThat(g.edgeSet().stream().filter(e -> e.getType() == EdgeType.EGRESS_CONNECTION).count())
+            .isEqualTo(1);
+    }
+
+    /**
+     * (b) The egress peer is the worst case for the #97/#98 invariant: parked inside the HOME /24
+     * and running a vulnerable service. It must still receive ONLY the EGRESS_CONNECTION edge —
+     * never SAME_SUBNET or EXPLOITABLE_VULN — while the co-bucketed HOME peers keep their own edges.
+     */
+    @Test
+    void egressPeer_getsNoSameSubnetOrExploitableVulnEdge() {
+        Device homeA = device(1L, "10.0.0.10");
+        Device homeB = device(2L, "10.0.0.20");
+        Device origin = device(5L, "192.168.68.51");                 // HOME at dockerHostIp
+        Device peer = connTablePublicDevice(7L, "10.0.0.30");        // PUBLIC squatting in the HOME /24
+        when(deviceRepo.findAll()).thenReturn(List.of(homeA, homeB, origin, peer));
+
+        // Vulnerable service on the egress peer — would draw EXPLOITABLE_VULN if it were bucketed.
+        NetworkService svc = new NetworkService(10L, 7L, 22, "tcp", "openssh", "8.2", Instant.EPOCH);
+        when(serviceRepo.findByDeviceId(7L)).thenReturn(List.of(svc));
+        Cve cve = new Cve();
+        cve.setCveId("CVE-EGRESS-1");
+        cve.setCvssV31Score(new BigDecimal("9.0"));
+        cve.setLastModified(Instant.EPOCH);
+        cve.setRawJson("{}");
+        when(cveMatcher.findVulnerable(anyString())).thenReturn(List.of(cve));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPeer = new DeviceVertex(7L, "10.0.0.30");
+        assertThat(g.edgesOf(vPeer))
+            .as("egress peer is touched only by the EGRESS_CONNECTION edge")
+            .hasSize(1);
+        assertThat(g.edgesOf(vPeer).stream().allMatch(e -> e.getType() == EdgeType.EGRESS_CONNECTION))
+            .as("no SAME_SUBNET / EXPLOITABLE_VULN edge on a v4 PUBLIC egress peer (#97/#98)")
+            .isTrue();
+
+        // Surgical: HOME peers in the shared /24 keep their SAME_SUBNET adjacency.
+        assertThat(g.getEdge(new DeviceVertex(1L, "10.0.0.10"), new DeviceVertex(2L, "10.0.0.20")))
+            .isNotNull();
+    }
+
+    /**
+     * (c) No HOME device matches the origin (none at dockerHostIp) → the egress peer stays a fully
+     * isolated vertex.
+     */
+    @Test
+    void egressConnection_noHomeOriginMatch_peerStaysIsolated() {
+        Device home = device(5L, "192.168.68.99");                   // HOME, but NOT the dockerHostIp
+        Device peer = connTablePublicDevice(7L, "203.0.113.50");     // origin "local" → no match
+        when(deviceRepo.findAll()).thenReturn(List.of(home, peer));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vPeer = new DeviceVertex(7L, "203.0.113.50");
+        assertThat(g.containsVertex(vPeer)).isTrue();
+        assertThat(g.edgesOf(vPeer)).as("no HOME origin → no egress edge").isEmpty();
+    }
+
+    /**
+     * (d) A remote origin (originHostIp = a remote agent IP with a HOME device at it) draws the
+     * edge from that host. The self-edge guard holds: no peer→peer loop is ever emitted.
+     * (origin is always a HOME device and the peer is PUBLIC, so origin==peer is unreachable by
+     * construction; the guard is defensive for future local-host self-registration.)
+     */
+    @Test
+    void egressConnection_remoteOrigin_drawsEdgeFromThatHost_noSelfLoop() {
+        Device remoteOrigin = device(10L, "192.168.1.50");           // HOME at the remote agent IP
+        Device peer = connTablePublicDevice(7L, "203.0.113.50");
+        peer.setOriginHostIp("192.168.1.50");                        // discovered from the remote host
+        when(deviceRepo.findAll()).thenReturn(List.of(remoteOrigin, peer));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        DeviceVertex vOrigin = new DeviceVertex(10L, "192.168.1.50");
+        DeviceVertex vPeer = new DeviceVertex(7L, "203.0.113.50");
+
+        AttackEdge edge = g.getEdge(vOrigin, vPeer);
+        assertThat(edge).as("egress edge from the remote origin host").isNotNull();
+        assertThat(edge.getType()).isEqualTo(EdgeType.EGRESS_CONNECTION);
+
+        // No self-loop on the peer, in either notional direction.
+        assertThat(g.getEdge(vPeer, vPeer)).as("no peer→peer self-loop").isNull();
+        assertThat(g.edgesOf(vPeer)).hasSize(1);
+    }
+
+    /**
+     * (e) Neither a CONN_TABLE + HOME peer nor a non-CONN_TABLE PUBLIC peer is an egress subject —
+     * both predicates (source == CONN_TABLE AND scope == PUBLIC) must hold. No egress edge forms.
+     */
+    @Test
+    void egressConnection_requiresBothConnTableAndPublic() {
+        Device origin = device(5L, "192.168.68.51");                 // HOME at dockerHostIp — origin resolves
+        Device connTableHome = device(6L, "10.5.5.5");
+        connTableHome.setDiscoverySource(DiscoverySource.CONN_TABLE); // CONN_TABLE but HOME scope
+        Device arpPublic = publicDevice(7L, "203.0.113.50");
+        arpPublic.setDiscoverySource(DiscoverySource.ARP);            // PUBLIC but not CONN_TABLE
+        when(deviceRepo.findAll()).thenReturn(List.of(origin, connTableHome, arpPublic));
+
+        Graph<DeviceVertex, AttackEdge> g = builder.build().graph();
+
+        assertThat(g.edgeSet().stream().anyMatch(e -> e.getType() == EdgeType.EGRESS_CONNECTION))
+            .as("egress requires CONN_TABLE source AND PUBLIC scope together")
+            .isFalse();
     }
 
     /**

@@ -2,6 +2,7 @@ package io.castellum.scan;
 
 import io.castellum.audit.AuditService;
 import io.castellum.discovery.DeviceUpsertService;
+import io.castellum.discovery.PassiveDiscoveryService;
 import io.castellum.discovery.probe.DockerHostProbeService;
 import io.castellum.domain.Device;
 import io.castellum.domain.DeviceRepository;
@@ -50,6 +51,7 @@ class ScanExecutionServiceChunkLoopTest {
     @Mock DeviceRepository deviceRepository;
     @Mock AliveHostResolver aliveHostResolver;
     @Mock DockerHostProbeService dockerHostProbeService;
+    @Mock PassiveDiscoveryService passiveDiscoveryService;
 
     ScanExecutionService service;
 
@@ -59,7 +61,7 @@ class ScanExecutionServiceChunkLoopTest {
             nmapRunner, scanRepository, nmapOutputParser,
             deviceUpsertService, networkServiceRepository, auditService,
             scanRetryService, riskCacheEvictor, deviceRepository, aliveHostResolver,
-            dockerHostProbeService);
+            dockerHostProbeService, passiveDiscoveryService);
     }
 
     private Scan stubScan(Long id, String cidr, String scanType) {
