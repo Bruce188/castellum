@@ -4,6 +4,7 @@ import io.castellum.cve.dto.NvdCveResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
@@ -13,6 +14,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
+import java.net.http.HttpClient;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -33,10 +35,19 @@ public class NvdClient {
     public NvdClient(RestClient.Builder builder,
                      @Value("${castellum.nvd.base-url}") String baseUrl,
                      @Value("${castellum.nvd.api-key:}") String apiKey,
-                     @Value("${castellum.nvd.request-interval-millis:6000}") long intervalMillis) {
+                     @Value("${castellum.nvd.request-interval-millis:6000}") long intervalMillis,
+                     @Value("${castellum.nvd.pin-http1:true}") boolean pinHttp1) {
         RestClient.Builder b = builder.baseUrl(baseUrl);
         if (apiKey != null && !apiKey.isBlank()) {
             b = b.defaultHeader("apiKey", apiKey);
+        }
+        if (pinHttp1) {
+            // NVD resets large HTTP/2 responses mid-stream (RST_STREAM), truncating the
+            // multi-thousand-CVE pages a full backfill pulls — beyond what fetchPage()'s retry can
+            // recover (dense post-2023 windows fail all 3 attempts). HTTP/1.1 has no stream resets,
+            // so full pages complete. Disabled in slice tests that mock the transport.
+            b = b.requestFactory(new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()));
         }
         this.client = b.build();
         this.intervalMillis = intervalMillis;
@@ -76,10 +87,11 @@ public class NvdClient {
                 log.warn("NVD I/O error on attempt {}/{}: {}", attempt, MAX_ATTEMPTS, e.getMessage());
                 lastError = new IOException("NVD I/O error", e);
             } catch (RestClientException e) {
-                // NVD truncates large HTTP/2 responses mid-stream (RST_STREAM), surfaced by .body()
-                // as a base RestClientException ("Error while extracting response..."). Retry those;
-                // let real HTTP-status errors (4xx/5xx) propagate unchanged.
-                // ponytail: if mid-stream resets ever exceed MAX_ATTEMPTS, pin the RestClient to HTTP/1.1.
+                // Body-extraction failure surfaced by .body() as a base RestClientException
+                // ("Error while extracting response..."). The client is pinned to HTTP/1.1 in the
+                // constructor to prevent the HTTP/2 RST_STREAM truncation that used to cause this;
+                // this retry is the residual net for genuine transient extraction hiccups.
+                // Let real HTTP-status errors (4xx/5xx) propagate unchanged.
                 if (e instanceof RestClientResponseException) {
                     throw e;
                 }
