@@ -128,6 +128,7 @@ jobs:
   # backend/src/test/resources/application.yml), so no postgres service is needed.
   backend-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -147,7 +148,14 @@ jobs:
           restore-keys: ${{ runner.os }}-maven-
 
       - name: Run backend tests
-        run: cd backend && ./mvnw -B test
+        # A suite that stalls past 10 minutes (normal: ~3) prints a thread dump of the test
+        # JVM before the job timeout kills it, so a hang is diagnosable from the log.
+        run: |
+          cd backend
+          ./mvnw -B test &
+          mvn_pid=$!
+          ( sleep 600; for p in $(pgrep -f surefirebooter); do jstack "$p"; done ) &
+          wait "$mvn_pid"
 
   # Frontend type-check, production build, and vitest suite.
   frontend:
