@@ -240,8 +240,9 @@ describe('<CveDetailPanel />', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /close cve panel/i })).toBeInTheDocument();
     });
-    // A visible error body — NOT a header-only panel
-    expect(screen.getByText(/couldn'?t load cve detail/i)).toBeInTheDocument();
+    // A visible error body — NOT a header-only panel. The close button renders
+    // before the rejection settles, so wait for the error state explicitly.
+    expect(await screen.findByText(/couldn'?t load cve detail/i)).toBeInTheDocument();
   });
 
   it('sparse-but-resolved detail: no-enrichment copy and NVD fallback link both present', async () => {
