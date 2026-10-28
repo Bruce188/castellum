@@ -37,9 +37,13 @@ public class SecurityConfig {
     @Nullable
     private RemoteAgentTokenRepository remoteAgentTokenRepository;
 
+    /** Lowered only by the test config: at cost 12 every login burns ~250ms of CPU. */
+    @Value("${castellum.security.bcrypt-strength:12}")
+    private int bcryptStrength = 12;
+
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
+        return new BCryptPasswordEncoder(bcryptStrength);
     }
 
     @Bean

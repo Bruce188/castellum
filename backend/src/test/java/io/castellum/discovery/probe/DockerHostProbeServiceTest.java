@@ -23,7 +23,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.annotation.DirtiesContext;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -58,7 +57,6 @@ import static org.mockito.Mockito.verify;
     DockerApiContainerListMapper.class,
     JacksonAutoConfiguration.class
 })
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class DockerHostProbeServiceTest {
 
     static final Instant FIXED_NOW = Instant.parse("2026-05-30T12:00:00Z");
