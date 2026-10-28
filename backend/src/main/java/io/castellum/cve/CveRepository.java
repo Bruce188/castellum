@@ -50,32 +50,34 @@ public interface CveRepository extends JpaRepository<Cve, Long> {
     // The method names are retained (callers/tests reference them) but the @Query
     // overrides name-based derivation. ORDER BY is baked in, so callers pass an
     // unsorted Pageable (page+size only).
+    // Native with explicit count queries: Spring Data's ANTLR HQL parser takes ~4s per
+    // query here and can stall indefinitely deriving the count query at startup.
     // ─────────────────────────────────────────────────────────────────────
 
-    @Query("SELECT c FROM Cve c WHERE c.id IN :ids "
-        + "AND (c.cvssV31Score IS NOT NULL OR c.cvssV30Score IS NOT NULL OR c.cvssV2Score IS NOT NULL) "
-        + "ORDER BY COALESCE(c.cvssV31Score, c.cvssV30Score, c.cvssV2Score) DESC, c.cveId ASC")
+    @Query(nativeQuery = true,
+        value = "SELECT c.* FROM cve c WHERE c.id IN (:ids) AND (c.cvss_v31_score IS NOT NULL OR c.cvss_v30_score IS NOT NULL OR c.cvss_v2_score IS NOT NULL) ORDER BY COALESCE(c.cvss_v31_score, c.cvss_v30_score, c.cvss_v2_score) DESC, c.cve_id ASC",
+        countQuery = "SELECT count(*) FROM cve c WHERE c.id IN (:ids) AND (c.cvss_v31_score IS NOT NULL OR c.cvss_v30_score IS NOT NULL OR c.cvss_v2_score IS NOT NULL)")
     Page<Cve> findByIdInAndCvssV31ScoreIsNotNull(@Param("ids") Set<Long> ids, Pageable pageable);
 
-    @Query("SELECT c FROM Cve c WHERE c.id IN :ids "
-        + "AND COALESCE(c.cvssV31Score, c.cvssV30Score, c.cvssV2Score) >= :minScore "
-        + "ORDER BY COALESCE(c.cvssV31Score, c.cvssV30Score, c.cvssV2Score) DESC, c.cveId ASC")
+    @Query(nativeQuery = true,
+        value = "SELECT c.* FROM cve c WHERE c.id IN (:ids) AND COALESCE(c.cvss_v31_score, c.cvss_v30_score, c.cvss_v2_score) >= :minScore ORDER BY COALESCE(c.cvss_v31_score, c.cvss_v30_score, c.cvss_v2_score) DESC, c.cve_id ASC",
+        countQuery = "SELECT count(*) FROM cve c WHERE c.id IN (:ids) AND COALESCE(c.cvss_v31_score, c.cvss_v30_score, c.cvss_v2_score) >= :minScore")
     Page<Cve> findByIdInAndCvssV31ScoreGreaterThanEqual(@Param("ids") Set<Long> ids,
                                                         @Param("minScore") BigDecimal minScore,
                                                         Pageable pageable);
 
     // v3-F1 — kevOnly fleet branch (cveId-IN only). Broadened to any-score, coalesced order.
-    @Query("SELECT c FROM Cve c WHERE c.cveId IN :cveIds "
-        + "AND (c.cvssV31Score IS NOT NULL OR c.cvssV30Score IS NOT NULL OR c.cvssV2Score IS NOT NULL) "
-        + "ORDER BY COALESCE(c.cvssV31Score, c.cvssV30Score, c.cvssV2Score) DESC, c.cveId ASC")
+    @Query(nativeQuery = true,
+        value = "SELECT c.* FROM cve c WHERE c.cve_id IN (:cveIds) AND (c.cvss_v31_score IS NOT NULL OR c.cvss_v30_score IS NOT NULL OR c.cvss_v2_score IS NOT NULL) ORDER BY COALESCE(c.cvss_v31_score, c.cvss_v30_score, c.cvss_v2_score) DESC, c.cve_id ASC",
+        countQuery = "SELECT count(*) FROM cve c WHERE c.cve_id IN (:cveIds) AND (c.cvss_v31_score IS NOT NULL OR c.cvss_v30_score IS NOT NULL OR c.cvss_v2_score IS NOT NULL)")
     Page<Cve> findByCveIdInAndCvssV31ScoreIsNotNull(@Param("cveIds") Set<String> cveIds, Pageable pageable);
 
     // kevOnly fleet branch — intersect the fleet-matched FK set (PK id IN) with the
     // KEV catalog (cveId IN), keeping paging at the DB level. Broadened to any-score,
     // coalesced order — same gate as findByIdInAndCvssV31ScoreIsNotNull above.
-    @Query("SELECT c FROM Cve c WHERE c.id IN :ids AND c.cveId IN :cveIds "
-        + "AND (c.cvssV31Score IS NOT NULL OR c.cvssV30Score IS NOT NULL OR c.cvssV2Score IS NOT NULL) "
-        + "ORDER BY COALESCE(c.cvssV31Score, c.cvssV30Score, c.cvssV2Score) DESC, c.cveId ASC")
+    @Query(nativeQuery = true,
+        value = "SELECT c.* FROM cve c WHERE c.id IN (:ids) AND c.cve_id IN (:cveIds) AND (c.cvss_v31_score IS NOT NULL OR c.cvss_v30_score IS NOT NULL OR c.cvss_v2_score IS NOT NULL) ORDER BY COALESCE(c.cvss_v31_score, c.cvss_v30_score, c.cvss_v2_score) DESC, c.cve_id ASC",
+        countQuery = "SELECT count(*) FROM cve c WHERE c.id IN (:ids) AND c.cve_id IN (:cveIds) AND (c.cvss_v31_score IS NOT NULL OR c.cvss_v30_score IS NOT NULL OR c.cvss_v2_score IS NOT NULL)")
     Page<Cve> findByIdInAndCveIdInAndCvssV31ScoreIsNotNull(@Param("ids") Set<Long> ids,
                                                            @Param("cveIds") Collection<String> cveIds,
                                                            Pageable pageable);

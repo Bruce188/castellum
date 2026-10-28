@@ -148,14 +148,7 @@ jobs:
           restore-keys: ${{ runner.os }}-maven-
 
       - name: Run backend tests
-        # A suite that stalls past 10 minutes (normal: ~3) prints a thread dump of the test
-        # JVM before the job timeout kills it, so a hang is diagnosable from the log.
-        run: |
-          cd backend
-          ./mvnw -B test &
-          mvn_pid=$!
-          ( sleep 600; for p in $(pgrep -f surefirebooter); do jstack "$p"; done ) &
-          wait "$mvn_pid"
+        run: cd backend && ./mvnw -B test
 
   # Frontend type-check, production build, and vitest suite.
   frontend:
