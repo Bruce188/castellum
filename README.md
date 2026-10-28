@@ -13,7 +13,8 @@ Full threat model: [documentation/threat-model.html](documentation/threat-model.
 **Trust boundaries:**
 - External → API (JWT authentication required; ADMIN/VIEWER roles)
 - NIC → JVM via CAP_NET_RAW (passive packet capture; not `--privileged`)
-- Castellum → OT network (read-only TCP probes; function-code whitelist)
+- Castellum → OT network (read-only TCP probes, UDP for BACnet/IP; function-code whitelist)
+- Castellum → Docker Engine API on discovered hosts (plaintext TCP :2375; read-only GET)
 - Castellum → NVD/EPSS/CISA/TAXII/MISP (egress HTTPS)
 - JVM → nmap subprocess (argv array only; no shell interpolation)
 
@@ -22,10 +23,10 @@ Full threat model: [documentation/threat-model.html](documentation/threat-model.
 **Out-of-scope adversaries:** nation-state supply-chain compromise (no SLSA-3), insider with root access, physical hardware attacks, side-channel analysis.
 
 **Top-5 mitigations:**
-1. **Argv-only nmap** (`scan/NmapRunner`) — the nmap subprocess is launched via Java's `ProcessBuilder` with an explicit argument array, never via shell string interpolation. This eliminates OS command injection through the scan CIDR parameter. Test cases in `NmapRunnerTest` cover semicolon, backtick, and `$(...)` injection patterns.
+1. **Argv-only nmap** (`scan/NmapRunner`) — the nmap subprocess is launched via Java's `ProcessBuilder` with an explicit argument array, never via shell string interpolation. This eliminates OS command injection through the scan CIDR parameter. Test cases in `NmapRunnerInjectionTest` cover semicolon, backtick, and `$(...)` injection patterns.
 2. **SSRF guard** (`scan/CidrValidator` + `ot/HostValidator`) — scan CIDRs are validated to a well-formed IP range. OT probe targets are validated to dotted-quad IPv4 addresses only; hostnames are rejected to prevent DNS-based redirection to loopback, metadata services, or internal infrastructure.
 3. **JWT HS256 + BCrypt-12** (`security/JwtService`) — all API authentication uses HMAC-SHA256 signed tokens. The signing secret must be ≥ 32 bytes; the application refuses to start with a weak or default secret outside the `test` Spring profile. Admin passwords are stored as BCrypt strength-12 hashes (approximately 8 seconds per guess on modern hardware).
-4. **Append-only audit log** (`audit/AuditLogRepository`) — the repository interface exposes only `save` and read operations; no `delete*` or `update*` methods are declared. All mutating API operations write an audit record. Database-level protection (application DB user with INSERT/SELECT only on `audit_log`) completes the control.
+4. **Append-only audit log** (`audit/AuditLogRepository`) — the repository interface exposes only `save` and read operations; no `delete*` or `update*` methods are declared. All mutating API operations write an audit record. Database-level protection (an application DB user with INSERT/SELECT only on `audit_log`) is an operator step that completes the control.
 5. **Distroless + CAP_NET_RAW only** — the runtime image (`gcr.io/distroless/java21-debian12:nonroot`) has no shell, no package manager, and no debugging tools. The container is started with `--cap-drop=ALL --cap-add=NET_RAW` — only the single capability required for raw packet capture is granted.
 
 ---
@@ -39,7 +40,7 @@ Mapped control families: AC (access control), AU (audit), CM (configuration), IA
 **Explicit non-claims:**
 - No SLSA-3 provenance (Maven build is not hermetically reproducible).
 - No FIPS 140-3 (standard JVM crypto; BCrypt-12 is not FIPS-validated).
-- No login rate-limiting in v1 — AC-7 is satisfied at the reverse proxy (operator responsibility).
+- No distributed login rate-limiting — AC-7 is enforced in-application by a per-IP, in-memory `LoginRateLimiter` (10 failed attempts per 60 s by default) that is single-instance only; multi-replica deployments need a shared limiter at the gateway.
 - SC-8 (TLS) is satisfied at the reverse proxy, not within Castellum itself.
 - CP-*, MP-*, PE-*, AT-* control families are out of scope for this solo MVP.
 
@@ -67,12 +68,12 @@ The MISP push capability (`POST /api/threat-intel/push/misp`) is the natural int
 
 ## Architecture
 
-Application docs live under `documentation/`; the `docs/` directory is workflow scratch and is gitignored.
+Application docs live under `documentation/`.
 
 | Module | Package | Description |
 |--------|---------|-------------|
-| Active scanner | `scan/` | Hardened nmap runner (argv-only), CIDR validator, scan controller |
-| Passive discovery | `discovery/` | pcap4j ARP sniffer, mDNS probe, LLDP/CDP decoder, ARP cache reader |
+| Active scanner | `scan/` | Hardened nmap runner (argv-only), CIDR validator, scan execution, scheduled scan policies |
+| Passive discovery | `discovery/` | pcap4j ARP sniffer, mDNS probe, LLDP/CDP decoder, ARP cache reader, Docker container discovery (local CLI, read-only Engine API host probe, remote push agent) |
 | Threat-intel ingest | `cve/`, `risk/` | Local NVD mirror (V2.0 API), EPSS daily fetch, CISA KEV ingestion |
 | Risk scorer | `risk/CompositeScorer` | Pure function: CVSS × EPSS × KEV × criticality, range [0, 10] |
 | Attack graph | `graph/` | JGraphT DijkstraShortestPath; ATT&CK technique annotation per edge — see [documentation/attack-graph.html](documentation/attack-graph.html) |
@@ -91,7 +92,8 @@ Application docs live under `documentation/`; the `docs/` directory is workflow 
 
 - Java 21, Maven 3.9+
 - PostgreSQL 16
-- Node 20+ (frontend only)
+- nmap (active scanning)
+- Node 20.19+ (frontend only)
 - Docker (optional — for supply-chain pipeline)
 
 ### Quick start
@@ -148,15 +150,23 @@ curl -X POST http://localhost:8080/api/auth/login \
 
 | Group | Endpoints | Min role |
 |-------|-----------|----------|
-| Auth | `POST /api/auth/login` | public |
+| Auth | `POST /api/auth/login`, `POST /api/auth/change-password` | public (login), any authenticated user (change-password) |
+| Users | `GET /api/users`, `POST /api/users`, `PUT /api/users/{username}/role`, `POST /api/users/{username}/disable` | ADMIN |
 | CVE mirror | `GET /api/cve/{cveId}`, `GET /api/cve?cpe=...` | VIEWER |
 | Scans | `POST /api/scan`, `GET /api/scans/{id}`, `GET /api/scans` | ADMIN (write), VIEWER (read) |
+| Scan policies | `GET /api/scan-policy`, `POST /api/scan-policy`, `PUT /api/scan-policy/{id}/enable`, `PUT /api/scan-policy/{id}/disable`, `DELETE /api/scan-policy/{id}` | ADMIN |
 | Devices | `GET /api/devices`, `POST /api/devices`, `PUT /api/devices/{id}`, `DELETE /api/devices/{id}` | ADMIN (write), VIEWER (read) |
+| Network services | `GET /api/services`, `POST /api/services`, `PUT /api/services/{id}`, `DELETE /api/services/{id}` | ADMIN (write), VIEWER (read) |
 | Risk | `GET /api/risk/score`, `GET /api/risk/feeds/status`, `GET /api/risk/device/{id}` | VIEWER |
 | Attack graph | `GET /api/graph/shortest-path?from=X&to=Y` | VIEWER |
 | OT probes | `POST /api/ot-probe` | ADMIN |
 | Passive discovery | `POST /api/discovery/passive` | ADMIN |
+| Docker discovery | `POST /api/discovery/docker`, `GET /api/discovery/remote-docker/tokens`, `POST /api/discovery/remote-docker/tokens`, `POST /api/discovery/remote-docker/tokens/{id}/revoke` | ADMIN |
+| Remote Docker ingest | `POST /api/discovery/remote-docker` (pushed by `scripts/remote-docker-agent.sh`) | remote-agent bearer token |
 | Threat-intel export | `POST /api/threat-intel/export`, `POST /api/threat-intel/push/taxii`, `POST /api/threat-intel/push/misp` | ADMIN |
+| Integrations | `GET /api/integrations/{type}`, `PUT /api/integrations/{type}`, `POST /api/integrations/{type}/push`, `POST /api/integrations/{type}/probe` | ADMIN |
+| Audit log | `GET /api/audit`, `GET /api/audit/csv` | ADMIN |
+| Admin / feed sync | `GET /api/admin/sync/status`, `POST /api/admin/initial-sync`, `POST /api/admin/full-backfill`, `GET /api/admin/feed-schedule`, `PUT /api/admin/feed-schedule` | ADMIN |
 | Health | `GET /actuator/health` | public |
 
 ---
