@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -22,7 +23,10 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @TestPropertySource(properties = {
     "castellum.nvd.base-url=https://test.nvd.example/rest/json/cves/2.0",
     "castellum.nvd.api-key=",
-    "castellum.nvd.request-interval-millis=10"
+    "castellum.nvd.request-interval-millis=10",
+    // Slice test mocks the transport via MockRestServiceServer; leave its request factory in place
+    // rather than swapping in the real HTTP/1.1 JDK client the production constructor pins.
+    "castellum.nvd.pin-http1=false"
 })
 class NvdClientTest {
 
@@ -120,5 +124,14 @@ class NvdClientTest {
         // The gap between first call finishing and second call finishing should be >= 10ms
         assertTrue((t3 - t1) >= 10, "Two calls should take at least intervalMillis total");
         server.verify();
+    }
+
+    @Test
+    void constructsWithHttp1PinWithoutError() {
+        // Exercises the production pinHttp1=true branch (the slice tests disable it): the HTTP/1.1
+        // JDK request factory must construct cleanly. Construction only — no network call.
+        NvdClient pinned = new NvdClient(RestClient.builder(),
+            "https://test.nvd.example/rest/json/cves/2.0", "", 10L, true);
+        assertNotNull(pinned);
     }
 }

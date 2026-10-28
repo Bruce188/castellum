@@ -20,7 +20,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 @TestPropertySource(properties = {
     "castellum.nvd.base-url=https://test.nvd.example/rest/json/cves/2.0",
     "castellum.nvd.api-key=test-key",
-    "castellum.nvd.request-interval-millis=10"
+    "castellum.nvd.request-interval-millis=10",
+    // Mocked transport (MockRestServiceServer) — don't swap in the real HTTP/1.1 client (see NvdClientTest).
+    "castellum.nvd.pin-http1=false"
 })
 class NvdClientApiKeyTest {
 
