@@ -49,6 +49,9 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @TestPropertySource(properties = {
+    // Own in-memory DB: cached contexts from earlier @SpringBootTest classes share jdbc:h2:mem:test
+    // with a Hibernate-generated schema, which Flyway would refuse as non-empty without history.
+    "spring.datasource.url=jdbc:h2:mem:flyway_it;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
     "spring.flyway.enabled=true",
     "spring.flyway.locations=classpath:db/migration/h2",
     "spring.jpa.hibernate.ddl-auto=validate"

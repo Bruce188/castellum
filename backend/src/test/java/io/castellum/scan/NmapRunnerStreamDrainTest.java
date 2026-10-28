@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Tests that NmapRunner cleans up its drainer ExecutorService on all exit paths,
@@ -20,6 +21,11 @@ class NmapRunnerStreamDrainTest {
     @Test
     @DisabledOnOs(OS.WINDOWS)
     void run_shutsDownExecutorOnInterruption() throws Exception {
+        // Without nmap, ProcessBuilder.start() throws before the drainer exists, so there is
+        // nothing to shut down and the assertion would test the environment, not the cleanup.
+        assumeTrue(java.util.Arrays.stream(System.getenv().getOrDefault("PATH", "").split(java.io.File.pathSeparator))
+                .anyMatch(dir -> !dir.isBlank() && new java.io.File(dir, "nmap").canExecute()),
+            "nmap not on PATH");
         AtomicBoolean shutdownNowCalled = new AtomicBoolean(false);
         AtomicReference<ExecutorService> createdExecutor = new AtomicReference<>();
 
