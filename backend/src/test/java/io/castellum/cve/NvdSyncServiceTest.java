@@ -186,7 +186,10 @@ class NvdSyncServiceTest {
         syncService.incrementalPull();
 
         verify(nvdClient, atLeastOnce()).fetchPage(startCaptor.capture(), any(), anyInt(), anyInt());
-        Instant captured = startCaptor.getValue();
+        // The pull starts at MAX(last_modified); once that is >120 days before now the window is
+        // sliced into 120-day pages, so assert on the FIRST slice's start — the cursor itself —
+        // not the last captured call.
+        Instant captured = startCaptor.getAllValues().get(0);
         // Should use MAX(last_modified) which is exactly 2026-04-01T00:00:00Z
         long diffMillis = Math.abs(Duration.between(captured, cursor).toMillis());
         assertTrue(diffMillis < 1000, "Cursor should match the seeded last_modified");
