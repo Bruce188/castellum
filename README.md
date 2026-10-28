@@ -14,7 +14,7 @@ Full threat model: [documentation/threat-model.html](documentation/threat-model.
 - External → API (JWT authentication required; ADMIN/VIEWER roles)
 - NIC → JVM via CAP_NET_RAW (passive packet capture; not `--privileged`)
 - Castellum → OT network (read-only TCP probes, UDP for BACnet/IP; function-code whitelist)
-- Castellum → Docker Engine API on discovered hosts (plaintext TCP :2375; read-only GET)
+- Castellum → management APIs on discovered hosts (Docker Engine on plaintext TCP :2375, plus Portainer, Traefik, cAdvisor, Kubernetes API, kubelet, registry and SNMP; read-only GET / SNMP GETBULK)
 - Castellum → NVD/EPSS/CISA/TAXII/MISP (egress HTTPS)
 - JVM → nmap subprocess (argv array only; no shell interpolation)
 
@@ -25,7 +25,7 @@ Full threat model: [documentation/threat-model.html](documentation/threat-model.
 **Top-5 mitigations:**
 1. **Argv-only nmap** (`scan/NmapRunner`) — the nmap subprocess is launched via Java's `ProcessBuilder` with an explicit argument array, never via shell string interpolation. This eliminates OS command injection through the scan CIDR parameter. Test cases in `NmapRunnerInjectionTest` cover semicolon, backtick, and `$(...)` injection patterns.
 2. **SSRF guard** (`scan/CidrValidator` + `ot/HostValidator`) — scan CIDRs are validated to a well-formed IP range. OT probe targets are validated to dotted-quad IPv4 addresses only; hostnames are rejected to prevent DNS-based redirection to loopback, metadata services, or internal infrastructure.
-3. **JWT HS256 + BCrypt-12** (`security/JwtService`) — all API authentication uses HMAC-SHA256 signed tokens. The signing secret must be ≥ 32 bytes; the application refuses to start with a weak or default secret outside the `test` Spring profile. Admin passwords are stored as BCrypt strength-12 hashes (approximately 8 seconds per guess on modern hardware).
+3. **JWT HS256 + BCrypt-12** (`security/JwtService`) — all API authentication uses HMAC-SHA256 signed tokens. The signing secret must be ≥ 32 bytes; the application refuses to start with a weak or default secret outside the `test` Spring profile. Admin passwords are stored as BCrypt strength-12 hashes (cost factor 12, i.e. 2^12 key-setup rounds per hash, which makes offline guessing deliberately slow).
 4. **Append-only audit log** (`audit/AuditLogRepository`) — the repository interface exposes only `save` and read operations; no `delete*` or `update*` methods are declared. All mutating API operations write an audit record. Database-level protection (an application DB user with INSERT/SELECT only on `audit_log`) is an operator step that completes the control.
 5. **Distroless + CAP_NET_RAW only** — the runtime image (`gcr.io/distroless/java21-debian12:nonroot`) has no shell, no package manager, and no debugging tools. The container is started with `--cap-drop=ALL --cap-add=NET_RAW` — only the single capability required for raw packet capture is granted.
 
@@ -93,7 +93,7 @@ Application docs live under `documentation/`.
 - Java 21, Maven 3.9+
 - PostgreSQL 16
 - nmap (active scanning)
-- Node 20.19+ (frontend only)
+- Node 20.19+ or 22.13+ (frontend only)
 - Docker (optional — for supply-chain pipeline)
 
 ### Quick start
