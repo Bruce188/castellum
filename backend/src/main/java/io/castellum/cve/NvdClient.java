@@ -87,10 +87,11 @@ public class NvdClient {
                 log.warn("NVD I/O error on attempt {}/{}: {}", attempt, MAX_ATTEMPTS, e.getMessage());
                 lastError = new IOException("NVD I/O error", e);
             } catch (RestClientException e) {
-                // NVD truncates large HTTP/2 responses mid-stream (RST_STREAM), surfaced by .body()
-                // as a base RestClientException ("Error while extracting response..."). Retry those;
-                // let real HTTP-status errors (4xx/5xx) propagate unchanged.
-                // ponytail: if mid-stream resets ever exceed MAX_ATTEMPTS, pin the RestClient to HTTP/1.1.
+                // Body-extraction failure surfaced by .body() as a base RestClientException
+                // ("Error while extracting response..."). The client is pinned to HTTP/1.1 in the
+                // constructor to prevent the HTTP/2 RST_STREAM truncation that used to cause this;
+                // this retry is the residual net for genuine transient extraction hiccups.
+                // Let real HTTP-status errors (4xx/5xx) propagate unchanged.
                 if (e instanceof RestClientResponseException) {
                     throw e;
                 }
