@@ -76,7 +76,7 @@ public class GatewayProbe {
                         gw, routePath);
                     continue;
                 }
-                return List.of(new DiscoveredNeighbor(gatewayIp, null, null, null, fields[0], null));
+                return List.of(new DiscoveredNeighbor(gatewayIp, null, null, null, fields[0], null, null));
             }
         }
 

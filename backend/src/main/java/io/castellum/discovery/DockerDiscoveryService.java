@@ -172,7 +172,7 @@ public class DockerDiscoveryService {
                 DiscoverySource.DOCKER,
                 observedAt,
                 null,                       // no host iface for a container address
-                c.publishesHostPort());     // propagate host-port flag from parsed container
+                c.publishesHostPort(), null);     // propagate host-port flag from parsed container
             Device saved = upsertService.upsertWithScope(disc, scope, origin);
             // Populate the container's docker network name (e.g. "bridge", "pingpay_default").
             // Post-upsert mutation mirrors the registryImages / originHostIp re-save pattern.
@@ -289,7 +289,7 @@ public class DockerDiscoveryService {
                 DiscoverySource.DOCKER,
                 observedAt,
                 null,
-                false);                     // synthetic gateway never publishes a host port
+                false, null);                     // synthetic gateway never publishes a host port
             Device saved = upsertService.upsertWithScope(disc, DiscoveryScope.DOCKER_BRIDGE, origin);
             deviceIds.add(saved.getId());
             gatewayCount++;

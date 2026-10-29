@@ -104,7 +104,7 @@ public class WindowsArpReader implements ArpReader {
             String ip = m.group("ip");
             String mac = m.group("mac").toLowerCase().replace('-', ':');
             String type = m.group("type").toLowerCase();
-            out.add(new DiscoveredNeighbor(ip, mac, type, null, null, null));
+            out.add(new DiscoveredNeighbor(ip, mac, type, null, null, null, null));
         }
         return out;
     }

@@ -48,6 +48,7 @@ class MacPrimaryDedupeTest {
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpCapture lldpCapture;
     @Mock private CdpCapture cdpCapture;
+    @Mock private DhcpCapture dhcpCapture;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
     @Mock private AuditService auditService;
@@ -62,10 +63,10 @@ class MacPrimaryDedupeTest {
         Clock clock = Clock.fixed(Instant.parse("2026-04-30T00:00:00Z"), ZoneOffset.UTC);
         upsertService = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier(), new DeviceRoleClassifier());
         service = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture, dhcpCapture,
             connTableReader, gatewayProbe,
             upsertService, auditService, recorder,
-            false, false, true, true, clock);
+            false, false, false, true, true, clock);
         when(arpFactory.select()).thenReturn(arpReader);
         when(recorder.start(anyString(), any(), anyString())).thenReturn(99L);
         when(deviceRepository.findByIpAddressIn(anyList())).thenReturn(List.of());
@@ -84,8 +85,8 @@ class MacPrimaryDedupeTest {
     void aggregate_sameMacDifferentIps_collapseToSingleDiscovery() throws Exception {
         // Same NIC observed at two different IPs (renumber event mid-sweep).
         when(arpReader.read()).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.0.1", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null),
-            new DiscoveredNeighbor("10.0.0.99", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null)
+            new DiscoveredNeighbor("10.0.0.1", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null, null),
+            new DiscoveredNeighbor("10.0.0.99", "aa:bb:cc:dd:ee:ff", "0x1", "0x2", "eth0", null, null)
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
@@ -98,9 +99,9 @@ class MacPrimaryDedupeTest {
     void aggregate_noMac_fallsBackToIpKey() throws Exception {
         // No MAC → IP-key dedupe path
         when(arpReader.read()).thenReturn(List.of(
-            new DiscoveredNeighbor("10.0.1.1", null, null, null, null, null),
-            new DiscoveredNeighbor("10.0.1.1", null, null, null, null, null),
-            new DiscoveredNeighbor("10.0.1.2", null, null, null, null, null)
+            new DiscoveredNeighbor("10.0.1.1", null, null, null, null, null, null),
+            new DiscoveredNeighbor("10.0.1.1", null, null, null, null, null, null),
+            new DiscoveredNeighbor("10.0.1.2", null, null, null, null, null, null)
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest("eth0", 5, List.of(DiscoverySource.ARP));
@@ -119,7 +120,7 @@ class MacPrimaryDedupeTest {
         when(deviceRepository.findByMacAddressIn(any(Collection.class))).thenReturn(List.of(existing));
 
         Discovery freshObservation = new Discovery("10.0.0.99", "aa:bb:cc:dd:ee:ff", null,
-            DiscoverySource.ARP, Instant.parse("2026-04-30T00:00:00Z"), null, false);
+            DiscoverySource.ARP, Instant.parse("2026-04-30T00:00:00Z"), null, false, null);
 
         upsertService.upsertAll(List.of(freshObservation));
 
@@ -135,7 +136,7 @@ class MacPrimaryDedupeTest {
     void upsertAll_emptyMacPartition_skipsMacLookup() {
         // No MAC-bearing discoveries → findByMacAddressIn must NOT be called.
         Discovery ipOnly = new Discovery("10.0.2.1", null, null, DiscoverySource.MDNS,
-            Instant.parse("2026-04-30T00:00:00Z"), null, false);
+            Instant.parse("2026-04-30T00:00:00Z"), null, false, null);
 
         upsertService.upsertAll(List.of(ipOnly));
 

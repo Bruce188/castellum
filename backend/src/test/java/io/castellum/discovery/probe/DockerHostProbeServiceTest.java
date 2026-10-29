@@ -222,7 +222,7 @@ class DockerHostProbeServiceTest {
         io.castellum.discovery.Discovery disc = new io.castellum.discovery.Discovery(
             ip, null, "host-" + ip,
             io.castellum.discovery.DiscoverySource.NMAP_SCAN,
-            FIXED_NOW, null, false);
+            FIXED_NOW, null, false, null);
         return deviceUpsertService.upsert(disc);
     }
 

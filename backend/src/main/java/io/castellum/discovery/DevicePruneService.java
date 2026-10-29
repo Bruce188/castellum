@@ -110,6 +110,7 @@ public class DevicePruneService {
         DiscoverySource.PCAP,
         DiscoverySource.LLDP,
         DiscoverySource.CDP,
+        DiscoverySource.DHCP,
         DiscoverySource.CONN_TABLE,
         DiscoverySource.GATEWAY);
 

@@ -270,7 +270,7 @@ class DockerDiscoveryServiceTest {
 
         // 2. A passive ARP sweep re-observes the same IP — must NOT overwrite to HOME
         Discovery passive = new Discovery(
-            "172.18.0.2", "02:42:ac:12:00:02", null, DiscoverySource.ARP, FIXED_NOW.plusSeconds(60), null, false);
+            "172.18.0.2", "02:42:ac:12:00:02", null, DiscoverySource.ARP, FIXED_NOW.plusSeconds(60), null, false, null);
         upsertService.upsert(passive);
 
         Device after = repo.findByIpAddress("172.18.0.2").orElseThrow();

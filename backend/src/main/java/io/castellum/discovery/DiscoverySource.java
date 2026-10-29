@@ -18,6 +18,13 @@ public enum DiscoverySource {
     PCAP,
     LLDP,
     CDP,
+    /**
+     * Flag-gated ({@code castellum.discovery.dhcp.enabled}) live promiscuous capture of
+     * DHCP/BOOTP traffic in both directions ({@link DhcpCapture} feeding the frame-level
+     * {@link DhcpDecoder}). BOOTREPLY option announcements (router / DNS / server
+     * identifier) yield {@link RoleHint} evidence alongside client lease identities.
+     */
+    DHCP,
     /** Active OT/ICS fingerprint probe (Modbus, DNP3, S7comm, BACnet). */
     OT_PROBE,
     /** Active nmap-based network scan (PING_SWEEP, SERVICE_DETECT, OS_FINGERPRINT). */

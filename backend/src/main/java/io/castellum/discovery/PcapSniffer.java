@@ -118,7 +118,7 @@ public class PcapSniffer {
         if (ip == null || ip.isBlank()) return;
         if (!reserveCaptureSlot(captured)) return;
 
-        queue.offer(new DiscoveredNeighbor(ip, mac, null, null, iface, null));
+        queue.offer(new DiscoveredNeighbor(ip, mac, null, null, iface, null, null));
         log.debug("PCAP ARP decoded: {} -> {}", ip, mac);
     }
 
@@ -132,7 +132,7 @@ public class PcapSniffer {
         if (!isHostAddress(addr)) return;
         if (!reserveCaptureSlot(captured)) return;
         String ip = addr.getHostAddress();
-        queue.offer(new DiscoveredNeighbor(ip, null, null, null, iface, null));
+        queue.offer(new DiscoveredNeighbor(ip, null, null, null, iface, null, null));
         log.debug("PCAP IP decoded: {}", ip);
     }
 

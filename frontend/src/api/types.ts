@@ -389,7 +389,7 @@ export interface AuditFilters {
  * reads the host's established-connection table (the main producer of PUBLIC-scope
  * devices); GATEWAY records the default-route egress router.
  */
-export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'OT_PROBE' | 'NMAP_SCAN' | 'DOCKER' | 'CONN_TABLE' | 'GATEWAY';
+export type DiscoverySource = 'ARP' | 'MDNS' | 'PCAP' | 'LLDP' | 'CDP' | 'DHCP' | 'OT_PROBE' | 'NMAP_SCAN' | 'DOCKER' | 'CONN_TABLE' | 'GATEWAY';
 
 export interface PassiveDiscoveryRequest {
   iface: string;
@@ -402,7 +402,7 @@ export interface PassiveDiscoveryResponse {
   discovered: number;
   deviceIds: number[];
   /** Map of source name → count of neighbors discovered via that source. */
-  perSourceCount: Record<DiscoverySource, number>;
+  perSourceCount: Partial<Record<DiscoverySource, number>>;
   sweepId: number | null;
 }
 

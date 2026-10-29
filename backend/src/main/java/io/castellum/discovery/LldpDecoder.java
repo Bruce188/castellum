@@ -117,7 +117,7 @@ public class LldpDecoder {
         if (mac == null && ip == null && hostname == null) {
             return List.of();
         }
-        return List.of(new DiscoveredNeighbor(ip, mac, null, null, iface, hostname));
+        return List.of(new DiscoveredNeighbor(ip, mac, null, null, iface, hostname, null));
     }
 
     /**

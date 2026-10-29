@@ -37,6 +37,7 @@ public class PassiveDiscoveryController {
     private final boolean pcapEnabled;
     private final boolean lldpEnabled;
     private final boolean cdpEnabled;
+    private final boolean dhcpEnabled;
     private final ActiveNetworkDetector activeNetworkDetector;
     private final DockerDiscoveryService dockerDiscoveryService;
 
@@ -46,6 +47,7 @@ public class PassiveDiscoveryController {
                                  @Value("${castellum.discovery.pcap.enabled:false}") boolean pcapEnabled,
                                  @Value("${castellum.discovery.lldp.enabled:false}") boolean lldpEnabled,
                                  @Value("${castellum.discovery.cdp.enabled:false}") boolean cdpEnabled,
+                                 @Value("${castellum.discovery.dhcp.enabled:false}") boolean dhcpEnabled,
                                  ActiveNetworkDetector activeNetworkDetector,
                                  DockerDiscoveryService dockerDiscoveryService) {
         this.service = service;
@@ -54,6 +56,7 @@ public class PassiveDiscoveryController {
         this.pcapEnabled = pcapEnabled;
         this.lldpEnabled = lldpEnabled;
         this.cdpEnabled = cdpEnabled;
+        this.dhcpEnabled = dhcpEnabled;
         this.activeNetworkDetector = activeNetworkDetector;
         this.dockerDiscoveryService = dockerDiscoveryService;
     }
@@ -104,7 +107,10 @@ public class PassiveDiscoveryController {
                 : "Disabled by castellum.discovery.lldp.enabled"),
             new DiscoverySourceDto("CDP", cdpEnabled, cdpEnabled
                 ? "Cisco Discovery Protocol (managed-switch profile)"
-                : "Disabled by castellum.discovery.cdp.enabled")
+                : "Disabled by castellum.discovery.cdp.enabled"),
+            new DiscoverySourceDto("DHCP", dhcpEnabled, dhcpEnabled
+                ? "DHCP/BOOTP payload capture (requires CAP_NET_RAW)"
+                : "Disabled by castellum.discovery.dhcp.enabled")
         );
     }
 

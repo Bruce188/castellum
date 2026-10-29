@@ -47,6 +47,7 @@ class MdnsProbeHostnamePropagationTest {
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpCapture lldpCapture;
     @Mock private CdpCapture cdpCapture;
+    @Mock private DhcpCapture dhcpCapture;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
     @Mock private AuditService auditService;
@@ -62,10 +63,10 @@ class MdnsProbeHostnamePropagationTest {
         clock = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
         realUpsert = new DeviceUpsertService(deviceRepository, new DiscoveryScopeClassifier(), new DeviceRoleClassifier());
         service = new PassiveDiscoveryService(
-            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture,
+            arpFactory, mdnsProbe, pcapSniffer, lldpCapture, cdpCapture, dhcpCapture,
             connTableReader, gatewayProbe,
             realUpsert, auditService, recorder,
-            false, false, true, true, clock);
+            false, false, false, true, true, clock);
         when(recorder.start(anyString(), any(), anyString())).thenReturn(7L);
         // Saved devices echo back with sequential IDs
         when(deviceRepository.findByIpAddress(anyString())).thenReturn(Optional.empty());
@@ -105,7 +106,7 @@ class MdnsProbeHostnamePropagationTest {
     @Test
     void endToEnd_mdnsDiscoveredDevice_hostnameNonNullAfterUpsert() throws Exception {
         when(mdnsProbe.probe(anyInt())).thenReturn(List.of(
-            new DiscoveredNeighbor("192.168.1.50", null, null, null, null, "host.local.")
+            new DiscoveredNeighbor("192.168.1.50", null, null, null, null, "host.local.", null)
         ));
 
         PassiveDiscoveryRequest req = new PassiveDiscoveryRequest(null, 5, List.of(DiscoverySource.MDNS));

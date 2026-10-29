@@ -95,7 +95,7 @@ public class MacArpReader implements ArpReader {
             String ip = m.group("ip");
             String mac = padMac(m.group("mac").toLowerCase());
             String iface = m.group("iface");
-            out.add(new DiscoveredNeighbor(ip, mac, null, null, iface, null));
+            out.add(new DiscoveredNeighbor(ip, mac, null, null, iface, null, null));
         }
         return out;
     }

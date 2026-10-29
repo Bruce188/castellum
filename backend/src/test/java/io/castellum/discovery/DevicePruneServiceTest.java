@@ -116,8 +116,8 @@ class DevicePruneServiceTest {
         // container inventory out of TTL pruning — pin its contents.
         assertThat(DevicePruneService.PRUNABLE_SOURCES).containsExactlyInAnyOrder(
             DiscoverySource.ARP, DiscoverySource.MDNS, DiscoverySource.PCAP,
-            DiscoverySource.LLDP, DiscoverySource.CDP, DiscoverySource.CONN_TABLE,
-            DiscoverySource.GATEWAY);
+            DiscoverySource.LLDP, DiscoverySource.CDP, DiscoverySource.DHCP,
+            DiscoverySource.CONN_TABLE, DiscoverySource.GATEWAY);
         assertThat(DevicePruneService.PRUNABLE_SOURCES).doesNotContain(
             DiscoverySource.NMAP_SCAN, DiscoverySource.OT_PROBE, DiscoverySource.DOCKER);
     }
