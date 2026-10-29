@@ -44,10 +44,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleMethodArgumentNotValid(MethodArgumentNotValidException ex) {
-        log.warn("Method argument not valid: {}", ex.getMessage());
         List<String> details = ex.getBindingResult().getFieldErrors().stream()
             .map(e -> e.getField() + ": " + e.getDefaultMessage())
             .collect(Collectors.toList());
+        // Not ex.getMessage(): it embeds every rejected value, so an oversized request body
+        // (e.g. a 2 MB container list) would be copied verbatim into a single log line.
+        log.warn("Method argument not valid: {}", details);
         return ResponseEntity.badRequest().body(Map.of("error", "Validation failed", "details", details));
     }
 
