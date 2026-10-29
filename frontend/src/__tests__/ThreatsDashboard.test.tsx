@@ -113,10 +113,12 @@ describe('<ThreatsDashboard />', () => {
     });
 
     renderWith();
-    await screen.findByText(/KEV-flagged CVEs/i);
+    // Wait for the rows to render — the KEV summary label is present even while
+    // topRisk is still resolving (count 0), so assert only once the data lands.
+    await screen.findByText('h1');
     // 2 + 3 = 5
     const kevBlock = screen.getByText(/KEV-flagged CVEs/i).parentElement!;
-    expect(kevBlock.textContent).toContain('5');
+    await waitFor(() => expect(kevBlock.textContent).toContain('5'));
   });
 
   it('renders green freshness badge when feeds are fresh (<7d)', async () => {

@@ -123,3 +123,136 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
+
+  # Backend unit/integration tests. These run against H2 (see
+  # backend/src/test/resources/application.yml), so no postgres service is needed.
+  backend-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+
+      - name: Run backend tests
+        run: cd backend && ./mvnw -B test
+
+  # Frontend type-check, production build, and vitest suite.
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install, build, and test frontend
+        run: cd frontend && npm ci && npm run build && npm test
+
+  # Build the production Docker image and smoke-test the packaged app: it must
+  # boot against postgres, serve the SPA same-origin, and ship nmap with caps.
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: castellum
+          POSTGRES_USER: castellum
+          POSTGRES_PASSWORD: castellum
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # BuildKit is required: the root Dockerfile uses a `# syntax=` directive and
+      # cache mounts. GitHub's ubuntu runners ship buildx.
+      - name: Build image
+        env:
+          DOCKER_BUILDKIT: 1
+        run: docker build -t castellum:ci .
+
+      - name: Boot image and smoke-test
+        run: |
+          set -euo pipefail
+          IMAGE=castellum:ci
+
+          # Throwaway, ephemeral credentials — never production values. The JWT secret
+          # (>= 32 bytes) and integration key (32-byte base64 AES-256) are validated at
+          # boot; the admin account is bootstrapped but its login is not exercised here.
+          JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
+          INTEGRATION_KEY=$(openssl rand -base64 32 | tr -d '\n')
+          ADMIN_USERNAME=admin
+          ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '\n')
+          # bcrypt via htpasswd (apache2-utils, preinstalled on ubuntu runners).
+          ADMIN_PASSWORD_HASH=$(htpasswd -bnBC 10 "" "$ADMIN_PASSWORD" | tr -d ':\n')
+
+          # Bridge network + published port 8080 (the image EXPOSEs 8080). The container
+          # reaches the postgres service — published on the runner host — via host-gateway.
+          docker run -d --name castellum \
+            -p 8080:8080 \
+            --add-host host.docker.internal:host-gateway \
+            -e SERVER_PORT=8080 \
+            -e DATABASE_URL=jdbc:postgresql://host.docker.internal:5432/castellum \
+            -e DATABASE_USERNAME=castellum \
+            -e DATABASE_PASSWORD=castellum \
+            -e CASTELLUM_SECURITY_JWT_SECRET="$JWT_SECRET" \
+            -e CASTELLUM_INTEGRATION_KEY="$INTEGRATION_KEY" \
+            -e CASTELLUM_ADMIN_USERNAME="$ADMIN_USERNAME" \
+            -e CASTELLUM_ADMIN_PASSWORD_HASH="$ADMIN_PASSWORD_HASH" \
+            "$IMAGE"
+
+          # Poll /actuator/health (public) until UP, ~90 s. A healthy status also proves
+          # the app connected to postgres and ran its Flyway migrations.
+          echo "Waiting for /actuator/health to report UP..."
+          DEADLINE=$(( $(date +%s) + 90 ))
+          until curl -sf http://localhost:8080/actuator/health | grep -q '"status":"UP"'; do
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "Image did not become healthy within 90 s" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          echo "Image is UP."
+
+          # SPA is served same-origin at / (guards the same-origin SPA-serving fix).
+          curl -sf http://localhost:8080/ | grep -q 'id="root"'
+          echo "SPA index served."
+
+          # Scanner present with raw-socket caps (guards the nmap packaging fix). getcap
+          # exits 0 even with no caps, so assert the cap string is actually there.
+          docker run --rm --entrypoint bash "$IMAGE" \
+            -c 'command -v nmap && getcap /usr/bin/nmap' | grep -q cap_net_raw
+          echo "nmap present with capabilities."
+
+      - name: Container logs
+        if: failure()
+        run: docker logs castellum || true

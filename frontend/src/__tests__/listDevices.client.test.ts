@@ -100,7 +100,9 @@ describe('api.listDevices() pagination walk', () => {
   it('stops at the 25-page ceiling with a console.warn and returns the partial fleet', async () => {
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
-      const page = Number(new URL(url).searchParams.get('page') ?? '0');
+      // request() fetches same-origin relative paths (empty API_BASE), so give
+      // new URL() a base — a bare relative path is not a valid URL in Node/CI.
+      const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? '0');
       return pageResponse(range(page * 200 + 1, 200), 6000, page);
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

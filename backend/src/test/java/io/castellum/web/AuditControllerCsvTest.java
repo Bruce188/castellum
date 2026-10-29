@@ -97,7 +97,13 @@ class AuditControllerCsvTest {
     void adminGet_csv_overCap_returns413() throws Exception {
         when(repository.count(any(Specification.class))).thenReturn(10001L);
 
-        mvc.perform(get("/api/audit/csv"))
+        // The 413 body is a StreamingResponseBody written on the async thread; asserting on it
+        // before asyncDispatch races that write and intermittently sees an empty body.
+        MvcResult started = mvc.perform(get("/api/audit/csv"))
+            .andExpect(request().asyncStarted())
+            .andReturn();
+
+        mvc.perform(asyncDispatch(started))
             .andExpect(status().is(413))
             .andExpect(jsonPath("$.error").value("csv_cap_exceeded"))
             .andExpect(jsonPath("$.filteredCount").value(10001))

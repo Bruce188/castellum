@@ -27,6 +27,7 @@ public final class AttackTechniqueMapper {
         m.put(EdgeType.EXPLOITABLE_VULN, new AttackTechnique("T1190", "Exploit Public-Facing Application"));
         m.put(EdgeType.WEAK_CRED_PATH, new AttackTechnique("T1078", "Valid Accounts"));
         m.put(EdgeType.GATEWAY_PIVOT, new AttackTechnique("T1090", "Proxy"));
+        m.put(EdgeType.EGRESS_CONNECTION, new AttackTechnique("T1071", "Application Layer Protocol"));
         MAPPING = Map.copyOf(m);
     }
 

@@ -138,9 +138,9 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
         // dashed in the DOCKER_BRIDGE scope color so they read visually as a
         // distinct overlay rather than physical L2 adjacency.
         { selector: 'edge[kind = "docker-bridge"]', style: { 'line-color': EDGE_STYLES.dockerBridge.color, 'line-style': 'dashed' as const, width: EDGE_STYLES.dockerBridge.width, opacity: EDGE_STYLES.dockerBridge.opacity } },
-        // WAN edges (egress router → PUBLIC device) — dashed in the PUBLIC
-        // scope orange so external nodes read as hanging off the gateway
-        // rather than floating isolated inside zone-public.
+        // WAN edges (originating host → PUBLIC device) — dashed in the PUBLIC
+        // scope orange so external nodes read as hanging off the host that
+        // actually observed them rather than floating isolated inside zone-public.
         { selector: 'edge.wan-edge', style: { 'line-color': scopeBorderColor.PUBLIC, 'line-style': 'dashed' as const, width: 2, opacity: 0.8 } },
         // Risk-still-loading overlay — dashed blue ring + dimmed fill. Appended
         // last so it wins border resolution while the parent's deviceRisk fanout
@@ -376,9 +376,9 @@ export function TopologyView({ devices, risksById, onNodeClick, onBackgroundClic
     });
 
     const edges = buildGatewayEdges(visibleDevices);
-    // WAN edges anchor PUBLIC-scope devices to the LAN's egress router so
+    // WAN edges anchor PUBLIC-scope devices to their originating host so
     // they don't render edge-less. Built from the same visibility-filtered
-    // device list, so a hidden anchor or hidden PUBLIC scope drops the edges.
+    // device list, so a hidden host or hidden PUBLIC scope drops the edges.
     const wanEdges = buildWanEdges(visibleDevices);
 
     // When a path is provided, add ad-hoc edges for path pairs that aren't

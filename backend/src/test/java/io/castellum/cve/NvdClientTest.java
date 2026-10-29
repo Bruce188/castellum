@@ -58,6 +58,20 @@ class NvdClientTest {
     }
 
     @Test
+    void fetchPageByPublished_buildsPubDateUri() throws Exception {
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("pubStartDate=")))
+            .andExpect(requestTo(org.hamcrest.Matchers.containsString("pubEndDate=")))
+            .andExpect(requestTo(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("lastModStartDate="))))
+            .andExpect(requestTo(org.hamcrest.Matchers.containsString("startIndex=0")))
+            .andRespond(withSuccess(fixture, MediaType.APPLICATION_JSON));
+
+        NvdCveResponse response = client.fetchPage(START, END, 0, 2000, true);
+
+        assertNotNull(response);
+        server.verify();
+    }
+
+    @Test
     void fetchPage_omitsApiKeyHeaderWhenEmpty() throws Exception {
         server.expect(requestTo(org.hamcrest.Matchers.containsString("lastModStartDate=")))
             .andExpect(headerDoesNotExist("apiKey"))
@@ -84,6 +98,20 @@ class NvdClientTest {
     void fetchPage_retriesOn503ThenSucceeds() throws Exception {
         server.expect(requestTo(org.hamcrest.Matchers.anything()))
             .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        server.expect(requestTo(org.hamcrest.Matchers.anything()))
+            .andRespond(withSuccess(fixture, MediaType.APPLICATION_JSON));
+
+        NvdCveResponse response = client.fetchPage(START, END, 0, 2000);
+        assertNotNull(response);
+        server.verify();
+    }
+
+    @Test
+    void fetchPage_retriesOnTruncatedBodyThenSucceeds() throws Exception {
+        // Mid-stream HTTP/2 reset surfaces as a body-extraction failure (200 + unparseable body),
+        // wrapped as a base RestClientException — must be retried, not propagated.
+        server.expect(requestTo(org.hamcrest.Matchers.anything()))
+            .andRespond(withSuccess("{\"vulnerabilities\": [", MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.anything()))
             .andRespond(withSuccess(fixture, MediaType.APPLICATION_JSON));
 

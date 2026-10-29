@@ -50,4 +50,14 @@ public final class EdgeWeights {
 
     /** Gateway-pivot edge risk contribution (defender-pain dual of weight). */
     public static double gatewayPivotRisk() { return 4.0; }
+
+    /**
+     * Egress-connection edge Dijkstra cost. Same band as {@link #gatewayPivotWeight()} (3.0) and
+     * heavier than SAME_SUBNET (1.0): an observed outbound hop to a PUBLIC peer is a real but
+     * non-trivial pivot, never preferred over within-subnet movement.
+     */
+    public static double egressConnectionWeight() { return 3.0; }
+
+    /** Egress-connection edge risk contribution (defender-pain dual of weight). */
+    public static double egressConnectionRisk() { return 1.0; }
 }

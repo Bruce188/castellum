@@ -33,6 +33,7 @@ spring:
 
 castellum:
   security:
+    bcrypt-strength: 4
     jwt:
       secret: test-secret-test-secret-test-secret-1234
       ttl-seconds: 3600
