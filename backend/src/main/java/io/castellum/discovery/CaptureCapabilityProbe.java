@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Boot-time capability probe. Warns once (never fatally) when this runtime cannot actually
@@ -20,7 +21,9 @@ import java.util.List;
  *
  * <p>Three real runtime signals are checked: nmap on {@code PATH} (how {@code NmapRunner}
  * resolves the binary), libpcap loadable (the pcap4j → JNA native path), and {@code CAP_NET_RAW}
- * held by the process (raw-socket open). A single WARN names the gaps and the remedy.
+ * held by the process (raw-socket open). A single WARN names the gaps and the remedy. A WSL2
+ * kernel (detected from {@code /proc/sys/kernel/osrelease}) gets its own WARN, because there
+ * every check can pass while L2 capture still sees almost nothing.
  */
 @Component
 public class CaptureCapabilityProbe {
@@ -30,8 +33,24 @@ public class CaptureCapabilityProbe {
     /** CAP_NET_RAW is capability bit 13 in the Linux capability bitmask (linux/capability.h). */
     private static final int CAP_NET_RAW = 13;
 
+    private final Path osRelease;
+
+    public CaptureCapabilityProbe() {
+        this(Path.of("/proc/sys/kernel/osrelease"));
+    }
+
+    CaptureCapabilityProbe(Path osRelease) {
+        this.osRelease = osRelease;
+    }
+
     @EventListener(ApplicationReadyEvent.class)
     public void probe() {
+        if (isWsl()) {
+            log.warn("Running under WSL2: passive capture is DEGRADED. WSL2's virtual NIC (and especially "
+                    + "networkingMode=mirrored) filters layer-2 traffic, so ARP/LLDP/CDP/DHCP/mDNS capture "
+                    + "sees little beyond this host. For real passive discovery run natively on Linux "
+                    + "or on a host bridged onto the target network.");
+        }
         List<String> missing = new ArrayList<>();
         if (!nmapOnPath()) missing.add("nmap not found on PATH (active scanning disabled)");
         if (!libpcapLoadable()) missing.add("libpcap not loadable (PCAP/LLDP/CDP capture disabled)");
@@ -47,6 +66,16 @@ public class CaptureCapabilityProbe {
                 + "(docker --cap-add=NET_RAW), and on the nmap binary "
                 + "`setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap`.",
                 String.join("; ", missing));
+    }
+
+    /** WSL kernels report e.g. {@code 5.15.167.4-microsoft-standard-WSL2} in osrelease. */
+    boolean isWsl() {
+        try {
+            String release = Files.readString(osRelease).toLowerCase(Locale.ROOT);
+            return release.contains("microsoft") || release.contains("wsl");
+        } catch (Exception e) { // ponytail: no procfs (non-Linux) → not WSL
+            return false;
+        }
     }
 
     /** Mirrors {@code NmapRunner}, which spawns the bare {@code nmap} resolved via PATH. */

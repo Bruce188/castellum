@@ -120,6 +120,10 @@ export NVD_API_KEY=<your-key>
 
 For the full operator runbook — including Suricata wiring, TLS termination with nginx/Caddy/Traefik, and bootstrap admin pre-flight checklist — see [documentation/operations.html](documentation/operations.html).
 
+### Running under WSL2
+
+WSL2 works for development, but passive discovery there is unreliable. Its virtual NIC filters layer-2 traffic, and `networkingMode=mirrored` filters even more. ARP, LLDP, CDP, DHCP and mDNS capture therefore sees little beyond the Windows host itself. At startup the backend detects WSL2 from `/proc/sys/kernel/osrelease` and logs a warning. For real passive discovery, run Castellum natively on Linux, or on a host bridged onto the target network.
+
 ### Supply-chain pipeline
 
 ```bash
