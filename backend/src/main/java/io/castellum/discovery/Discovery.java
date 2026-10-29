@@ -11,7 +11,8 @@ public record Discovery(
     DiscoverySource source,
     Instant observedAt,
     String iface,
-    boolean publishesHostPort
+    boolean publishesHostPort,
+    RoleHint roleHint
 ) {
     public Discovery {
         Objects.requireNonNull(ipAddress, "ipAddress must not be null");

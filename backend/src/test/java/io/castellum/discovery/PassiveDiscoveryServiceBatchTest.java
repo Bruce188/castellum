@@ -41,6 +41,7 @@ class PassiveDiscoveryServiceBatchTest {
     @Mock private PcapSniffer pcapSniffer;
     @Mock private LldpCapture lldpCapture;
     @Mock private CdpCapture cdpCapture;
+    @Mock private DhcpCapture dhcpCapture;
     @Mock private ConnTableReader connTableReader;
     @Mock private GatewayProbe gatewayProbe;
     @Mock private DeviceUpsertService upsertService;
@@ -54,8 +55,8 @@ class PassiveDiscoveryServiceBatchTest {
             org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(42L);
         org.mockito.Mockito.when(arpFactory.select()).thenReturn(arpReader);
         return new PassiveDiscoveryService(arpFactory, mdnsProbe, pcapSniffer,
-            lldpCapture, cdpCapture, connTableReader, gatewayProbe,
-            upsertService, auditService, recorder, false, false, true, true, clock);
+            lldpCapture, cdpCapture, dhcpCapture, connTableReader, gatewayProbe,
+            upsertService, auditService, recorder, false, false, false, true, true, clock);
     }
 
     @Test
@@ -63,7 +64,7 @@ class PassiveDiscoveryServiceBatchTest {
         List<DiscoveredNeighbor> neighbors = new ArrayList<>(100);
         for (int i = 0; i < 100; i++) {
             neighbors.add(new DiscoveredNeighbor("10.0.0." + i,
-                String.format("aa:bb:cc:dd:ee:%02x", i), "0x1", "0x2", "eth0", null));
+                String.format("aa:bb:cc:dd:ee:%02x", i), "0x1", "0x2", "eth0", null, null));
         }
         when(arpReader.read()).thenReturn(neighbors);
         when(upsertService.upsertAll(anyList())).thenAnswer(inv -> {
@@ -92,7 +93,7 @@ class PassiveDiscoveryServiceBatchTest {
         List<DiscoveredNeighbor> neighbors = new ArrayList<>(100);
         for (int i = 0; i < 100; i++) {
             neighbors.add(new DiscoveredNeighbor("10.1.0." + i,
-                String.format("bb:cc:dd:ee:ff:%02x", i), "0x1", "0x2", "eth0", null));
+                String.format("bb:cc:dd:ee:ff:%02x", i), "0x1", "0x2", "eth0", null, null));
         }
         when(arpReader.read()).thenReturn(neighbors);
         when(upsertService.upsertAll(anyList())).thenAnswer(inv -> {

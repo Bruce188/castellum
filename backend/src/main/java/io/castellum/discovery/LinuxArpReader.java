@@ -108,6 +108,6 @@ public class LinuxArpReader implements ArpReader {
             return;
         }
 
-        results.add(new DiscoveredNeighbor(ip, mac, hwType, flags, iface, null));
+        results.add(new DiscoveredNeighbor(ip, mac, hwType, flags, iface, null, null));
     }
 }

@@ -32,7 +32,7 @@ class MdnsProbeTest {
         try {
             publisher.registerService(info);
 
-            MdnsProbe probe = new MdnsProbe("_test._tcp.local.");
+            MdnsProbe probe = new MdnsProbe("_test._tcp.local.", new MdnsPayloadDecoder(), false, 1000);
             List<DiscoveredNeighbor> results = probe.probe(3);
 
             // May or may not discover in 3s depending on timing, but should not throw
@@ -44,7 +44,7 @@ class MdnsProbeTest {
 
     @Test
     void probe_durationBounded_terminatesAtDeadline() {
-        MdnsProbe probe = new MdnsProbe("_test._tcp.local.");
+        MdnsProbe probe = new MdnsProbe("_test._tcp.local.", new MdnsPayloadDecoder(), false, 1000);
         long start = System.nanoTime();
         try {
             List<DiscoveredNeighbor> results = probe.probe(1);
@@ -55,6 +55,23 @@ class MdnsProbeTest {
         long elapsed = System.nanoTime() - start;
         // Should complete within 8000ms of the 1s window (jmdns init can be slow on some hosts)
         assertThat(elapsed).isLessThan(8_000_000_000L);
+    }
+
+    // Payload decoding is opt-in: with the flag OFF the probe must never
+    // touch the decoder, regardless of what traffic the socket loop sees.
+    // NOTE: passes in RED (the ctor merely stores the decoder) — pinned so GREEN's
+    // socket-loop wiring cannot invoke it when payload-decode is disabled.
+    @Test
+    void probe_payloadDecodeFlagOff_decoderNeverInvoked() {
+        MdnsPayloadDecoder decoder = org.mockito.Mockito.mock(MdnsPayloadDecoder.class);
+        MdnsProbe probe = new MdnsProbe("_test._tcp.local.", decoder, false, 1000);
+        try {
+            probe.probe(1);
+        } catch (DiscoveryUnavailableException e) {
+            // mDNS may be unavailable in this environment — the contract still holds:
+            // a disabled decoder must not have been touched on any path.
+        }
+        org.mockito.Mockito.verifyNoInteractions(decoder);
     }
 
     @Test

@@ -43,7 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
     "castellum.discovery.pcap.enabled=false",
     "castellum.discovery.lldp.enabled=false",
-    "castellum.discovery.cdp.enabled=false"
+    "castellum.discovery.cdp.enabled=false",
+    "castellum.discovery.dhcp.enabled=false"
 })
 class PassiveDiscoveryControllerSourcesTest {
 
@@ -86,6 +87,16 @@ class PassiveDiscoveryControllerSourcesTest {
             .andExpect(jsonPath("$[3].enabled").value(false))
             .andExpect(jsonPath("$[4].source").value("CDP"))
             .andExpect(jsonPath("$[4].enabled").value(false));
+    }
+
+    // DHCP appears as the sixth source row, reflecting its enabled flag.
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void getSources_viewer_listsDhcpSourceWithFlag() throws Exception {
+        mockMvc.perform(get("/api/discovery/sources"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[5].source").value("DHCP"))
+            .andExpect(jsonPath("$[5].enabled").value(false));
     }
 
     @Test

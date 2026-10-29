@@ -7,6 +7,10 @@ package io.castellum.discovery;
  * {@link MdnsProbe} can propagate the {@code info.getServer()} value end-to-end into
  * {@link io.castellum.domain.Device#getHostname()}. ARP-source readers
  * (Linux/Windows/Mac) pass {@code null} for hostname.
+ *
+ * <p>The {@code roleHint} slot carries payload-derived role evidence from
+ * {@link DhcpDecoder} / {@link MdnsPayloadDecoder}; every other source passes
+ * {@code null} (no evidence — never "evidence of nothing").
  */
 public record DiscoveredNeighbor(
     String ipAddress,
@@ -14,5 +18,6 @@ public record DiscoveredNeighbor(
     String hwType,
     String flags,
     String iface,
-    String hostname
+    String hostname,
+    RoleHint roleHint
 ) {}

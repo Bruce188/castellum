@@ -137,6 +137,11 @@ public class DeviceUpsertService {
             // Origin: update both columns so a row can move origin if needed (last-writer-wins).
             e.setOriginHostIp(origin.originHostIp());
             e.setOriginHostName(origin.originHostName());
+            // Sticky role hint: rank-upgrade-only merge, written BEFORE classification so
+            // the classifier sees the merged evidence. Incoming null (rank 0) never clears.
+            if (RoleHint.rank(d.roleHint()) > RoleHint.rank(e.getRoleHint())) {
+                e.setRoleHint(d.roleHint());
+            }
             // Non-downgrade role write (UPDATE branch): classify after all other fields are set.
             // Never overwrite a known role with UNKNOWN — a signal-less re-sweep must not flap.
             RoleClassification rcU = roleClassifier.classifyWithConfidence(e);
@@ -170,6 +175,10 @@ public class DeviceUpsertService {
             // Origin: set on insert.
             fresh.setOriginHostIp(origin.originHostIp());
             fresh.setOriginHostName(origin.originHostName());
+            // Sticky role hint (INSERT branch): fresh row starts null — any incoming hint lands.
+            if (RoleHint.rank(d.roleHint()) > RoleHint.rank(fresh.getRoleHint())) {
+                fresh.setRoleHint(d.roleHint());
+            }
             // Non-downgrade role write (INSERT branch): fresh device starts at entity default UNKNOWN,
             // so the guard always permits the first classification.
             RoleClassification rcI = roleClassifier.classifyWithConfidence(fresh);
@@ -255,6 +264,11 @@ public class DeviceUpsertService {
                     e.setDiscoveredByScanId(scanId);
                 }
             }
+            // Sticky role hint: rank-upgrade-only merge, written BEFORE classification so
+            // the classifier sees the merged evidence. Incoming null (rank 0) never clears.
+            if (RoleHint.rank(d.roleHint()) > RoleHint.rank(e.getRoleHint())) {
+                e.setRoleHint(d.roleHint());
+            }
             // Non-downgrade role write (UPDATE branch).
             RoleClassification rcUpsertU = roleClassifier.classifyWithConfidence(e);
             if (rcUpsertU.role() != DeviceRole.UNKNOWN || e.getDeviceRole() == DeviceRole.UNKNOWN) {
@@ -283,6 +297,10 @@ public class DeviceUpsertService {
             if (scanId != null) {
                 fresh.setDiscoveredByScanId(scanId);
                 fresh.setLastSeenByScanId(scanId);
+            }
+            // Sticky role hint (INSERT branch): fresh row starts null — any incoming hint lands.
+            if (RoleHint.rank(d.roleHint()) > RoleHint.rank(fresh.getRoleHint())) {
+                fresh.setRoleHint(d.roleHint());
             }
             // Non-downgrade role write (INSERT branch).
             RoleClassification rcUpsertI = roleClassifier.classifyWithConfidence(fresh);
@@ -414,6 +432,10 @@ public class DeviceUpsertService {
                         pending.setLastSeenIface(d.iface());
                     }
                     pending.setDiscoverySource(d.source());
+                    // Sticky role hint: rank-upgrade-only merge before re-classification.
+                    if (RoleHint.rank(d.roleHint()) > RoleHint.rank(pending.getRoleHint())) {
+                        pending.setRoleHint(d.roleHint());
+                    }
                     // Re-classify after the fold — backfilled fields may carry role signal.
                     RoleClassification rcFold = roleClassifier.classifyWithConfidence(pending);
                     if (rcFold.role() != DeviceRole.UNKNOWN || pending.getDeviceRole() == DeviceRole.UNKNOWN) {
@@ -457,6 +479,11 @@ public class DeviceUpsertService {
                 existing.setDiscoverySource(d.source());
                 // Origin: local batch — confirm local origin on update.
                 existing.setOriginHostIp("local");
+                // Sticky role hint: rank-upgrade-only merge, written BEFORE classification
+                // so the classifier sees the merged evidence. Incoming null never clears.
+                if (RoleHint.rank(d.roleHint()) > RoleHint.rank(existing.getRoleHint())) {
+                    existing.setRoleHint(d.roleHint());
+                }
                 // Non-downgrade role write (UPDATE branch).
                 RoleClassification rcAllU = roleClassifier.classifyWithConfidence(existing);
                 if (rcAllU.role() != DeviceRole.UNKNOWN || existing.getDeviceRole() == DeviceRole.UNKNOWN) {
@@ -475,6 +502,10 @@ public class DeviceUpsertService {
                 fresh.setDiscoverySource(d.source());
                 // Origin: local batch — entity default "local" is already set, confirm explicitly.
                 fresh.setOriginHostIp("local");
+                // Sticky role hint (INSERT branch): fresh row starts null — any hint lands.
+                if (RoleHint.rank(d.roleHint()) > RoleHint.rank(fresh.getRoleHint())) {
+                    fresh.setRoleHint(d.roleHint());
+                }
                 // Non-downgrade role write (INSERT branch).
                 RoleClassification rcAllI = roleClassifier.classifyWithConfidence(fresh);
                 if (rcAllI.role() != DeviceRole.UNKNOWN || fresh.getDeviceRole() == DeviceRole.UNKNOWN) {

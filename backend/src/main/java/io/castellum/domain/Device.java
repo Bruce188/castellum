@@ -4,6 +4,7 @@ import io.castellum.discovery.DeviceRole;
 import io.castellum.discovery.DiscoveryScope;
 import io.castellum.discovery.DiscoverySource;
 import io.castellum.discovery.RoleConfidence;
+import io.castellum.discovery.RoleHint;
 import io.castellum.risk.Criticality;
 import jakarta.persistence.*;
 import java.time.Instant;
@@ -69,6 +70,16 @@ public class Device {
     @Enumerated(EnumType.STRING)
     @Column(name = "role_confidence", nullable = false)
     private RoleConfidence roleConfidence = RoleConfidence.HIGH;
+
+    /**
+     * Sticky-with-upgrade payload-derived role evidence: best
+     * {@link RoleHint} ever observed for this device, by {@code RoleHint.rank}.
+     * Incoming null never clears; a higher-ranked hint upgrades. Nullable —
+     * most devices never emit payload evidence.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role_hint")
+    private RoleHint roleHint;
 
     /**
      * Compact inventory of Docker registry images served by this device (host metadata only).
@@ -190,6 +201,9 @@ public class Device {
 
     public RoleConfidence getRoleConfidence() { return roleConfidence; }
     public void setRoleConfidence(RoleConfidence roleConfidence) { this.roleConfidence = roleConfidence; }
+
+    public RoleHint getRoleHint() { return roleHint; }
+    public void setRoleHint(RoleHint roleHint) { this.roleHint = roleHint; }
 
     public String getRegistryImages() { return registryImages; }
     public void setRegistryImages(String registryImages) { this.registryImages = registryImages; }

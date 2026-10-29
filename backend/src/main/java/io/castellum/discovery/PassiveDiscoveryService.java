@@ -32,6 +32,7 @@ public class PassiveDiscoveryService {
     private final PcapSniffer pcapSniffer;
     private final LldpCapture lldpCapture;
     private final CdpCapture cdpCapture;
+    private final DhcpCapture dhcpCapture;
     private final ConnTableReader connTableReader;
     private final GatewayProbe gatewayProbe;
     private final DeviceUpsertService upsertService;
@@ -39,6 +40,7 @@ public class PassiveDiscoveryService {
     private final DiscoverySweepRecorder recorder;
     private final boolean lldpEnabled;
     private final boolean cdpEnabled;
+    private final boolean dhcpEnabled;
     private final boolean pcapEnabled;
     private final boolean connTableEnabled;
     private final Clock clock;
@@ -49,6 +51,7 @@ public class PassiveDiscoveryService {
             PcapSniffer pcapSniffer,
             LldpCapture lldpCapture,
             CdpCapture cdpCapture,
+            DhcpCapture dhcpCapture,
             ConnTableReader connTableReader,
             GatewayProbe gatewayProbe,
             DeviceUpsertService upsertService,
@@ -56,6 +59,7 @@ public class PassiveDiscoveryService {
             DiscoverySweepRecorder recorder,
             @Value("${castellum.discovery.lldp.enabled:false}") boolean lldpEnabled,
             @Value("${castellum.discovery.cdp.enabled:false}") boolean cdpEnabled,
+            @Value("${castellum.discovery.dhcp.enabled:false}") boolean dhcpEnabled,
             @Value("${castellum.discovery.pcap.enabled:false}") boolean pcapEnabled,
             @Value("${castellum.discovery.conn-table.enabled:true}") boolean connTableEnabled,
             Clock clock) {
@@ -64,6 +68,7 @@ public class PassiveDiscoveryService {
         this.pcapSniffer = pcapSniffer;
         this.lldpCapture = lldpCapture;
         this.cdpCapture = cdpCapture;
+        this.dhcpCapture = dhcpCapture;
         this.connTableReader = connTableReader;
         this.gatewayProbe = gatewayProbe;
         this.upsertService = upsertService;
@@ -71,6 +76,7 @@ public class PassiveDiscoveryService {
         this.recorder = recorder;
         this.lldpEnabled = lldpEnabled;
         this.cdpEnabled = cdpEnabled;
+        this.dhcpEnabled = dhcpEnabled;
         this.pcapEnabled = pcapEnabled;
         this.connTableEnabled = connTableEnabled;
         this.clock = clock;
@@ -120,6 +126,13 @@ public class PassiveDiscoveryService {
                 && req.sources().contains(DiscoverySource.CDP)
                 && (req.iface() == null || req.iface().isBlank())) {
             throw new DiscoveryUnavailableException("CDP source requires interface name");
+        }
+        // Same intake validation for DHCP — a live capture cannot open a null/blank interface.
+        // When DHCP is disabled by flag the source is soft-skipped inside runSweep.
+        if (dhcpEnabled
+                && req.sources().contains(DiscoverySource.DHCP)
+                && (req.iface() == null || req.iface().isBlank())) {
+            throw new DiscoveryUnavailableException("DHCP source requires interface name");
         }
 
         String joinedSources = req.sources().stream()
@@ -208,6 +221,21 @@ public class PassiveDiscoveryService {
                         }));
                         submittedSources.add(source);
                     }
+                    case DHCP -> {
+                        if (!dhcpEnabled) {
+                            log.info("DHCP source requested but disabled by feature flag; skipping");
+                            break;
+                        }
+                        futures.add(executor.submit(() -> {
+                            try {
+                                return dhcpCapture.capture(req.iface(), req.durationSeconds());
+                            } catch (PcapNativeException | NotOpenException e) {
+                                throw new DiscoveryUnavailableException(
+                                    "DHCP capture failed on interface '" + req.iface() + "': " + e.getMessage(), e);
+                            }
+                        }));
+                        submittedSources.add(source);
+                    }
                     case CONN_TABLE -> {
                         if (!connTableEnabled) {
                             log.info("CONN_TABLE source requested but disabled by flag; skipping");
@@ -253,7 +281,10 @@ public class PassiveDiscoveryService {
                             // plain last-write-wins.
                             withMac.merge(disc.macAddress(), disc, PassiveDiscoveryService::mergeOnMac);
                         } else {
-                            withoutMac.put(disc.ipAddress(), disc); // fallback IP key
+                            // Fallback IP key — incoming row wins but payload-derived role
+                            // evidence survives by rank (a GATEWAY hint must not be erased
+                            // by a later hint-less row for the same IP).
+                            withoutMac.merge(disc.ipAddress(), disc, PassiveDiscoveryService::mergeOnIp);
                         }
                     }
                 } catch (ExecutionException ex) {
@@ -343,9 +374,11 @@ public class PassiveDiscoveryService {
             Discovery kept = withMac.get(macKey);
             String hostname = kept.hostname() != null ? kept.hostname() : dropped.hostname();
             String iface = kept.iface() != null ? kept.iface() : dropped.iface();
-            if (!Objects.equals(hostname, kept.hostname()) || !Objects.equals(iface, kept.iface())) {
+            RoleHint hint = maxHint(kept.roleHint(), dropped.roleHint());
+            if (!Objects.equals(hostname, kept.hostname()) || !Objects.equals(iface, kept.iface())
+                    || hint != kept.roleHint()) {
                 withMac.put(macKey, new Discovery(kept.ipAddress(), kept.macAddress(), hostname,
-                    kept.source(), kept.observedAt(), iface, kept.publishesHostPort()));
+                    kept.source(), kept.observedAt(), iface, kept.publishesHostPort(), hint));
             }
             ipKeyed.remove();
         }
@@ -364,20 +397,50 @@ public class PassiveDiscoveryService {
         boolean existingPlaceholder = PlaceholderIp.isPlaceholder(existing.ipAddress());
         boolean incomingPlaceholder = PlaceholderIp.isPlaceholder(incoming.ipAddress());
         if (existingPlaceholder == incomingPlaceholder) {
-            return incoming; // same IP quality — last-write-wins on MAC
+            // Same IP quality — last-write-wins on MAC, but role evidence survives by rank.
+            RoleHint hint = maxHint(existing.roleHint(), incoming.roleHint());
+            if (hint == incoming.roleHint()) {
+                return incoming;
+            }
+            return new Discovery(incoming.ipAddress(), incoming.macAddress(), incoming.hostname(),
+                incoming.source(), incoming.observedAt(), incoming.iface(),
+                incoming.publishesHostPort(), hint);
         }
         Discovery winner = existingPlaceholder ? incoming : existing;
         Discovery loser = existingPlaceholder ? existing : incoming;
         String hostname = winner.hostname() != null ? winner.hostname() : loser.hostname();
         String iface = winner.iface() != null ? winner.iface() : loser.iface();
-        if (Objects.equals(hostname, winner.hostname()) && Objects.equals(iface, winner.iface())) {
+        RoleHint hint = maxHint(winner.roleHint(), loser.roleHint());
+        if (Objects.equals(hostname, winner.hostname()) && Objects.equals(iface, winner.iface())
+                && hint == winner.roleHint()) {
             return winner;
         }
         return new Discovery(winner.ipAddress(), winner.macAddress(), hostname,
-            winner.source(), winner.observedAt(), iface, winner.publishesHostPort());
+            winner.source(), winner.observedAt(), iface, winner.publishesHostPort(), hint);
+    }
+
+    /**
+     * Same-sweep collision between two null-MAC discoveries on one IP: the incoming row
+     * wins (last-write-wins, unchanged behavior) but the rank-max {@link RoleHint}
+     * survives onto it.
+     */
+    private static Discovery mergeOnIp(Discovery existing, Discovery incoming) {
+        RoleHint hint = maxHint(existing.roleHint(), incoming.roleHint());
+        if (hint == incoming.roleHint()) {
+            return incoming;
+        }
+        return new Discovery(incoming.ipAddress(), incoming.macAddress(), incoming.hostname(),
+            incoming.source(), incoming.observedAt(), incoming.iface(),
+            incoming.publishesHostPort(), hint);
+    }
+
+    /** Rank-max of two hints ({@code null} ranks 0); ties keep the first argument. */
+    private static RoleHint maxHint(RoleHint a, RoleHint b) {
+        return RoleHint.rank(b) > RoleHint.rank(a) ? b : a;
     }
 
     private Discovery toDiscovery(DiscoveredNeighbor n, DiscoverySource source, Instant observedAt, String ipAddress) {
-        return new Discovery(ipAddress, n.macAddress(), n.hostname(), source, observedAt, n.iface(), false);
+        return new Discovery(ipAddress, n.macAddress(), n.hostname(), source, observedAt, n.iface(), false,
+            n.roleHint());
     }
 }

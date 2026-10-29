@@ -110,7 +110,7 @@ public class CdpDecoder {
             offset += length;
         }
 
-        return List.of(new DiscoveredNeighbor(ip, mac, null, null, iface, hostname));
+        return List.of(new DiscoveredNeighbor(ip, mac, null, null, iface, hostname, null));
     }
 
     /**

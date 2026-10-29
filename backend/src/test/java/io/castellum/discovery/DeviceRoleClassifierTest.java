@@ -237,4 +237,100 @@ class DeviceRoleClassifierTest {
         assertThat(result.role()).isEqualTo(DeviceRole.SERVER);
         assertThat(result.confidence()).isEqualTo(RoleConfidence.HIGH);
     }
+
+    // ─── Role-hint rules (3a chassis, 4a/4b infra) ──────────────────
+
+    // C1 — GATEWAY hint on a non-.1 IP → ROUTER @ HIGH. The hint is an
+    // independent signal: it must classify ROUTER even where Rule 5 (.1 IP)
+    // cannot fire.
+    @Test
+    void classifyWithConfidence_gatewayHintNonDotOneIp_routerHigh() {
+        Device d = withIp("192.168.1.37");
+        d.setRoleHint(RoleHint.GATEWAY);
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role())
+            .as("GATEWAY hint must yield ROUTER independently of the .1-IP rule")
+            .isEqualTo(DeviceRole.ROUTER);
+        assertThat(result.confidence()).isEqualTo(RoleConfidence.HIGH);
+    }
+
+    // C2 — infra-service hints → SERVER @ HIGH.
+    @Test
+    void classifyWithConfidence_dnsServerHint_serverHigh() {
+        Device d = withIp("192.168.1.53");
+        d.setRoleHint(RoleHint.DNS_SERVER);
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role()).isEqualTo(DeviceRole.SERVER);
+        assertThat(result.confidence()).isEqualTo(RoleConfidence.HIGH);
+    }
+
+    @Test
+    void classifyWithConfidence_dhcpServerHint_serverHigh() {
+        Device d = withIp("192.168.1.54");
+        d.setRoleHint(RoleHint.DHCP_SERVER);
+        var result = classifier.classifyWithConfidence(d);
+        assertThat(result.role()).isEqualTo(DeviceRole.SERVER);
+        assertThat(result.confidence()).isEqualTo(RoleConfidence.HIGH);
+    }
+
+    // C3 — chassis hints. LAPTOP_CHASSIS + desktop-class OS → LAPTOP: the
+    // chassis rule (3a) must outrank Rule 4, which would otherwise map
+    // "Mac OS X" to DESKTOP. This is the ordering pin.
+    @Test
+    void classify_laptopChassisHintWithMacOs_laptop() {
+        Device d = withOsName("Mac OS X 12.6");
+        d.setRoleHint(RoleHint.LAPTOP_CHASSIS);
+        assertThat(classifier.classify(d))
+            .as("LAPTOP_CHASSIS hint must outrank the desktop-OS rule")
+            .isEqualTo(DeviceRole.LAPTOP);
+    }
+
+    @Test
+    void classify_desktopChassisHint_desktop() {
+        Device d = new Device();
+        d.setRoleHint(RoleHint.DESKTOP_CHASSIS);
+        assertThat(classifier.classify(d)).isEqualTo(DeviceRole.DESKTOP);
+    }
+
+    // C4 — server-OS fingerprint outranks hints (deliberate H8 pin): a Debian
+    // box that happens to serve DHCP/DNS is a SERVER, not a ROUTER.
+    // NOTE: passes in RED (the classifier ignores hints today) — pinned so
+    // GREEN cannot regress the ordering when inserting rules 4a/4b.
+    @Test
+    void classify_gatewayHintWithServerOs_serverWins() {
+        Device d = withOsName("Debian GNU/Linux 11");
+        d.setRoleHint(RoleHint.GATEWAY);
+        assertThat(classifier.classify(d))
+            .as("Rule 3 (server OS) must outrank role hints")
+            .isEqualTo(DeviceRole.SERVER);
+    }
+
+    // C5 — Docker rule still first: GATEWAY hint on a DOCKER-source device
+    // remains CONTAINER. NOTE: passes in RED — pinned against GREEN reordering.
+    @Test
+    void classify_gatewayHintWithDockerSource_containerWins() {
+        Device d = dockerContainer("api-1", DiscoveryScope.DOCKER_BRIDGE);
+        d.setRoleHint(RoleHint.GATEWAY);
+        assertThat(classifier.classify(d))
+            .as("Rule 2 (Docker container) must outrank role hints")
+            .isEqualTo(DeviceRole.CONTAINER);
+    }
+
+    // C6 — null-hint regression: explicitly-null roleHint must change nothing.
+    // NOTE: passes in RED — together with the untouched ruleMatrix above it
+    // pins pre-role-hint behavior byte-identical for hint-less devices.
+    @Test
+    void classify_explicitNullHint_preRoleHintBehaviorUnchanged() {
+        Device nonDotOne = withIp("192.168.1.100");
+        nonDotOne.setRoleHint(null);
+        assertThat(classifier.classify(nonDotOne)).isEqualTo(DeviceRole.UNKNOWN);
+
+        Device dotOne = withIp("192.168.1.1");
+        dotOne.setRoleHint(null);
+        assertThat(classifier.classify(dotOne)).isEqualTo(DeviceRole.ROUTER);
+
+        Device empty = emptyDevice();
+        empty.setRoleHint(null);
+        assertThat(classifier.classify(empty)).isEqualTo(DeviceRole.UNKNOWN);
+    }
 }

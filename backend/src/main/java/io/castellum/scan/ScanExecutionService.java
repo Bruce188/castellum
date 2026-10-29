@@ -401,7 +401,8 @@ public class ScanExecutionService {
                 DiscoverySource.NMAP_SCAN,
                 now,
                 null,           // iface not available from nmap XML output
-                false
+                false,
+                null
             );
             Device device = deviceUpsertService.upsert(discovery, scanId);
             probeTargets.add(host.ipAddress());

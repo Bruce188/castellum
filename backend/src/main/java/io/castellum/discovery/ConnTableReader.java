@@ -80,7 +80,7 @@ public class ConnTableReader {
             if (results.size() == maxRemotes) {
                 break;
             }
-            results.add(new DiscoveredNeighbor(ip, null, null, null, null, null));
+            results.add(new DiscoveredNeighbor(ip, null, null, null, null, null, null));
         }
         return results;
     }

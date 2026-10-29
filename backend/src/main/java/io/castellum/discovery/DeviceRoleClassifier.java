@@ -17,12 +17,22 @@ import org.springframework.stereotype.Service;
  *       at {@link RoleConfidence#HIGH} (API-confirmed).</li>
  *   <li>Server OS fingerprint: {@code osName}/{@code osCpe} contains a server signal
  *       (case-insensitive) → {@link DeviceRole#SERVER} at HIGH.</li>
+ *   <li>Chassis hint (rule 3a): {@link RoleHint#LAPTOP_CHASSIS} →
+ *       {@link DeviceRole#LAPTOP} at HIGH; {@link RoleHint#DESKTOP_CHASSIS} →
+ *       {@link DeviceRole#DESKTOP} at HIGH. The mDNS {@code _device-info} model is the
+ *       only signal that distinguishes laptop from desktop chassis, so it outranks the
+ *       desktop-OS rule; server-OS fingerprints still outrank it.</li>
  *   <li>Desktop/client OS fingerprint: Windows client, macOS/Mac OS X, desktop Linux
- *       → {@link DeviceRole#DESKTOP} at HIGH. {@link DeviceRole#LAPTOP} is RESERVED — OS fingerprinting
- *       alone cannot distinguish laptop from desktop chassis; ambiguous desktop-class OSes
- *       deterministically map to {@link DeviceRole#DESKTOP}, never a non-deterministic guess.</li>
+ *       → {@link DeviceRole#DESKTOP} at HIGH. {@link DeviceRole#LAPTOP} is RESERVED for the
+ *       chassis hint above — OS fingerprinting alone cannot distinguish laptop from desktop
+ *       chassis; ambiguous desktop-class OSes deterministically map to
+ *       {@link DeviceRole#DESKTOP}, never a non-deterministic guess.</li>
+ *   <li>Infra hints (rules 4a/4b): {@link RoleHint#GATEWAY} →
+ *       {@link DeviceRole#ROUTER} at HIGH (DHCP option 3 evidence, independent of the
+ *       weak .1-IP rule); {@link RoleHint#DHCP_SERVER} / {@link RoleHint#DNS_SERVER} →
+ *       {@link DeviceRole#SERVER} at HIGH.</li>
  *   <li>Gateway/last-octet-1 IP: IPv4 last octet == 1 → {@link DeviceRole#ROUTER} at HIGH.
- *       Weak signal only; ranks below OS and docker rules.</li>
+ *       Weak signal only; ranks below OS, hint and docker rules.</li>
  *   <li>Hostname substring tiebreaker (WEAK, last resort): obvious router/gateway hostname
  *       keywords may nudge {@link DeviceRole#ROUTER} at HIGH. Never the primary signal.</li>
  *   <li>macvlan/ipvlan heuristic (LOW confidence, MUST rank after all deterministic rules):
@@ -74,10 +84,35 @@ public class DeviceRoleClassifier {
             return new RoleClassification(DeviceRole.SERVER, RoleConfidence.HIGH);
         }
 
+        // Rule 3a: chassis hints — mDNS _device-info model evidence is the only
+        // signal that can distinguish laptop from desktop chassis, so it MUST outrank the
+        // desktop-OS rule below (which would map "Mac OS X" to DESKTOP). Server-OS
+        // fingerprints (Rule 3) still outrank chassis hints by design.
+        if (d.getRoleHint() == RoleHint.LAPTOP_CHASSIS) {
+            return new RoleClassification(DeviceRole.LAPTOP, RoleConfidence.HIGH);
+        }
+        if (d.getRoleHint() == RoleHint.DESKTOP_CHASSIS) {
+            return new RoleClassification(DeviceRole.DESKTOP, RoleConfidence.HIGH);
+        }
+
         // Rule 4: desktop/client OS fingerprint
-        // LAPTOP is reserved — ambiguous desktop-class OSes → DESKTOP (deterministic, no guess)
+        // LAPTOP is reserved for the chassis hint above — ambiguous desktop-class OSes
+        // → DESKTOP (deterministic, no guess)
         if (hasDesktopOs(d.getOsName()) || hasDesktopOs(d.getOsCpe())) {
             return new RoleClassification(DeviceRole.DESKTOP, RoleConfidence.HIGH);
+        }
+
+        // Rule 4a: DHCP option 3 named this IP as default router — authoritative
+        // payload evidence, independent of the weak .1-IP heuristic below.
+        if (d.getRoleHint() == RoleHint.GATEWAY) {
+            return new RoleClassification(DeviceRole.ROUTER, RoleConfidence.HIGH);
+        }
+
+        // Rule 4b: DHCP/DNS service announcements → SERVER. Ranks below the
+        // OS rules (a Debian box that happens to serve DHCP is a SERVER by OS already)
+        // and below Rule 4a (GATEWAY outranks by RoleHint.rank).
+        if (d.getRoleHint() == RoleHint.DHCP_SERVER || d.getRoleHint() == RoleHint.DNS_SERVER) {
+            return new RoleClassification(DeviceRole.SERVER, RoleConfidence.HIGH);
         }
 
         // Rule 5: gateway by last-octet-1 IP (weak signal)
