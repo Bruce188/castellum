@@ -94,29 +94,33 @@ Application docs live under `documentation/`.
 - PostgreSQL 16
 - nmap (active scanning)
 - Node 20.19+ or 22.13+ (frontend only)
-- Docker (optional — for supply-chain pipeline)
+- Docker (optional — one-command `docker compose` run and the supply-chain pipeline)
 
 ### Quick start
 
+Native PostgreSQL (default for local development):
+
 ```bash
-# 1. Set required environment variables:
-export CASTELLUM_ADMIN_USERNAME=admin
-export CASTELLUM_ADMIN_PASSWORD_HASH="$(htpasswd -bnBC 12 '' 'your-password' | tr -d ':\n')"
-export CASTELLUM_SECURITY_JWT_SECRET="$(openssl rand -base64 48)"
-export DATABASE_URL=jdbc:postgresql://localhost:5432/castellum
-export DATABASE_USERNAME=castellum
-export DATABASE_PASSWORD=<db-password>
+# 1. Install PostgreSQL 16, create the castellum role/database, and generate .env
+#    (prompts for the admin password; keeps an existing .env). Needs sudo.
+./scripts/dev-setup.sh
 
-# 2. Run backend (Flyway migrations run automatically):
-cd backend && ./mvnw spring-boot:run
+# 2. Start backend (Flyway migrations run automatically) and Vite dev server:
+./scripts/dev.sh            # dashboard on http://localhost:5173
 
-# 3. Run frontend dev server:
-cd frontend && npm install && npm run dev
-
-# 4. (Optional) Register an NVD API key and pull the CVE corpus:
+# 3. (Optional) Register an NVD API key and pull the CVE corpus:
 export NVD_API_KEY=<your-key>
 ./scripts/nvd-bulk-sync.sh --since 2002-01-01
 ```
+
+Docker (optional, one install): Postgres with a persistent volume plus the packaged image.
+
+```bash
+cp .env.example .env         # fill in DATABASE_PASSWORD, JWT secret, admin hash (commands are in the file)
+docker compose up -d --build   # dashboard and API on http://localhost:${SERVER_PORT:-8080}
+```
+
+The database lives in the `pgdata` volume. `docker compose down` keeps it; `down -v` deletes it.
 
 For the full operator runbook — including Suricata wiring, TLS termination with nginx/Caddy/Traefik, and bootstrap admin pre-flight checklist — see [documentation/operations.html](documentation/operations.html).
 
