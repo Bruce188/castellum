@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# castellum: command-line client for the Castellum REST API (needs curl and jq).
+# Server: CASTELLUM_URL, else the URL saved at login, else http://localhost:8080.
+# The token is stored in ~/.config/castellum/token (mode 600) and never put on a command line.
+set -euo pipefail
+
+cfg=${XDG_CONFIG_HOME:-$HOME/.config}/castellum
+url=${CASTELLUM_URL:-$(cat "$cfg/url" 2>/dev/null || echo http://localhost:8080)}
+url=${url%/}
+
+usage() {
+  cat <<EOF
+Usage: castellum <command> [args]
+
+  login [username]            log in (prompts for password; default user: admin)
+  logout                      forget the saved token
+  scan <cidr> [ping|service|os]  start an active scan (default: ping)
+  scans [id]                  list scans, or show one
+  report <scan-id>            scan report
+  devices                     list devices
+  top [n]                     n riskiest devices (default 10)
+  cve <CVE-ID>                CVE details
+  cve-devices <CVE-ID>        devices affected by a CVE
+  discover [iface] [seconds]  passive discovery sweep
+  export [file]               STIX 2.1 bundle (stdout if no file)
+  push <misp|taxii>           push threat intel
+  sync                        NVD/EPSS/KEV sync status
+  backfill                    start a full NVD backfill
+  api <METHOD> <path> [json]  any other endpoint, e.g. castellum api GET /api/audit
+
+Server: $url
+EOF
+}
+
+die() { echo "castellum: $*" >&2; exit 1; }
+
+# api METHOD PATH [BODY]: authenticated request, prints the response body.
+api() {
+  local token out code data=()
+  token=$(cat "$cfg/token" 2>/dev/null) || die "not logged in: run 'castellum login'"
+  [ $# -ge 3 ] && data=(-H 'Content-Type: application/json' --data-binary "$3")
+  out=$(curl -sS -X "$1" -w '\n%{http_code}' "${data[@]}" \
+    -H @<(printf 'Authorization: Bearer %s\n' "$token") "$url$2") || die "cannot reach $url"
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  [ "$code" = 401 ] && die "not logged in or session expired: run 'castellum login'"
+  [[ $code == 2* ]] || { [ -n "$out" ] && echo "$out" >&2; die "HTTP $code from $1 $2"; }
+  printf '%s\n' "$out"
+}
+
+# Pretty-print JSON when the output is a terminal-bound JSON document, else pass through.
+show() { local s; s=$(cat); jq . 2>/dev/null <<<"$s" || printf '%s\n' "$s"; }
+
+id_arg() { [[ ${1:-} =~ ^[0-9]+$ ]] || die "expected a numeric id, got '${1:-}'"; echo "$1"; }
+cve_arg() { [[ ${1:-} =~ ^CVE-[0-9]{4}-[0-9]{4,}$ ]] || die "expected a CVE id like CVE-2024-3094, got '${1:-}'"; echo "$1"; }
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+case $cmd in
+  login)
+    user=${1:-admin}
+    read -rsp "Password for $user@$url: " pw
+    echo >&2
+    resp=$(jq -n --arg u "$user" --arg p "$pw" '{username: $u, password: $p}' |
+      curl -s --fail-with-body -H 'Content-Type: application/json' --data-binary @- \
+        "$url/api/auth/login") || die "login failed: ${resp:-cannot reach $url}"
+    token=$(jq -er .token <<<"$resp") || die "unexpected login response"
+    mkdir -p "$cfg"
+    (umask 077; printf '%s' "$token" >"$cfg/token"; printf '%s' "$url" >"$cfg/url")
+    echo "Logged in as $user (roles: $(jq -r '.roles | join(", ")' <<<"$resp"))"
+    if [ "$(jq -r .mustChangePassword <<<"$resp")" = true ]; then
+      echo "Password change required: change it in the web UI before other calls work." >&2
+    fi
+    ;;
+  logout) rm -f "$cfg/token"; echo "Logged out" ;;
+  scan)
+    cidr=${1:?usage: castellum scan <cidr> [ping|service|os]}
+    case ${2:-ping} in
+      ping) type=PING_SWEEP ;; service) type=SERVICE_DETECT ;; os) type=OS_FINGERPRINT ;;
+      *) die "scan type must be ping, service or os" ;;
+    esac
+    api POST /api/scan "$(jq -n --arg c "$cidr" --arg t "$type" '{cidr: $c, type: $t}')" | show
+    ;;
+  scans) if [ $# -gt 0 ]; then api GET "/api/scans/$(id_arg "$1")"; else api GET /api/scans; fi | show ;;
+  report) api GET "/api/scans/$(id_arg "${1:-}")/report" | show ;;
+  devices) api GET /api/devices | show ;;
+  top) api GET "/api/risk/top?n=$(id_arg "${1:-10}")" | show ;;
+  cve) api GET "/api/cve/$(cve_arg "${1:-}")" | show ;;
+  cve-devices) api GET "/api/cve/$(cve_arg "${1:-}")/devices" | show ;;
+  discover)
+    body=$(jq -n --arg i "${1:-}" --argjson d "$(id_arg "${2:-30}")" \
+      '{durationSeconds: $d} + (if $i == "" then {} else {iface: $i} end)')
+    api POST /api/discovery/passive "$body" | show
+    ;;
+  export)
+    if [ $# -gt 0 ]; then
+      api POST /api/threat-intel/export >"$1"
+      echo "Wrote $1"
+    else
+      api POST /api/threat-intel/export
+    fi
+    ;;
+  push)
+    case ${1:-} in misp|taxii) ;; *) die "usage: castellum push <misp|taxii>" ;; esac
+    api POST "/api/threat-intel/push/$1" | show
+    ;;
+  sync) api GET /api/admin/sync/status | show ;;
+  backfill) api POST /api/admin/full-backfill | show ;;
+  api)
+    [ $# -ge 2 ] || die "usage: castellum api <METHOD> <path> [json]"
+    [[ $2 == /api/* ]] || die "path must start with /api/"
+    api "$@" | show
+    ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac

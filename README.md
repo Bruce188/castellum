@@ -122,6 +122,39 @@ docker compose up -d --build   # dashboard and API on http://localhost:${SERVER_
 
 The database lives in the `pgdata` volume. `docker compose down` keeps it; `down -v` deletes it.
 
+Desktop app (optional): a native Tauri window onto the same server. The browser keeps working.
+
+```bash
+./scripts/dev-setup.sh --desktop   # once: also installs the WebKitGTK build libraries
+./scripts/dev.sh --desktop         # dev stack plus the desktop window
+
+# Against any running server (packaged, Docker, remote):
+cd desktop && npm ci && CASTELLUM_URL=http://localhost:8080 npm run dev
+npm run build                      # installers under desktop/src-tauri/target/release/bundle/
+```
+
+The window shows a waiting page until the server answers, then loads it. Remote pages get no access to Tauri APIs.
+
+### Command line
+
+`scripts/castellum` is a small CLI over the REST API (needs `curl` and `jq`). Put it on your PATH with `ln -s "$PWD/scripts/castellum" ~/.local/bin/castellum`.
+
+```bash
+export CASTELLUM_URL=http://localhost:8080   # saved at login; defaults to this
+castellum login admin                        # prompts for the password
+castellum scan 192.168.1.0/24 service        # ping | service | os
+castellum scans                              # list scans; castellum scans <id> for one
+castellum devices
+castellum top 5                              # riskiest devices
+castellum cve CVE-2024-3094
+castellum export bundle.json                 # STIX 2.1 bundle
+castellum push misp                          # or taxii
+castellum api GET /api/audit                 # any other endpoint
+castellum help
+```
+
+The token is stored in `~/.config/castellum/token` (mode 600) and is never passed on a command line.
+
 For the full operator runbook — including Suricata wiring, TLS termination with nginx/Caddy/Traefik, and bootstrap admin pre-flight checklist — see [documentation/operations.html](documentation/operations.html).
 
 ### Running under WSL2
