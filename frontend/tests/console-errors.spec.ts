@@ -112,11 +112,16 @@ test('no console errors during CVE list → detail → pagination flow', async (
   expect(hard, `console errors during CVE flow:\n${hard.map((c) => c.text).join('\n')}`).toEqual([]);
 });
 
+const CORE_ROUTES = ['/', '/scans', '/threats', '/cves', '/attack-graph', '/audit', '/settings'];
+
 test('no console errors navigating core authenticated routes', async ({ page }) => {
+  // Each route can spend its full 4s settle (background polling keeps the network busy) plus
+  // load time, so the default 30s test budget is too tight for all routes in one test.
+  test.setTimeout(CORE_ROUTES.length * 10_000);
   const sink: Captured[] = [];
   attach(page, sink);
 
-  for (const path of ['/', '/scans', '/threats', '/cves', '/attack-graph', '/audit', '/settings']) {
+  for (const path of CORE_ROUTES) {
     await page.goto(path);
     await settle(page);
     await page.waitForTimeout(400); // flush late async renders
