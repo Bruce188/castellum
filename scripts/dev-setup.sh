@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time local setup: native PostgreSQL, the castellum role/database, and .env.
 # Safe to re-run: an existing .env is kept and the role password is re-synced to it.
+# --desktop also installs the system libraries the Tauri desktop app needs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -9,6 +10,12 @@ if ! command -v psql >/dev/null || ! command -v htpasswd >/dev/null; then
   sudo apt-get install -y postgresql apache2-utils
 fi
 pg_isready -q || sudo service postgresql start
+
+if [ "${1:-}" = --desktop ]; then
+  # Tauri v2 build dependencies (WebKitGTK etc.) for the optional desktop app.
+  sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev \
+    libayatana-appindicator3-dev librsvg2-dev
+fi
 
 if [ ! -f .env ]; then
   read -rp "Admin username [admin]: " admin
